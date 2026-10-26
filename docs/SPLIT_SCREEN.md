@@ -19,10 +19,18 @@ The game's own two-player link co-op, with both consoles on this PC.
    `<save>.before-link` first.
 
 Widescreen works in co-op: both consoles get the window's width (284 by default), with world
-margins, camera clamping and the widened actor visibility, and menus pillarboxed. Each console has
-its own widescreen state (`widescreenSelectConsole`, switched by the session's bind hook), and its
-hooks keep running while the others are suspended. HUD at the edges works on both screens when its
-option is on. Both consoles use the same margins, so their simulations agree.
+margins and the widened actor visibility, and menus pillarboxed. Each console has its own
+widescreen state (`widescreenSelectConsole`, switched by the session's bind hook), and its hooks
+keep running while the others are suspended. HUD at the edges works on both screens when its
+option is on.
+
+Co-op keeps the game's own camera clamp. The game links two simulations of the same level, and each
+console tracks both players' cameras; widescreen's clamp only re-clamps the console's own player's
+camera, so near a level edge the consoles disagreed on the cameras, ticked different actors and
+stopped accepting each other's messages: the game reports a lost connection after 300 frames
+without one (2026-10-26, a scripted session dropped at linked frame 6,418 with widescreen alone, and
+held 12,000 frames without the clamp). At a level edge the margins in co-op show the area past the
+edge. Game logic hooks must give the same result on both consoles.
 
 Smooth motion, real transparency and the extra sprite pages also work in co-op, each with its own
 state per console (`pcFeaturesSelectConsole` in src/main.cpp). Smooth motion rarely has an
@@ -56,9 +64,14 @@ Option "Player 2 save" (`player2-save`):
   pixel.
 - Interpreter fallback (`runtime_set_session_interpreter_fallback`): self-modifying RAM code (the
   sound mixer) runs through the interpreter, as in single-player.
-- Loose cable timing (`GbaLinkHub::set_loose_timing`): a transfer starts on the primary's clock
-  and is timed on each console's own clock, so consoles whose clocks differ by a chunk or a pause
-  still link. ROTK's handshake, level select and gameplay work with it.
+- Loose cable timing (`GbaLinkHub::set_loose_timing`): the consoles' clocks differ by up to about
+  15,000 cycles (one runs a chunk, then the other catches up, and IRQ handlers run past a chunk's
+  end), so multiplayer transfers keep one timeline. A transfer the primary starts at cycle S takes
+  each console's send data and clears its receive registers when that console's own clock reaches
+  S, and completes on it at S + duration once every console's data is in; transfers queue per
+  console. The first version took a lagging console's data early and cleared its received data
+  before it was read (27 times in a 3-minute scripted fight). `GBARECOMP_LINK_TRACE=1` reports
+  these hazards when the session ends. The strict (netplay) cable is unchanged.
 - Machine pause (`set_machine_paused`): a paused console's clock stops and it resumes without
   catching up.
 - Shared view (`LocalLinkPlay::share_view`): both consoles render at the window's margins, and
@@ -101,6 +114,13 @@ budget); local chunks on menus 3.8 ms mean on a quiet machine.
 
 - `RotkSplitScreenSpike` (tests/split_screen_spike.cpp): headless runs with per-seat input scripts
   and side-by-side screenshots, and `play` mode (`PlaySplitScreenTest.cmd`).
+- Link checks: with `ROTK_PC_COOP_TEST_INPUTS`, each console's scene and `g_MpLinkState` changes are
+  logged (`ff00` once the game dropped the link), `ROTK_PC_COOP_TEST_FAST=1` runs unpaced,
+  `ROTK_PC_COOP_TEST_SHOW_FROM=N` shows (and frame-dumps) from linked frame N, and
+  `ROTK_PC_COOP_TEST_TRACE=<file>` writes per frame each console's scene, frames since a link
+  message arrived (the game gives up past 300), `g_MpMessageMask`, IE and SIOCNT. A 15-minute random
+  fight with the player's own settings (2026-10-26) held the link with at most 57 frames between
+  messages.
 - In game, `ROTK_PC_COOP_TEST_INPUTS=<file>` plays both players from `frame p1 p2` lines counted
   from the link. Widescreen check (2026-10-26): saves from `.private/split-screen/`, the solo
   console scripted into Multiplayer, both players through the menus into the first level and 30 s

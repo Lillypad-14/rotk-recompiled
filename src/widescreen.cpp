@@ -457,7 +457,10 @@ void widescreenStartCoop()
         if (g_hudEdges)
             for (auto& pieces : g_states[console].hudPieces) pieces.assign(kMaxPieces, 0);
     }
-    for (const char* id : {kCameraHookId, kVisibilityHookId, kTickListHookId, kFxQueuesHookId})
+    // Both consoles track both players' cameras, and the camera hook clamps only the console's own
+    // player's. The consoles would then disagree on the cameras near level edges, and so on which
+    // actors are on screen and tick, and the link desyncs. Co-op keeps the game's own clamp.
+    for (const char* id : {kVisibilityHookId, kTickListHookId, kFxQueuesHookId})
         gba_mod_set_function_hook_runs_suspended(id, 1);
 }
 

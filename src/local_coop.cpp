@@ -164,6 +164,45 @@ bool frame(gbarecomp::LocalLinkFrame* link)
             }
         return rows;
     }();
+    if (!script.empty()) {
+        // Scripted runs report each console's scene changes and run unpaced with
+        // ROTK_PC_COOP_TEST_FAST.
+        static const bool fast = std::getenv("ROTK_PC_COOP_TEST_FAST") != nullptr;
+        static const char* showFrom = std::getenv("ROTK_PC_COOP_TEST_SHOW_FROM");
+        link->fast = fast && !(showFrom && link->frame - g_linkedAt >= std::strtoull(showFrom, nullptr, 10));
+        static std::uint32_t scenes[2] = {~0u, ~0u};
+        const MenuState consoles[2] = {one, two};
+        // g_MpLinkState[4..5] (game/include/multiplayer.h): session state and this console's
+        // multi-player ID, 0xFF once multiplayer_abortSession has dropped the link.
+        // ROTK_PC_COOP_TEST_TRACE=<file>: per frame, each console's scene, frames since a link
+        // message last arrived (the game drops the link past 300) and g_MpMessageMask.
+        static std::FILE* trace = [] {
+            const char* path = std::getenv("ROTK_PC_COOP_TEST_TRACE");
+            return path ? std::fopen(path, "w") : nullptr;
+        }();
+        if (trace) {
+            std::fprintf(trace, "%llu", static_cast<unsigned long long>(link->frame - g_linkedAt));
+            for (int i = 0; i < 2; ++i) {
+                gba::GbaBus& bus = link->machines[i]->bus;
+                const std::uint32_t now = bus.read32(bus.read32(0x030040B0u) + 0x1Cu);
+                std::fprintf(trace, " %u %d %08x ie=%04x sio=%04x", consoles[i].scene,
+                             static_cast<int>(now - bus.read32(0x03006C0Cu)), bus.read32(0x03006C08u),
+                             bus.read16(0x04000200u), bus.read16(0x04000128u));
+            }
+            std::fputc('\n', trace);
+        }
+        static std::uint32_t linkStates[2] = {~0u, ~0u};
+        for (int i = 0; i < 2; ++i) {
+            const std::uint32_t linkState = link->machines[i]->bus.read16(0x03006D04u);
+            if (consoles[i].scene != scenes[i] || linkState != linkStates[i]) {
+                std::fprintf(stderr, "[rotk] co-op test: frame %llu console %d scene %u link %04x\n",
+                             static_cast<unsigned long long>(link->frame - g_linkedAt), i + 1, consoles[i].scene,
+                             linkState);
+                scenes[i] = consoles[i].scene;
+                linkStates[i] = linkState;
+            }
+        }
+    }
     for (const auto& row : script)
         if (row[0] <= link->frame - g_linkedAt) {
             link->buttons[0] = static_cast<std::uint16_t>(row[1]);
