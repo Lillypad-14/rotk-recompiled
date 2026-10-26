@@ -45,7 +45,7 @@ add_library(RotkCart OBJECT ${CART_SOURCES})
 target_include_directories(RotkCart PRIVATE ${ROTK_HOST_INCLUDES})
 target_link_gbarecomp_runtime_stack(RotkCart)
 
-add_executable(${ROTK_EXECUTABLE} src/main.cpp src/widescreen.cpp src/hd_audio.cpp src/hd_icons.cpp
+add_executable(${ROTK_EXECUTABLE} src/main.cpp src/widescreen.cpp src/hd_audio.cpp src/hd_icons.cpp src/local_coop.cpp
     src/smooth_motion.cpp src/transparency.cpp $<TARGET_OBJECTS:RotkCart>)
 target_include_directories(${ROTK_EXECUTABLE} PRIVATE ${ROTK_HOST_INCLUDES})
 # stb_image decodes the HD art packs.
@@ -113,6 +113,14 @@ if(ROTK_LAUNCHER)
     target_link_libraries(RotkWidescreenEdgeCheck PRIVATE RotkLauncher)
 endif()
 
+add_executable(RotkSplitScreenSpike EXCLUDE_FROM_ALL tests/split_screen_spike.cpp $<TARGET_OBJECTS:RotkCart>)
+target_include_directories(RotkSplitScreenSpike PRIVATE ${ROTK_HOST_INCLUDES})
+target_link_gbarecomp_runtime_stack(RotkSplitScreenSpike)
+gbarecomp_target_link_host_stack(RotkSplitScreenSpike PRIVATE)
+if(ROTK_LAUNCHER)
+    target_link_libraries(RotkSplitScreenSpike PRIVATE RotkLauncher)
+endif()
+
 add_executable(RotkAudioEnvelopeCheck EXCLUDE_FROM_ALL tests/audio_envelope_test.cpp)
 target_include_directories(RotkAudioEnvelopeCheck PRIVATE src)
 
@@ -165,3 +173,13 @@ if(ROTK_THIN_LTO)
     # Bound optimizer memory use on development machines with 16 GiB RAM.
     target_link_options(${ROTK_EXECUTABLE} PRIVATE "-Wl,--thinlto-jobs=2")
 endif()
+
+# The same game under another name, for testing a change while the normal executable is running
+# (Windows locks a running .exe). Not built by default: cmake --build ... --target <name>Next.
+add_executable(${ROTK_EXECUTABLE}Next EXCLUDE_FROM_ALL)
+foreach(property SOURCES INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS LINK_LIBRARIES LINK_OPTIONS)
+    get_target_property(value ${ROTK_EXECUTABLE} ${property})
+    if(value)
+        set_property(TARGET ${ROTK_EXECUTABLE}Next PROPERTY ${property} "${value}")
+    endif()
+endforeach()

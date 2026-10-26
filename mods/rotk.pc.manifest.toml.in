@@ -221,6 +221,29 @@ value = "6"
 label = "6x"
 
 [[feature]]
+id = "local-coop"
+name = "Split-screen co-op (experimental)"
+description = "Choosing Multiplayer on the title menu starts two-player co-op on this PC: a second screen opens for player 2 (a second controller, or WASD, J/K and Space). PC enhancements are off during co-op. Your save is backed up first."
+group = "Gameplay"
+default_enabled = true
+
+[[option]]
+feature = "local-coop"
+id = "player2-save"
+label = "Player 2 save"
+description = "Player 2's own save starts as a copy of yours and keeps player 2's progress between sessions (delete rotk.player2.sram to start it over). A copy of yours each session keeps nothing."
+type = "choice"
+default = "own"
+
+[[option.choice]]
+value = "own"
+label = "Player 2's own save"
+
+[[option.choice]]
+value = "copy"
+label = "A copy of yours each session"
+
+[[feature]]
 id = "stereo"
 name = "Stereo sound"
 description = "Plays the game in stereo, as on the GBA. Off mixes everything to mono."
@@ -284,6 +307,10 @@ id = "rotk.pc.transparency"
 [[plugin]]
 feature = "hd-icons"
 id = "rotk.pc.hd-icons"
+
+[[plugin]]
+feature = "local-coop"
+id = "rotk.pc.local-coop"
 
 [[plugin]]
 feature = "stereo"
