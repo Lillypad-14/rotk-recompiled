@@ -102,8 +102,33 @@ bool wanted()
     return true;
 }
 
+// g_SaveGlobals (game/include/save.h) is the first 0x40 bytes of the save: its halfwords sum to 0,
+// and optionsFlags holds OPTION_FLAG_MUSIC_ENABLED.
+constexpr std::uint32_t kSaveGlobalsBytes = 0x40, kOptionsFlags = 0x30, kChecksum = 0x3E;
+constexpr std::uint8_t kMusicEnabled = 1u << 1;
+
+// Console 2 plays its sound effects into player 1's sound but not the music, which would double.
+// The game reads the music flag from the save at boot, so it is cleared there before console 2
+// runs, keeping the checksum valid.
+void muteMusic(gba::GbaBus& bus)
+{
+    const auto save = bus.save().sram_bytes();
+    if (save.size() < kSaveGlobalsBytes || !(save[kOptionsFlags] & kMusicEnabled)) return;
+    std::uint16_t sum = 0;
+    for (std::uint32_t i = 0; i < kSaveGlobalsBytes; i += 2) sum += save[i] | save[i + 1] << 8;
+    if (sum != 0) return;  // no valid globals yet (a blank save)
+    const std::uint16_t checksum = (save[kChecksum] | save[kChecksum + 1] << 8) + kMusicEnabled;
+    bus.save().sram_write(kOptionsFlags, save[kOptionsFlags] & ~kMusicEnabled);
+    bus.save().sram_write(kChecksum, checksum & 0xFF);
+    bus.save().sram_write(kChecksum + 1, checksum >> 8);
+}
+
 bool frame(gbarecomp::LocalLinkFrame* link)
 {
+    if (link->frame == 0) {
+        muteMusic(link->machines[1]->bus);
+        link->partner_audio = true;
+    }
     const MenuState one = menuState(link->machines[0]->bus), two = menuState(link->machines[1]->bus);
     if (!g_linked) {
         // Both fresh consoles boot unshown and walk into Multiplayer, as the player already chose.
@@ -123,7 +148,12 @@ bool frame(gbarecomp::LocalLinkFrame* link)
     link->buttons[1] = link->players[1];
     // Test aid: ROTK_PC_COOP_TEST_EXIT_AFTER=N ends the session N frames after the consoles link.
     static const char* exitAfter = std::getenv("ROTK_PC_COOP_TEST_EXIT_AFTER");
-    if (exitAfter && link->frame - g_linkedAt >= std::strtoull(exitAfter, nullptr, 10)) return false;
+    if (exitAfter && link->frame - g_linkedAt >= std::strtoull(exitAfter, nullptr, 10)) {
+        // g_SfxMusic.state (game/include/sfx.h): 0 stopped, 1 playing, 2 paused.
+        std::fprintf(stderr, "[rotk] split-screen co-op test exit: music state %u / %u\n",
+                     link->machines[0]->bus.read32(0x02001648u), link->machines[1]->bus.read32(0x02001648u));
+        return false;
+    }
     // Back on the main menu (cancelled or co-op finished): the session ends.
     return !(one.scene == kSceneMainMenu && one.state < kMenuLinkWait);
 }

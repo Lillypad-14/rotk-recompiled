@@ -8,9 +8,11 @@ The game's own two-player link co-op, with both consoles on this PC.
 1. Solo play is the normal game with every PC feature.
 2. Choosing Multiplayer on the title menu freezes the solo console and opens a local link session:
    two fresh consoles boot unshown from the solo console's save (about 5 s of game time, run
-   unpaced), and both are steered into Multiplayer. The window then shows both screens.
+   unpaced), and both are steered into Multiplayer. The window then fades in both screens.
 3. Player 1 keeps the normal controls. Player 2 uses a second controller, or WASD, J = A, K = B,
-   Space = Start, G = Select, U/I = L/R. Sound is console 1's.
+   Space = Start, G = Select, U/I = L/R. The sound is console 1's with console 2's sound effects
+   mixed in: console 2 boots with the game's own music option off (cleared in its save image,
+   checksum kept valid), so the music is not doubled. Player 2's save keeps that option off.
 4. When console 1 is back on the main menu, the session ends: the solo console takes console 1's
    save through its own cartridge writes (the battery flush saves it), B cancels its link prompt,
    and the window returns to one screen. The save is backed up once per run to
@@ -48,6 +50,7 @@ Option "Player 2 save" (`player2-save`):
   still link. ROTK's handshake, level select and gameplay work with it.
 - Machine pause (`set_machine_paused`): a paused console's clock stops and it resumes without
   catching up.
+- Partner audio (`LocalLinkFrame::partner_audio`): console 1's samples are added to console 0's.
 - Partner save (`LocalLinkPlay::partner_keeps_save`): console 1's own save file,
   `<stem>.player2<ext>` beside the normal save.
 - `gba_mod_set_function_hooks_suspended`, `HostWindow::player_two_buttons` and
