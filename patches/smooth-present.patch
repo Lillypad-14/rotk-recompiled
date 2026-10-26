@@ -1,0 +1,43 @@
+diff --git a/src/gba/gba_ppu.cpp b/src/gba/gba_ppu.cpp
+index 684afc0..3a4f92e 100644
+--- a/src/gba/gba_ppu.cpp
++++ b/src/gba/gba_ppu.cpp
+@@ -27,6 +27,7 @@ extern "C" int (*g_ws_bg_x_provider)(int bg, int output_x, int screen_y,
+                                      int* out_hw_x) = nullptr;
+ extern "C" unsigned g_ws_bg_x_provider_layers = 0xFu;
+ extern "C" int (*g_ws_bg_xy_provider)(int, int, int, int*, int*) = nullptr;
++extern "C" void (*g_present_scanline_hook)(uint32_t, uint8_t*, uint8_t*) = nullptr;
+ extern "C" unsigned g_ws_bg_xy_provider_layers = 0xFu;
+ extern "C" int g_ws_affine_filter_enabled = 0;
+ extern "C" int (*g_ws_affine_filter_provider)(int, int) = nullptr;
+@@ -2463,6 +2464,12 @@ void GbaPpu::render_scanline(uint32_t y,
+         state.x += pb;
+         state.y += pd;
+     }
++    std::array<uint8_t, 0x400> present_oam;
++    if (g_present_scanline_hook) {
++        std::memcpy(present_oam.data(), oam, present_oam.size());
++        g_present_scanline_hook(y, affine_io.data(), present_oam.data());
++        oam = present_oam.data();
++    }
+ 
+     if (!rasterization_enabled_) return;
+     // The enhanced surface consumes only published raster inputs. Its tile
+diff --git a/src/gba/gba_ppu.h b/src/gba/gba_ppu.h
+index dcdd540..ca9d71c 100644
+--- a/src/gba/gba_ppu.h
++++ b/src/gba/gba_ppu.h
+@@ -319,6 +319,13 @@ extern "C" int g_ws_obj_native_clip;
+ // stay valid until the next call. nullptr (default) draws hardware OAM only.
+ extern "C" const uint8_t* (*g_extra_obj_provider)(uint32_t* count);
+ 
++// Host presentation hook (frame interpolation). When set, every rendered
++// scanline passes its BG register image (IO 0x00..0x5F, affine references
++// already resolved for the line) and a copy of OAM; the host may edit both
++// before the line is drawn. Presentation only: guest memory, timing and
++// state hashes never see the edits.
++extern "C" void (*g_present_scanline_hook)(uint32_t y, uint8_t* bg_io, uint8_t* oam);
++
+ // Read-only, game-authored OBJ coverage for expanded margins. RGB555 bit 15
+ // marks a transparent pixel. Priority uses the hardware 0..3 BG/OBJ order.
+ // The PPU never consumes this layer inside the native 240x160 viewport.

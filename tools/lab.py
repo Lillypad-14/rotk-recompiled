@@ -23,6 +23,8 @@ FRAMEWORK_PATCHES = [
     ROOT / "patches/hook-return.patch",
     ROOT / "patches/extra-objects.patch",
     ROOT / "patches/mod-state-defaults.patch",
+    ROOT / "patches/stereo-audio.patch",
+    ROOT / "patches/smooth-present.patch",
 ]
 
 STOCK_ROM_SIZE = 0x1000000
@@ -64,6 +66,12 @@ def verify_image(path: Path, sha1: str, size: int) -> None:
 
 def apply_framework_patch(framework: Path) -> None:
     command = ["git", "-C", str(framework), "apply"]
+    # The patches form an ordered stack and later ones can change an earlier one's context, so
+    # check the top first: when it is applied, the whole stack is.
+    top = subprocess.run(command + ["--reverse", "--check", str(FRAMEWORK_PATCHES[-1])],
+                         capture_output=True)
+    if top.returncode == 0:
+        return
     for patch in FRAMEWORK_PATCHES:
         applied = subprocess.run(command + ["--reverse", "--check", str(patch)],
                                  capture_output=True)

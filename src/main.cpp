@@ -10,6 +10,7 @@
 #include "gba_memory.h"
 #include "gba_ppu.h"
 #include "hd_audio.h"
+#include "smooth_motion.h"
 #include "mod_function_hooks.h"
 #include "mod_runtime.h"
 #include "runtime_arm.h"
@@ -404,6 +405,7 @@ int pcPushOam(std::uint32_t, int, ArmCpuState* cpu)
     if (count < extra.hardwareLimit) {
         extra.lastPushExtra = false;
         rotk::widescreenNotePiece(buffer, count);
+        rotk::smoothNotePiece(buffer, count);
         return 0;
     }
     if (extra.counts[buffer] >= extra.capacity) {
@@ -418,6 +420,7 @@ int pcPushOam(std::uint32_t, int, ArmCpuState* cpu)
         std::fprintf(stderr, "[rotk] extra sprite pieces peak %u\n", peak);
     }
     rotk::widescreenNotePiece(buffer, kHardwareObjects + extra.counts[buffer]);
+    rotk::smoothNotePiece(buffer, kHardwareObjects + extra.counts[buffer]);
     const std::uint32_t slot = extra.counts[buffer]++ * 8u;
     for (std::uint32_t i = 0; i < 8u; ++i) {
         const std::uint8_t value = bus_read_u8(cpu->R[1] + i);
@@ -452,6 +455,7 @@ int pcEndFrame(std::uint32_t, int, ArmCpuState*)
     const int buffer = shadowBuffer(bus_read_u32(kOamShadow));
     if (buffer >= 0 && bus_read_u8(kSpriteAllocCount) == 0) extra.counts[buffer] = 0;
     extra.lastPushExtra = false;
+    rotk::smoothEndFrame(buffer);
     return 0;
 }
 
@@ -470,6 +474,7 @@ void pcObserveDma(int, std::uint32_t source, std::uint32_t destination, std::uin
         }
     }
     rotk::widescreenSetDisplayedBuffer(extra.displayedBuffer);
+    rotk::smoothSetDisplayedBuffer(extra.displayedBuffer);
 }
 
 const std::uint8_t* pcExtraObjects(std::uint32_t* count)
@@ -480,7 +485,31 @@ const std::uint8_t* pcExtraObjects(std::uint32_t* count)
         return nullptr;
     }
     *count = extra.counts[extra.displayedBuffer];
-    return extra.pages[extra.displayedBuffer][extra.displayedHalf];
+    return rotk::smoothAdjustExtra(extra.pages[extra.displayedBuffer][extra.displayedHalf], *count);
+}
+
+void setEnv(const char* name, const char* value)
+{
+#if defined(_WIN32)
+    _putenv_s(name, value);
+#else
+    setenv(name, value, 1);
+#endif
+}
+
+// Stereo sound: the audio device opens after mod activation and reads GBARECOMP_AUDIO_STEREO.
+// Reset callbacks run before activation, so this picks mono and the feature's activation switches
+// back to stereo. A variable set by the player wins.
+bool g_stereoFromEnv = false;
+
+void applyStereoDefault()
+{
+    if (!g_stereoFromEnv) setEnv("GBARECOMP_AUDIO_STEREO", "0");
+}
+
+void stereoActivated()
+{
+    if (!g_stereoFromEnv) setEnv("GBARECOMP_AUDIO_STEREO", "1");
 }
 
 // CPU boost: GBARECOMP_CPU_OVERCLOCK is read on the first emulated instruction, after this runs.
@@ -504,14 +533,17 @@ void applyPcSettings()
     g_layout = makeLayout();
     configureExtraObjects();
     applyCpuBoost();
+    applyStereoDefault();
+    rotk::smoothMotionApply();
     const bool extra = extraObjects().capacity != 0;
+    const bool observePieces = extra || rotk::smoothMotionActive();
     gba_mod_set_function_hook_enabled(kHeapHookId, layout().heap);
     gba_mod_set_function_hook_enabled(kPoolHookId, layout().actors);
     gba_mod_set_function_hook_enabled(kSortHookId,
                                       layout().actors && envNumber("ROTK_PC_RENDER_SORT", 1) != 0);
-    gba_mod_set_function_hook_enabled(kPushOamHookId, extra);
-    gba_mod_set_function_hook_enabled(kHideOamHookId, extra);
-    gba_mod_set_function_hook_enabled(kEndFrameHookId, extra);
+    gba_mod_set_function_hook_enabled(kPushOamHookId, observePieces);
+    gba_mod_set_function_hook_enabled(kHideOamHookId, observePieces);
+    gba_mod_set_function_hook_enabled(kEndFrameHookId, observePieces);
     gba::g_rom_read32_override = layout().actors ? pcQueueLiterals : nullptr;
     g_dma_observer = pcObserveDma;
     gba::g_extra_obj_provider = extra ? pcExtraObjects : nullptr;
@@ -536,6 +568,9 @@ int main(int argc, char** argv)
                                "rotk.pc.cpu-boost"})
         gba_mod_register_activation_plugin(plugin, featureActivated);
     rotk::hdAudioRegister();
+    rotk::smoothMotionRegister();
+    g_stereoFromEnv = std::getenv("GBARECOMP_AUDIO_STEREO") != nullptr;
+    gba_mod_register_activation_plugin("rotk.pc.stereo", stereoActivated);
     gba_mod_register_reset_callback(applyPcSettings);
 
     gbarecomp::RunOptions options;

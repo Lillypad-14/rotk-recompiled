@@ -144,9 +144,23 @@ type = "boolean"
 default = false
 
 [[feature]]
+id = "smooth-motion"
+name = "Smooth motion (60 fps)"
+description = "The game updates 30 times a second. This draws a halfway frame in between, so scrolling and movement look like 60 fps. Gameplay is unchanged. Works best with CPU boost. Work in progress: particles still move at 30 fps."
+group = "Display"
+default_enabled = false
+
+[[feature]]
+id = "stereo"
+name = "Stereo sound"
+description = "Plays the game in stereo, as on the GBA. Off mixes everything to mono."
+group = "Audio"
+default_enabled = true
+
+[[feature]]
 id = "hd-audio"
 name = "HD audio"
-description = "Mixes the music and sound effects on the PC at 65 kHz instead of the GBA's 16 kHz 8-bit mix: clearer highs, no hiss. Work in progress: mono for now."
+description = "Mixes the music and sound effects on the PC at 65 kHz instead of the GBA's 16 kHz 8-bit mix: clearer highs, no hiss."
 group = "Audio"
 default_enabled = false
 
@@ -188,6 +202,14 @@ id = "rotk.pc.cpu-boost"
 [[plugin]]
 feature = "widescreen"
 id = "rotk.pc.widescreen"
+
+[[plugin]]
+feature = "smooth-motion"
+id = "rotk.pc.smooth-motion"
+
+[[plugin]]
+feature = "stereo"
+id = "rotk.pc.stereo"
 
 [[plugin]]
 feature = "hd-audio"

@@ -1,0 +1,671 @@
+diff --git a/src/gba/gba_audio.cpp b/src/gba/gba_audio.cpp
+index 72125d1..52e93c3 100644
+--- a/src/gba/gba_audio.cpp
++++ b/src/gba/gba_audio.cpp
+@@ -38,6 +38,7 @@ bool fifo_trace_enabled() {
+ GbaAudio::GbaAudio() {
+     ring_.assign(kRingSize, 0);
+     ring_rate_.assign(kRingSize, 0);
++    ring_side_.assign(kRingSize, 0);
+     cap_ring_.assign(kCapRingSize, CapSample{});
+     reset();
+ }
+@@ -117,6 +118,7 @@ void GbaAudio::deserialize(gbarecomp::debug::SnapshotReader& r) {
+     uint32_t ring_len = r.u32();
+     ring_.assign(ring_len, 0);
+     ring_rate_.assign(ring_len, 0);
++    ring_side_.assign(ring_len, 0);
+     if (ring_len) r.bytes(ring_.data(), ring_len * sizeof(int16_t));
+     ring_head_         = static_cast<std::size_t>(r.u64());
+     ring_tail_         = static_cast<std::size_t>(r.u64());
+@@ -124,6 +126,7 @@ void GbaAudio::deserialize(gbarecomp::debug::SnapshotReader& r) {
+     r.bytes(current_samples_, sizeof(current_samples_));
+     sample_index_      = r.u32();
+     std::fill(std::begin(current_sample_rates_), std::end(current_sample_rates_), uint8_t{0});
++    std::fill(std::begin(current_sides_), std::end(current_sides_), int16_t{0});
+ }
+ 
+ void GbaAudio::reset() {
+@@ -168,6 +171,8 @@ void GbaAudio::reset() {
+     trace_write_ = 0;
+     trace_count_ = 0;
+     std::fill(ring_.begin(), ring_.end(), int16_t{0});
++    std::fill(ring_side_.begin(), ring_side_.end(), int16_t{0});
++    std::fill(std::begin(current_sides_), std::end(current_sides_), int16_t{0});
+ }
+ 
+ void GbaAudio::write_io8(uint32_t off, uint8_t v) {
+@@ -468,8 +473,9 @@ void GbaAudio::ch4_trigger() {
+     }
+ }
+ 
+-void GbaAudio::ring_push(int16_t s, uint8_t rate_tag) {
++void GbaAudio::ring_push(int16_t s, int16_t side, uint8_t rate_tag) {
+     ring_[ring_head_] = s;
++    ring_side_[ring_head_] = side;
+     ring_rate_[ring_head_] = rate_tag;
+     ring_head_ = (ring_head_ + 1) % kRingSize;
+     if (ring_head_ == ring_tail_) {
+@@ -518,6 +524,27 @@ std::size_t GbaAudio::drain_sample_block(int16_t* out, std::size_t max, uint32_t
+     return n;
+ }
+ 
++std::size_t GbaAudio::drain_sample_block_stereo(int16_t* out, std::size_t max_frames,
++                                                uint32_t& rate) {
++    while (ring_tail_ != ring_head_ && !ring_rate_[ring_tail_])
++        ring_tail_ = (ring_tail_ + 1) % kRingSize;
++    if (!max_frames || ring_tail_ == ring_head_) return 0;
++    const uint8_t tag = ring_rate_[ring_tail_];
++    rate = 32768u << (tag - 1);
++    auto clamp = [](int32_t v) {
++        return static_cast<int16_t>(v > 32767 ? 32767 : v < -32767 ? -32767 : v);
++    };
++    std::size_t n = 0;
++    while (n < max_frames && ring_tail_ != ring_head_ && ring_rate_[ring_tail_] == tag) {
++        const int32_t mid = ring_[ring_tail_], side = ring_side_[ring_tail_];
++        out[2 * n] = clamp(mid + side);
++        out[2 * n + 1] = clamp(mid - side);
++        ++n;
++        ring_tail_ = (ring_tail_ + 1) % kRingSize;
++    }
++    return n;
++}
++
+ std::size_t GbaAudio::drain_samples(int16_t* out, std::size_t max) {
+     std::size_t n = 0;
+     while (n < max && ring_tail_ != ring_head_) {
+@@ -650,14 +677,16 @@ void GbaAudio::sample_until_current_time() {
+     uint32_t elapsed = cycle_accumulator_ / cycles_per_sample_;
+     if (elapsed > slots) elapsed = slots;
+     while (sample_index_ < elapsed) {
+-        current_samples_[sample_index_] = mix_one_sample(sample_index_);
++        current_samples_[sample_index_] =
++            mix_one_sample(sample_index_, true, nullptr, &current_sides_[sample_index_]);
+         current_sample_rates_[sample_index_] = 1 + ((soundbias_ >> 14) & 3);
+         ++sample_index_;
+     }
+ }
+ 
+ int16_t GbaAudio::mix_one_sample(uint32_t direct_slot, bool include_direct,
+-                                 ChannelTap* tap) {
++                                 ChannelTap* tap, int16_t* side_out) {
++    if (side_out) *side_out = 0;
+     if (!master_enable_) return 0;
+ 
+     // Per-channel contributions in the range [-15, +15]. Routing
+@@ -866,6 +895,17 @@ int16_t GbaAudio::mix_one_sample(uint32_t direct_slot, bool include_direct,
+     // Apply routing — channel must be enabled on at least one side
+     // to be audible in our mono mix.
+     int32_t mix = 0;
++    // Stereo side: (L - R) / 2 with each side at its own master volume.
++    int32_t mix_l = 0;
++    int32_t mix_r = 0;
++    if (ch1_left_enable_) mix_l += ch1_sample;
++    if (ch2_left_enable_) mix_l += ch2_sample;
++    if (ch3_left_enable_) mix_l += ch3_sample;
++    if (ch4_left_enable_) mix_l += ch4_sample;
++    if (ch1_right_enable_) mix_r += ch1_sample;
++    if (ch2_right_enable_) mix_r += ch2_sample;
++    if (ch3_right_enable_) mix_r += ch3_sample;
++    if (ch4_right_enable_) mix_r += ch4_sample;
+     if (ch1_left_enable_ || ch1_right_enable_) mix += ch1_sample;
+     if (ch2_left_enable_ || ch2_right_enable_) mix += ch2_sample;
+     if (ch3_left_enable_ || ch3_right_enable_) mix += ch3_sample;
+@@ -894,6 +934,9 @@ int16_t GbaAudio::mix_one_sample(uint32_t direct_slot, bool include_direct,
+     out = (out * dmg_scale_num) / dmg_scale_den;
+     constexpr int32_t kGain = 600;
+     out *= kGain;
++    int32_t side = (mix_l * volume_l_ - mix_r * volume_r_) / 14;
++    side = (side * dmg_scale_num) / dmg_scale_den;
++    side *= kGain;
+ 
+     // Direct Sound FIFO contribution. Omitted when the MP2K shadow is
+     // substituting (the caller adds the shadow's direct mix instead).
+@@ -914,10 +957,13 @@ int16_t GbaAudio::mix_one_sample(uint32_t direct_slot, bool include_direct,
+                    direct_b_full_volume_);
+         int32_t direct_out = ((direct_left + direct_right) / 2) * 48;
+         out += direct_out;
++        side += ((direct_left - direct_right) / 2) * 48;
+     }
+ 
+     if (out > 32767)  out = 32767;
+     if (out < -32767) out = -32767;
++    if (side_out)
++        *side_out = static_cast<int16_t>(side > 32767 ? 32767 : side < -32767 ? -32767 : side);
+ 
+     if (tap) {
+         // Raw per-channel synthesis values for the always-on capture ring.
+@@ -989,7 +1035,8 @@ void GbaAudio::run_sample_event() {
+         // When the shadow is proven-live, mix PSG-only canon + the shadow's
+         // direct-sound render; otherwise the full canon mix (incl. FIFO).
+         ChannelTap tap;
+-        int16_t s = mix_one_sample(slot, /*include_direct=*/!substitute, &tap);
++        int16_t side = 0;
++        int16_t s = mix_one_sample(slot, /*include_direct=*/!substitute, &tap, &side);
+         if (substitute) {
+             // Shadow output is the bus float domain (full-scale FIFO DAC =
+             // 0.25). kShadowOutputScale maps it to our int16 direct-sound
+@@ -1002,8 +1049,12 @@ void GbaAudio::run_sample_event() {
+             if (o > 32767) o = 32767;
+             if (o < -32767) o = -32767;
+             s = static_cast<int16_t>(o);
++            int32_t d = static_cast<int32_t>(side) +
++                        static_cast<int32_t>(((sl - sr) * 0.5f) * kShadowOutputScale);
++            side = static_cast<int16_t>(d > 32767 ? 32767 : d < -32767 ? -32767 : d);
+         }
+         current_samples_[slot] = s;
++        current_sides_[slot] = side;
+         current_sample_rates_[slot] = 1 + ((soundbias_ >> 14) & 3);
+         caps[slot].mixed = s;
+         caps[slot].ch[0] = tap.ch[0];
+@@ -1018,7 +1069,7 @@ void GbaAudio::run_sample_event() {
+         // cap_push first (keyed by samples_generated_ pre-increment), then
+         // ring_push which bumps samples_generated_ — keeps the two aligned.
+         cap_push(caps[i]);
+-        ring_push(current_samples_[i], current_sample_rates_[i]);
++        ring_push(current_samples_[i], current_sides_[i], current_sample_rates_[i]);
+     }
+     sample_index_ = 0;
+ 
+diff --git a/src/gba/gba_audio.h b/src/gba/gba_audio.h
+index cdd0d27..6cec36a 100644
+--- a/src/gba/gba_audio.h
++++ b/src/gba/gba_audio.h
+@@ -73,6 +73,11 @@ public:
+     // Playback-only rate tags are deliberately absent from serialized state.
+     // Unknown restored tags are discarded by this API, never guessed.
+     std::size_t drain_sample_block(int16_t* out, std::size_t max, uint32_t& rate);
++    // Stereo twin of drain_sample_block: up to max_frames interleaved L/R
++    // pairs. Both drains consume the same ring; a caller uses one of them.
++    // The mono stream is the mid signal (L+R)/2 and stays bit-identical.
++    std::size_t drain_sample_block_stereo(int16_t* out, std::size_t max_frames,
++                                          uint32_t& rate);
+     void discard_playback() { ring_tail_ = ring_head_; }
+ 
+     uint32_t sample_rate() const { return kSystemHz / cycles_per_sample_; }
+@@ -299,6 +304,7 @@ private:
+     // audio backend pulls from this in chunks.
+     std::vector<int16_t> ring_;
+     std::vector<uint8_t> ring_rate_;
++    std::vector<int16_t> ring_side_;  // (L-R)/2 per ring_ entry, host output only
+     std::size_t ring_head_ = 0;
+     std::size_t ring_tail_ = 0;
+     uint64_t    samples_generated_ = 0;
+@@ -308,13 +314,14 @@ private:
+     std::vector<CapSample> cap_ring_;
+     void cap_push(const CapSample& s);
+     int16_t current_samples_[kMaxSamplesPerEvent] = {};
++    int16_t current_sides_[kMaxSamplesPerEvent] = {};
+     uint8_t current_sample_rates_[kMaxSamplesPerEvent] = {};
+     uint32_t sample_index_ = 0;
+     std::vector<FifoTrace> trace_;
+     uint32_t trace_write_ = 0;
+     uint32_t trace_count_ = 0;
+ 
+-    void ring_push(int16_t s, uint8_t rate_tag);
++    void ring_push(int16_t s, int16_t side, uint8_t rate_tag);
+     void fifo_push_word(DirectFifo& fifo, uint32_t word);
+     void fifo_clear_queue(DirectFifo& fifo);
+     void fifo_reset(DirectFifo& fifo);
+@@ -337,8 +344,9 @@ private:
+         int16_t direct_a = 0;
+         int16_t direct_b = 0;
+     };
++    // Returns the mono (mid) sample; `side` receives (L-R)/2 when non-null.
+     int16_t mix_one_sample(uint32_t direct_slot, bool include_direct = true,
+-                           ChannelTap* tap = nullptr);
++                           ChannelTap* tap = nullptr, int16_t* side = nullptr);
+ 
+     // ── MP2K HLE shadow (verified-enhancement; default off) ──────
+     Mp2kShadow shadow_{};
+diff --git a/src/gba/mod_audio.cpp b/src/gba/mod_audio.cpp
+index f86495f..b303c88 100644
+--- a/src/gba/mod_audio.cpp
++++ b/src/gba/mod_audio.cpp
+@@ -24,6 +24,7 @@ struct Voice {
+ struct StreamSlot {
+     GBAModAudioStream capability = GBA_MOD_AUDIO_STREAM_INVALID;
+     GBAModAudioStreamReadCallback read = nullptr;
++    GBAModAudioStreamReadStereoCallback read_stereo = nullptr;
+     void* context = nullptr;
+     uint32_t activation_epoch = 0;
+     int gain_percent = 100;
+@@ -102,7 +103,8 @@ GBAModAudioStream make_capability() {
+ bool valid_stream(GBAModAudioStream stream) {
+     const StreamSlot& slot = state().stream;
+     return stream != GBA_MOD_AUDIO_STREAM_INVALID &&
+-           stream == slot.capability && slot.read != nullptr;
++           stream == slot.capability &&
++           (slot.read != nullptr || slot.read_stereo != nullptr);
+ }
+ 
+ Voice* allocate_fixed_voice() {
+@@ -211,10 +213,14 @@ extern "C" void gba_mod_audio_reset(void) {
+     next_nonzero(s.activation_epoch);
+ }
+ 
+-extern "C" GBAModAudioStream gba_mod_audio_stream_register_s16_mono(
+-    GBAModAudioStreamReadCallback read, void* context) {
++namespace {
++
++GBAModAudioStream register_stream(GBAModAudioStreamReadCallback read,
++                                  GBAModAudioStreamReadStereoCallback read_stereo,
++                                  void* context) {
+     State& s = state();
+-    if (!read || s.activation_depth == 0) return GBA_MOD_AUDIO_STREAM_INVALID;
++    if ((!read && !read_stereo) || s.activation_depth == 0)
++        return GBA_MOD_AUDIO_STREAM_INVALID;
+     if (s.stream.capability != GBA_MOD_AUDIO_STREAM_INVALID &&
+         s.stream.activation_epoch != s.activation_epoch) {
+         // One activation pass admits one selected plugin source. A later
+@@ -230,6 +236,7 @@ extern "C" GBAModAudioStream gba_mod_audio_stream_register_s16_mono(
+         s.stream.activation_epoch = s.activation_epoch;
+     }
+     s.stream.read = read;
++    s.stream.read_stereo = read_stereo;
+     s.stream.context = context;
+     s.stream.enabled = false;
+     s.stream.playing = false;
+@@ -237,6 +244,18 @@ extern "C" GBAModAudioStream gba_mod_audio_stream_register_s16_mono(
+     return s.stream.capability;
+ }
+ 
++}  // namespace
++
++extern "C" GBAModAudioStream gba_mod_audio_stream_register_s16_mono(
++    GBAModAudioStreamReadCallback read, void* context) {
++    return register_stream(read, nullptr, context);
++}
++
++extern "C" GBAModAudioStream gba_mod_audio_stream_register_s16_stereo(
++    GBAModAudioStreamReadStereoCallback read, void* context) {
++    return register_stream(nullptr, read, context);
++}
++
+ extern "C" int gba_mod_audio_stream_set_enabled(GBAModAudioStream stream,
+                                                    int enabled) {
+     if (!valid_stream(stream)) return 0;
+@@ -270,20 +289,29 @@ extern "C" int gba_mod_audio_stream_set_native_gain_percent(
+     return 1;
+ }
+ 
+-extern "C" void gba_mod_audio_mix(int16_t* dst, size_t frame_count) {
++namespace {
++
++// Mixes the overlays into `channels` (1 or 2) interleaved S16 channels. Mono
++// clips play on both channels; a stereo stream is averaged for mono output and
++// a mono stream is copied to both channels for stereo output.
++void mix_frames(int16_t* dst, size_t frame_count, size_t channels) {
+     if (!dst || frame_count == 0) return;
+     State& s = state();
+-    std::array<int16_t, GBA_MOD_AUDIO_MAX_STREAM_CALLBACK_FRAMES> stream_pcm{};
+-    std::array<int32_t, GBA_MOD_AUDIO_MAX_STREAM_CALLBACK_FRAMES> mixed{};
++    constexpr size_t kChunk = GBA_MOD_AUDIO_MAX_STREAM_CALLBACK_FRAMES;
++    std::array<int16_t, kChunk * 2> stream_pcm{};
++    std::array<int32_t, kChunk * 2> mixed{};
+ 
+     for (size_t offset = 0; offset < frame_count;) {
+-        const size_t count = std::min(
+-            frame_count - offset,
+-            static_cast<size_t>(GBA_MOD_AUDIO_MAX_STREAM_CALLBACK_FRAMES));
++        const size_t count = std::min(frame_count - offset, kChunk);
++        int16_t* out = dst + offset * channels;
+         size_t stream_count = 0;
+-        if (s.stream.playing && s.stream.enabled && s.stream.read) {
++        const bool stereo_source = s.stream.read_stereo != nullptr;
++        if (s.stream.playing && s.stream.enabled &&
++            (s.stream.read || s.stream.read_stereo)) {
+             stream_pcm.fill(0);
+-            stream_count = s.stream.read(s.stream.context, stream_pcm.data(), count);
++            stream_count = stereo_source
++                ? s.stream.read_stereo(s.stream.context, stream_pcm.data(), count)
++                : s.stream.read(s.stream.context, stream_pcm.data(), count);
+             if (stream_count > count) {
+                 // A malformed trusted callback fails closed before contributing
+                 // to this buffer or any later producer buffer.
+@@ -293,8 +321,8 @@ extern "C" void gba_mod_audio_mix(int16_t* dst, size_t frame_count) {
+                 s.stream.playing = false;
+             }
+         }
+-        for (size_t i = 0; i < count; ++i) {
+-            mixed[i] = (static_cast<int32_t>(dst[offset + i]) *
++        for (size_t i = 0; i < count * channels; ++i) {
++            mixed[i] = (static_cast<int32_t>(out[i]) *
+                         s.native_gain_percent) / 100;
+         }
+         for (Voice& voice : s.voices) {
+@@ -305,8 +333,10 @@ extern "C" void gba_mod_audio_mix(int16_t* dst, size_t frame_count) {
+                 continue;
+             }
+             for (size_t i = 0; i < count; ++i) {
+-                mixed[i] += (static_cast<int32_t>(slot->samples[voice.position++]) *
+-                             voice.gain_percent) / 100;
++                const int32_t sample =
++                    (static_cast<int32_t>(slot->samples[voice.position++]) *
++                     voice.gain_percent) / 100;
++                for (size_t c = 0; c < channels; ++c) mixed[i * channels + c] += sample;
+                 if (voice.position == slot->samples.size()) {
+                     if (voice.loop) voice.position = 0;
+                     else {
+@@ -316,11 +346,27 @@ extern "C" void gba_mod_audio_mix(int16_t* dst, size_t frame_count) {
+                 }
+             }
+         }
+-        for (size_t i = 0; i < stream_count; ++i)
+-            mixed[i] += (static_cast<int32_t>(stream_pcm[i]) *
+-                         s.stream.gain_percent) / 100;
+-        for (size_t i = 0; i < count; ++i)
+-            dst[offset + i] = clamp_s16(mixed[i]);
++        for (size_t i = 0; i < stream_count; ++i) {
++            for (size_t c = 0; c < channels; ++c) {
++                int32_t sample;
++                if (!stereo_source) sample = stream_pcm[i];
++                else if (channels == 2) sample = stream_pcm[i * 2 + c];
++                else sample = (static_cast<int32_t>(stream_pcm[i * 2]) + stream_pcm[i * 2 + 1]) / 2;
++                mixed[i * channels + c] += (sample * s.stream.gain_percent) / 100;
++            }
++        }
++        for (size_t i = 0; i < count * channels; ++i)
++            out[i] = clamp_s16(mixed[i]);
+         offset += count;
+     }
+ }
++
++}  // namespace
++
++extern "C" void gba_mod_audio_mix(int16_t* dst, size_t frame_count) {
++    mix_frames(dst, frame_count, 1);
++}
++
++extern "C" void gba_mod_audio_mix_stereo(int16_t* dst, size_t frame_count) {
++    mix_frames(dst, frame_count, 2);
++}
+diff --git a/src/gba/mod_audio.h b/src/gba/mod_audio.h
+index 7b78b33..2cd2619 100644
+--- a/src/gba/mod_audio.h
++++ b/src/gba/mod_audio.h
+@@ -36,6 +36,10 @@ typedef uint64_t GBAModAudioStream;
+ // re-enter this API.  Returning fewer than max_frames ends the stream voice.
+ typedef size_t (*GBAModAudioStreamReadCallback)(void* context, int16_t* dst,
+                                                 size_t max_frames);
++// Stereo variant: dst holds max_frames interleaved L/R S16 pairs at 65536 Hz.
++typedef size_t (*GBAModAudioStreamReadStereoCallback)(void* context,
++                                                      int16_t* dst,
++                                                      size_t max_frames);
+ 
+ // Copies one immutable mono S16 PCM clip. The source must be exactly the
+ // engine's 65536-Hz producer rate. Returns a positive handle or INVALID.
+@@ -77,6 +81,10 @@ void gba_mod_audio_reset(void);
+ // disabled. Every later stream control requires this exact capability.
+ GBAModAudioStream gba_mod_audio_stream_register_s16_mono(
+     GBAModAudioStreamReadCallback read, void* context);
++// Same as above for an interleaved stereo source. It is averaged to mono when
++// the host output is mono. One stream per activation either way.
++GBAModAudioStream gba_mod_audio_stream_register_s16_stereo(
++    GBAModAudioStreamReadStereoCallback read, void* context);
+ int gba_mod_audio_stream_set_enabled(GBAModAudioStream stream, int enabled);
+ int gba_mod_audio_stream_play(GBAModAudioStream stream, int gain_percent);
+ int gba_mod_audio_stream_stop(GBAModAudioStream stream);
+@@ -93,6 +101,8 @@ int gba_mod_audio_stream_set_native_gain_percent(GBAModAudioStream stream,
+ // accumulator once. It never allocates, locks, executes guest code, or touches
+ // SDL; SDL's consumer callback receives only the completed queue.
+ void gba_mod_audio_mix(int16_t* dst, size_t frame_count);
++// Same for interleaved stereo producer output (frame_count L/R pairs).
++void gba_mod_audio_mix_stereo(int16_t* dst, size_t frame_count);
+ 
+ #ifdef __cplusplus
+ }
+diff --git a/src/runtime/host_window.cpp b/src/runtime/host_window.cpp
+index f362728..2ca9b90 100644
+--- a/src/runtime/host_window.cpp
++++ b/src/runtime/host_window.cpp
+@@ -411,6 +411,11 @@ struct Backend {
+     SDL_AudioStream* audio_rate_stream = nullptr;
+     uint32_t audio_source_rate = 0;
+     std::vector<int16_t> audio_mix_buf;
++    // Stereo output (default; GBARECOMP_AUDIO_STEREO=0 keeps mono). Every
++    // stage after the device opens is then interleaved L/R; mono producers
++    // are copied to both channels.
++    bool audio_stereo = false;
++    std::vector<int16_t> audio_expand_buf;
+     // Diagnostic/direct path: let SDL own format conversion and queue the
+     // engine's verified 65536 Hz mono stream without passing it through RAB.
+     bool          audio_direct = false;
+@@ -1291,7 +1296,8 @@ runtime::ColorSettings resolve_color_settings(const char* toml_screen) {
+ // prime / on underrun, so a momentarily-starved producer no longer clicks.
+ void gba_audio_callback(void* userdata, Uint8* stream, int len) {
+     auto* b = static_cast<Backend*>(userdata);
+-    int frames = len / static_cast<int>(sizeof(int16_t)); // mono
++    const int channels = b && b->audio_stereo ? 2 : 1;
++    int frames = len / static_cast<int>(sizeof(int16_t) * channels);
+     if (b && b->bridge_ready) {
+         SDL_LockMutex(b->audio_mtx);
+         rab_pull(&b->bridge, reinterpret_cast<int16_t*>(stream), frames);
+@@ -1880,7 +1886,9 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
+     SDL_AudioSpec want{};
+     want.freq     = 65536;
+     want.format   = AUDIO_S16SYS;
+-    want.channels = 1;
++    const char* stereo_env = std::getenv("GBARECOMP_AUDIO_STEREO");
++    b->audio_stereo = !(stereo_env && stereo_env[0] == '0' && stereo_env[1] == '\0');
++    want.channels = b->audio_stereo ? 2 : 1;
+     want.samples  = 1024;  // ~15 ms callback quantum at 65 kHz
+     const char* direct_audio_env = std::getenv("GBARECOMP_AUDIO_DIRECT");
+     b->audio_direct =
+@@ -1905,11 +1913,12 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
+             b->audio_direct_rate = got.freq;
+             std::fprintf(stderr,
+                          "host_window: audio=direct-queue driver=%s "
+-                         "device=%s format=%dHz mono S16 quantum=%u\n",
++                         "device=%s format=%dHz %s S16 quantum=%u\n",
+                          SDL_GetCurrentAudioDriver()
+                              ? SDL_GetCurrentAudioDriver() : "(unknown)",
+                          audio_device_name ? audio_device_name : "(default)",
+-                         got.freq, static_cast<unsigned>(got.samples));
++                         got.freq, b->audio_stereo ? "stereo" : "mono",
++                         static_cast<unsigned>(got.samples));
+             if (const char* probe = std::getenv("GBARECOMP_AUDIO_PROBE");
+                 probe && *probe && *probe != '0') {
+                 const int devices = SDL_GetNumAudioDevices(0);
+@@ -1926,7 +1935,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
+             b->audio_mtx = SDL_CreateMutex();
+             rab_config cfg;
+             rab_config_defaults(&cfg);
+-            cfg.channels    = 1;
++            cfg.channels    = b->audio_stereo ? 2 : 1;
+             cfg.source_rate = 65536.0;                 // engine's standardized GBA mixer rate
+             cfg.host_rate   = static_cast<double>(got.freq);
+             cfg.target_ms   = 60.0;                     // steady cushion (matches NES)
+@@ -1957,6 +1966,12 @@ void HostWindow::push_audio_block(const int16_t* samples, std::size_t count,
+     if (!open_ || !impl_ || !samples || !count) return;
+     if (rate != 32768 && rate != 65536 && rate != 131072 && rate != 262144) return;
+     auto* b = static_cast<Backend*>(impl_);
++    if (b->audio_stereo) {
++        std::vector<int16_t> lr(count * 2);
++        for (std::size_t i = 0; i < count; ++i) lr[2 * i] = lr[2 * i + 1] = samples[i];
++        push_audio_block_stereo(lr.data(), count, rate);
++        return;
++    }
+     auto drain = [&]() {
+         int16_t converted[4096];
+         int bytes = 0;
+@@ -1992,10 +2007,112 @@ void HostWindow::push_audio_block(const int16_t* samples, std::size_t count,
+     }
+ }
+ 
++bool HostWindow::audio_stereo() const {
++    return open_ && impl_ && static_cast<const Backend*>(impl_)->audio_stereo;
++}
++
++void HostWindow::push_audio_block_stereo(const int16_t* lr, std::size_t frames,
++                                         uint32_t rate) {
++    if (!open_ || !impl_ || !lr || !frames) return;
++    if (rate != 32768 && rate != 65536 && rate != 131072 && rate != 262144) return;
++    auto* b = static_cast<Backend*>(impl_);
++    if (!b->audio_stereo) {
++        // Mono device: hand the mid signal to the mono path.
++        std::vector<int16_t> mono(frames);
++        for (std::size_t i = 0; i < frames; ++i)
++            mono[i] = static_cast<int16_t>((static_cast<int32_t>(lr[2 * i]) + lr[2 * i + 1]) / 2);
++        push_audio_block(mono.data(), frames, rate);
++        return;
++    }
++    auto drain = [&]() {
++        int16_t converted[4096];
++        int bytes = 0;
++        while ((bytes = SDL_AudioStreamGet(b->audio_rate_stream, converted,
++                                          sizeof(converted))) > 0) {
++            push_audio_frames_stereo(converted,
++                                     static_cast<std::size_t>(bytes) / (2 * sizeof(int16_t)));
++        }
++    };
++    if (rate != b->audio_source_rate) {
++        if (b->audio_rate_stream) {
++            SDL_AudioStreamFlush(b->audio_rate_stream);
++            drain();
++            SDL_FreeAudioStream(b->audio_rate_stream);
++            b->audio_rate_stream = nullptr;
++        }
++        b->audio_source_rate = rate;
++        if (rate != 65536) {
++            b->audio_rate_stream = SDL_NewAudioStream(AUDIO_S16SYS, 2, rate,
++                                                      AUDIO_S16SYS, 2, 65536);
++            if (!b->audio_rate_stream) {
++                throw std::runtime_error(std::string("audio rate conversion: ") + SDL_GetError());
++            }
++        }
++    }
++    if (rate == 65536) {
++        push_audio_frames_stereo(lr, frames);
++    } else {
++        if (SDL_AudioStreamPut(b->audio_rate_stream, lr,
++                              static_cast<int>(frames * 2 * sizeof(int16_t))) < 0) {
++            throw std::runtime_error(std::string("audio rate conversion: ") + SDL_GetError());
++        }
++        drain();
++    }
++}
++
++// Stereo twin of push_audio_samples (65536 Hz interleaved L/R frames).
++void HostWindow::push_audio_frames_stereo(const int16_t* lr, std::size_t frames) {
++    if (!open_ || !impl_ || !lr || frames == 0) return;
++    auto* b = static_cast<Backend*>(impl_);
++    if (b->audio_dev == 0) return;
++    const std::size_t count = frames * 2;
++    b->audio_mix_buf.assign(lr, lr + count);
++    gba_mod_audio_mix_stereo(b->audio_mix_buf.data(), frames);
++    const int16_t* samples = b->audio_mix_buf.data();
++    if (b->volume != 100) {
++        b->volume_buf.resize(count);
++        const int v = b->volume;
++        for (std::size_t i = 0; i < count; ++i)
++            b->volume_buf[i] = static_cast<int16_t>(
++                (static_cast<int32_t>(samples[i]) * v) / 100);
++        samples = b->volume_buf.data();
++    }
++    if (b->audio_direct) {
++        const Uint32 queued_before = SDL_GetQueuedAudioSize(b->audio_dev);
++        if (b->audio_direct_started && queued_before == 0) {
++            ++b->audio_direct_underruns;
++            b->audio_direct_started = false;
++            SDL_PauseAudioDevice(b->audio_dev, 1);
++        }
++        if (SDL_QueueAudio(b->audio_dev, samples,
++                           static_cast<Uint32>(count * sizeof(int16_t))) != 0)
++            return;
++        ++b->audio_direct_pushes;
++        b->audio_direct_samples += frames;
++        constexpr Uint32 kDirectPrerollBytes = 32768;  // 125 ms at 65536 Hz stereo S16
++        if (!b->audio_direct_started &&
++            SDL_GetQueuedAudioSize(b->audio_dev) >= kDirectPrerollBytes) {
++            b->audio_direct_started = true;
++            SDL_PauseAudioDevice(b->audio_dev, 0);
++        }
++        return;
++    }
++    if (!b->bridge_ready) return;
++    SDL_LockMutex(b->audio_mtx);
++    rab_push(&b->bridge, samples, static_cast<int>(frames));
++    SDL_UnlockMutex(b->audio_mtx);
++}
++
+ void HostWindow::push_audio_samples(const int16_t* samples, std::size_t count) {
+     if (!open_ || !impl_ || !samples || count == 0) return;
+     auto* b = static_cast<Backend*>(impl_);
+     if (b->audio_dev == 0) return;
++    if (b->audio_stereo) {
++        std::vector<int16_t> lr(count * 2);
++        for (std::size_t i = 0; i < count; ++i) lr[2 * i] = lr[2 * i + 1] = samples[i];
++        push_audio_frames_stereo(lr.data(), count);
++        return;
++    }
+ 
+     // Mod clips are registered at 65536 Hz: mix after guest-rate conversion.
+     b->audio_mix_buf.assign(samples, samples + count);
+@@ -3256,6 +3373,9 @@ int HostWindow::fast_forward_multiplier() const { return 4; }
+ void HostWindow::push_audio_samples(const int16_t* /*samples*/,
+                                     std::size_t /*count*/) {}
+ void HostWindow::push_audio_block(const int16_t*, std::size_t, uint32_t) {}
++void HostWindow::push_audio_block_stereo(const int16_t*, std::size_t, uint32_t) {}
++void HostWindow::push_audio_frames_stereo(const int16_t*, std::size_t) {}
++bool HostWindow::audio_stereo() const { return false; }
+ 
+ void HostWindow::service_events() {}
+ 
+diff --git a/src/runtime/host_window.h b/src/runtime/host_window.h
+index 10deb6c..1c4b2bc 100644
+--- a/src/runtime/host_window.h
++++ b/src/runtime/host_window.h
+@@ -167,6 +167,14 @@ public:
+     // GbaAudio::drain_sample_block). Never blocks the guest: a full ring is
+     // counted as overflow and requests a playback reset.
+     void push_audio_block(const int16_t* samples, std::size_t count, uint32_t rate);
++
++    // Interleaved L/R twin of push_audio_block (from
++    // GbaAudio::drain_sample_block_stereo). Mono devices get (L+R)/2.
++    void push_audio_block_stereo(const int16_t* lr, std::size_t frames, uint32_t rate);
++    // 65536 Hz interleaved L/R frames, the stereo push_audio_samples.
++    void push_audio_frames_stereo(const int16_t* lr, std::size_t frames);
++    // True when the opened device plays stereo (GBARECOMP_AUDIO_STEREO=0: mono).
++    bool audio_stereo() const;
+ #if defined(GBARECOMP_WEB_HOST)
+     // Starts a new playback epoch (pause, state load, overflow). Samples are
+     // not accepted until the AudioWorklet acknowledges the reset.
+diff --git a/src/runtime/host_window_web.cpp b/src/runtime/host_window_web.cpp
+index cdd53be..7e35fe5 100644
+--- a/src/runtime/host_window_web.cpp
++++ b/src/runtime/host_window_web.cpp
+@@ -352,6 +352,13 @@ void HostWindow::present(const uint8_t* rgb,unsigned sampled_w,unsigned sampled_
+     present(b.sampled_native.data());
+ }
+ void HostWindow::push_audio_samples(const int16_t* x,std::size_t n){push_audio_block(x,n,65536);}
++bool HostWindow::audio_stereo() const { return false; }
++void HostWindow::push_audio_frames_stereo(const int16_t* lr,std::size_t n){push_audio_block_stereo(lr,n,65536);}
++void HostWindow::push_audio_block_stereo(const int16_t* lr,std::size_t n,uint32_t rate) {
++    std::vector<int16_t> mono(n);
++    for(std::size_t i=0;i<n;++i) mono[i]=static_cast<int16_t>((static_cast<int32_t>(lr[2*i])+lr[2*i+1])/2);
++    push_audio_block(mono.data(),n,rate);
++}
+ void HostWindow::push_audio_block(const int16_t* x,std::size_t n,uint32_t rate) {
+     if(!impl_||!x||!(rate==32768||rate==65536||rate==131072||rate==262144))return;
+     auto& b=*backend(impl_);auto& s=b.shared;auto& c=s.control;
+diff --git a/src/runtime/runtime.cpp b/src/runtime/runtime.cpp
+index cb22b9c..c0c0345 100644
+--- a/src/runtime/runtime.cpp
++++ b/src/runtime/runtime.cpp
+@@ -3944,6 +3944,15 @@ int run_game(int argc, char** argv, const RunOptions& opts) {
+         // Bounded work, including 262144 Hz source frames and rate transitions.
+         for (int budget = 0; budget < 16; ++budget) {
+             uint32_t rate = 0;
++            if (win.audio_stereo()) {
++                // Desktop stereo: L/R from the same ring (the mono drain is
++                // its mid signal).
++                int16_t lr_buf[2048];
++                const auto frames = bus.audio().drain_sample_block_stereo(lr_buf, 1024, rate);
++                if (!frames) break;
++                if (!fast_forward_active) win.push_audio_block_stereo(lr_buf, frames, rate);
++                continue;
++            }
+             const auto n = bus.audio().drain_sample_block(audio_buf, 2048, rate);
+             if (!n) break;
+             if (!fast_forward_active) {

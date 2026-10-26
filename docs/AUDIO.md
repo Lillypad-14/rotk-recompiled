@@ -89,11 +89,26 @@ known engine signature.
 | guest, `ROTK_PC_HD_AUDIO_WAV` (HD dump, 65,536 Hz stereo; also lets env mode 1 replace without the
 package stream), `ROTK_PC_HD_AUDIO_GUEST_WAV` (verify only, 16,384 Hz), `ROTK_PC_HD_AUDIO_DEBUG`.
 
+## Stereo output (patches/stereo-audio.patch)
+
+The recomp used to play mono end to end. Now the desktop device opens in stereo by default
+(`GBARECOMP_AUDIO_STEREO=0` keeps mono):
+
+- `GbaAudio` keeps the mono stream bit-identical as the mid signal (L+R)/2 and stores the side
+  (L-R)/2 in a parallel ring (PSG per-side routing and master volumes, FIFO A/B routing, MP2K shadow).
+  `drain_sample_block_stereo` rebuilds L/R; the mono drain still serves web, netplay and tools.
+- Host window: 2-channel device, stereo rate conversion and bridge (RAB already supported 2 channels),
+  mono producers copied to both channels. The web host and stub builds downmix.
+- Mod audio: `gba_mod_audio_stream_register_s16_stereo` and `gba_mod_audio_mix_stereo`; fixed clips
+  play centred, a stereo stream is averaged on a mono device. HD audio uses the stereo stream.
+- Checks: framework audio_playback, audio_drc and mod_audio tests, RotkAudioRateCheck pass. SDL's disk
+  audio driver captured the real device stream, 2,400 frames of the first map: L/R correlation 0.735
+  with the GBA mixer and 0.735 with HD audio (mono would be 1.0), same levels.
+- tools/lab.py now treats the patches as a stack (top applied = all applied), since this patch edits
+  lines the desktop-audio-rate patch touched.
+
 ## Next
 
-1. Stereo. The game mixes true stereo, but the recomp plays mono end to end (`mix_one_sample` averages
-   L/R, the SDL device opens 1 channel, the mod stream is mono). Needs a framework patch: stereo
-   ring/bridge/device plus a stereo stream API. Also helps the GBA mixer path.
-2. Lift voice limits: the 32-voice table is fixed in EWRAM; more voices need a host table and the
+1. Lift voice limits: the 32-voice table is fixed in EWRAM; more voices need a host table and the
    setters above hooked.
-3. Optional: smooth volume changes across calls (the driver steps volumes per tick).
+2. Optional: smooth volume changes across calls (the driver steps volumes per tick).

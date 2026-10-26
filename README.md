@@ -37,7 +37,8 @@ tests and scripts. Headless runs (`--frames`, `--no-window`, `--tcp`) skip the l
   the level, enemies in the margins active. Optional HUD at the screen edges. Menus and cutscenes keep
   their width with black bars. See [docs/WIDESCREEN.md](docs/WIDESCREEN.md).
 - With these at their stock values the game renders exactly like the original (same frame hashes).
-- HD audio: the game's mixer runs on the PC at 65 kHz in float, off by default ([docs/AUDIO.md](docs/AUDIO.md)). Mono for now.
+- HD audio: the game's mixer runs on the PC at 65 kHz in float, off by default ([docs/AUDIO.md](docs/AUDIO.md)). Sound is now stereo, as on the GBA.
+- Smooth motion: halfway frames between the game's 30 Hz ticks, off by default ([docs/SMOOTH_MOTION.md](docs/SMOOTH_MOTION.md)).
 - Details and measurements: [docs/ENGINE_LIMITS.md](docs/ENGINE_LIMITS.md), [STATUS.md](STATUS.md).
   Next steps: [docs/ROADMAP.md](docs/ROADMAP.md).
 

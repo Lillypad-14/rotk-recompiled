@@ -495,21 +495,26 @@ void pushRing(std::uint32_t frames)
     }
 }
 
-// Mod audio pull stream: mono S16 at 65,536 Hz. Must always return max_frames, fewer ends the stream.
+// Mod audio pull stream: interleaved stereo S16 at 65,536 Hz (the framework averages it on a mono
+// device). Must always return max_frames, fewer ends the stream.
 std::size_t pullStream(void*, std::int16_t* dst, std::size_t max_frames)
 {
-    // Same loudness as the native path: a centred s8 sample x plays as x * 192 (gba_audio.cpp).
-    constexpr float kScale = 128.0f * 192.0f * 0.5f;
+    // Same loudness as the native path: an s8 FIFO sample x plays as x * 192 (gba_audio.cpp).
+    constexpr float kScale = 128.0f * 192.0f;
+    auto pcm = [](float v) {
+        const float s = v * kScale;
+        return static_cast<std::int16_t>(s > 32767.0f ? 32767.0f : s < -32767.0f ? -32767.0f : s);
+    };
     for (std::size_t i = 0; i < max_frames; ++i) {
         if (!g_ringPrimed && g_ringFill >= 276u * kOversample) g_ringPrimed = true;
         if (!g_ringPrimed || g_ringFill == 0) {
             if (g_ringPrimed) ++g_stats.underflows;
             g_ringPrimed = false;
-            dst[i] = 0;
+            dst[2 * i] = dst[2 * i + 1] = 0;
             continue;
         }
-        const float s = (g_ringL[g_ringRead] + g_ringR[g_ringRead]) * kScale;
-        dst[i] = static_cast<std::int16_t>(s > 32767.0f ? 32767.0f : s < -32767.0f ? -32767.0f : s);
+        dst[2 * i] = pcm(g_ringL[g_ringRead]);
+        dst[2 * i + 1] = pcm(g_ringR[g_ringRead]);
         g_ringRead = (g_ringRead + 1u) & (kRingFrames - 1u);
         --g_ringFill;
     }
@@ -599,7 +604,7 @@ void report()
 
 void hdAudioActivated()
 {
-    g_stream = gba_mod_audio_stream_register_s16_mono(pullStream, nullptr);
+    g_stream = gba_mod_audio_stream_register_s16_stereo(pullStream, nullptr);
     if (g_stream != GBA_MOD_AUDIO_STREAM_INVALID) gba_mod_audio_stream_set_enabled(g_stream, 1);
 }
 
