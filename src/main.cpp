@@ -13,6 +13,15 @@
 #include "mod_runtime.h"
 #include "runtime_arm.h"
 
+#if defined(ROTK_LAUNCHER)
+#include <string>
+#include <vector>
+
+#include "launcher_boot.h"
+#endif
+
+extern "C" void (*g_dma_observer)(int channel, std::uint32_t src, std::uint32_t dst, std::uint32_t bytes);
+
 namespace {
 
 // PC engine services for ROTK. Each one moves a fixed GBA allocation into host RAM:
@@ -22,7 +31,9 @@ namespace {
 //   ...           main and overlay actor pools
 //   ...           game heap
 //
-// ROTK_PC_HEAP_MB=0 keeps the EWRAM heap. ROTK_PC_ACTORS=256 and ROTK_PC_OVERLAY_ACTORS=40 keep the
+// The player picks them on the launcher's Mods page (built-in package "rotk.pc", see
+// mods/rotk.pc.manifest.toml.in). Environment variables override the package for tests and scripts:
+// ROTK_PC_HEAP_MB=0 keeps the EWRAM heap, ROTK_PC_ACTORS=256 and ROTK_PC_OVERLAY_ACTORS=40 keep the
 // stock pools and queues.
 
 constexpr std::uint32_t kMemoryAddHeap = 0x08032E74u;
@@ -42,9 +53,7 @@ constexpr std::uint32_t kActorSize = 0x148u;               // sizeof(Actor)
 constexpr std::uint32_t kStockMainActors = 0x100u;
 constexpr std::uint32_t kStockOverlayActors = 0x28u;
 constexpr std::uint32_t kInfoBytes = 0x1000u;
-constexpr unsigned long kDefaultHeapMb = 32;
-constexpr unsigned long kDefaultMainActors = 1024;
-constexpr unsigned long kDefaultOverlayActors = 160;
+constexpr const char* kPackageId = "rotk.pc";
 constexpr const char* kHeapHookId = "rotk.pc-heap";
 constexpr const char* kPoolHookId = "rotk.pc-actor-pools";
 constexpr const char* kSortHookId = "rotk.pc-render-sort";
@@ -101,6 +110,16 @@ unsigned long envNumber(const char* name, unsigned long fallback)
     return value ? std::strtoul(value, nullptr, 10) : fallback;
 }
 
+// A PC setting: the environment variable when set, else the option of the enabled package feature,
+// else the stock value. Package options are only available after the launcher commits them.
+unsigned long pcSetting(const char* env, const char* feature, const char* option, unsigned long stock)
+{
+    if (const char* value = std::getenv(env)) return std::strtoul(value, nullptr, 10);
+    if (const char* value = gba_mod_option_value(kPackageId, feature, option))
+        return std::strtoul(value, nullptr, 10);
+    return stock;
+}
+
 std::uint32_t alignUp(std::uint32_t value, std::uint32_t alignment)
 {
     return (value + alignment - 1u) & ~(alignment - 1u);
@@ -111,9 +130,10 @@ PcLayout makeLayout()
     PcLayout layout;
     const unsigned long hostBytes =
         envNumber("GBARECOMP_HOST_RAM_MB", gba::kHostRamDefaultSize / (1024u * 1024u)) * 1024u * 1024u;
-    const unsigned long heapBytes = envNumber("ROTK_PC_HEAP_MB", kDefaultHeapMb) * 1024u * 1024u;
-    unsigned long mainActors = envNumber("ROTK_PC_ACTORS", kDefaultMainActors);
-    unsigned long overlayActors = envNumber("ROTK_PC_OVERLAY_ACTORS", kDefaultOverlayActors);
+    const unsigned long heapBytes = pcSetting("ROTK_PC_HEAP_MB", "large-memory", "heap-mb", 0) * 1024u * 1024u;
+    unsigned long mainActors = pcSetting("ROTK_PC_ACTORS", "actor-limits", "main-actors", kStockMainActors);
+    unsigned long overlayActors =
+        pcSetting("ROTK_PC_OVERLAY_ACTORS", "actor-limits", "overlay-actors", kStockOverlayActors);
     if (mainActors < kStockMainActors) mainActors = kStockMainActors;
     if (overlayActors < kStockOverlayActors) overlayActors = kStockOverlayActors;
     layout.actors = mainActors != kStockMainActors || overlayActors != kStockOverlayActors;
@@ -151,10 +171,11 @@ PcLayout makeLayout()
     return layout;
 }
 
+PcLayout g_layout;
+
 const PcLayout& layout()
 {
-    static const PcLayout instance = makeLayout();
-    return instance;
+    return g_layout;
 }
 
 void writeInfoBlock()
@@ -326,8 +347,6 @@ constexpr std::uint32_t kOamShadowB = 0x03004B80u;
 constexpr std::uint32_t kOamHalfBytes = 0x400u;
 constexpr std::uint32_t kOamAddress = 0x07000000u;
 constexpr std::uint32_t kHardwareObjects = 128u;
-constexpr unsigned long kDefaultExtraObjects = 896;
-
 struct ExtraObjects {
     std::uint32_t capacity = 0;
     std::uint32_t hardwareLimit = kHardwareObjects;  // OAM entries used before extra pages
@@ -338,25 +357,34 @@ struct ExtraObjects {
     bool lastPushExtra = false;        // the latest push went to an extra page
 };
 
+ExtraObjects g_extra;
+
 ExtraObjects& extraObjects()
 {
-    static ExtraObjects instance = [] {
-        ExtraObjects extra;
-        extra.capacity = static_cast<std::uint32_t>(envNumber("ROTK_PC_EXTRA_OBJECTS", kDefaultExtraObjects));
-        if (extra.capacity > 3800u) extra.capacity = 3800u;
-        // ROTK_PC_OAM_LIMIT (test only): send pieces past this many OAM entries to the extra pages.
-        // The picture must match an unlimited run, since extra pieces keep their order behind OAM.
-        extra.hardwareLimit = static_cast<std::uint32_t>(envNumber("ROTK_PC_OAM_LIMIT", kHardwareObjects));
-        if (extra.hardwareLimit < 1u || extra.hardwareLimit > kHardwareObjects) extra.hardwareLimit = kHardwareObjects;
-        if (extra.capacity != 0) {
-            for (auto& buffer : extra.pages)
-                for (auto& half : buffer) half = new std::uint8_t[extra.capacity * 8u]();
-            std::fprintf(stderr, "[rotk] sprite pieces: %u (128 OAM + %u extra)\n",
-                         kHardwareObjects + extra.capacity, extra.capacity);
-        }
-        return extra;
-    }();
-    return instance;
+    return g_extra;
+}
+
+// Sizes the extra pages from the "sprite-limits" feature (total pieces) or ROTK_PC_EXTRA_OBJECTS
+// (extra pieces). Runs before boot, so no frame is in flight.
+void configureExtraObjects()
+{
+    for (auto& buffer : g_extra.pages)
+        for (auto& half : buffer) delete[] half;
+    g_extra = ExtraObjects{};
+    const unsigned long total = pcSetting("ROTK_PC_MAX_SPRITES", "sprite-limits", "max-sprites", kHardwareObjects);
+    unsigned long capacity = total > kHardwareObjects ? total - kHardwareObjects : 0;
+    if (const char* value = std::getenv("ROTK_PC_EXTRA_OBJECTS")) capacity = std::strtoul(value, nullptr, 10);
+    if (capacity > 3800u) capacity = 3800u;
+    g_extra.capacity = static_cast<std::uint32_t>(capacity);
+    // ROTK_PC_OAM_LIMIT (test only): send pieces past this many OAM entries to the extra pages.
+    // The picture must match an unlimited run, since extra pieces keep their order behind OAM.
+    g_extra.hardwareLimit = static_cast<std::uint32_t>(envNumber("ROTK_PC_OAM_LIMIT", kHardwareObjects));
+    if (g_extra.hardwareLimit < 1u || g_extra.hardwareLimit > kHardwareObjects) g_extra.hardwareLimit = kHardwareObjects;
+    if (g_extra.capacity == 0) return;
+    for (auto& buffer : g_extra.pages)
+        for (auto& half : buffer) half = new std::uint8_t[g_extra.capacity * 8u]();
+    std::fprintf(stderr, "[rotk] sprite pieces: %u (128 OAM + %u extra)\n",
+                 kHardwareObjects + g_extra.capacity, g_extra.capacity);
 }
 
 int shadowBuffer(std::uint32_t shadow)
@@ -449,21 +477,45 @@ const std::uint8_t* pcExtraObjects(std::uint32_t* count)
     return extra.pages[extra.displayedBuffer][extra.displayedHalf];
 }
 
-void enablePcServices()
+// CPU boost: GBARECOMP_CPU_OVERCLOCK is read on the first emulated instruction, after this runs.
+void applyCpuBoost()
 {
+    if (std::getenv("GBARECOMP_CPU_OVERCLOCK")) return;
+    const char* speed = gba_mod_option_value(kPackageId, "cpu-boost", "speed");
+    if (!speed) return;
+#if defined(_WIN32)
+    _putenv_s("GBARECOMP_CPU_OVERCLOCK", speed);
+#else
+    setenv("GBARECOMP_CPU_OVERCLOCK", speed, 1);
+#endif
+}
+
+// Resolves every PC setting and enables the matching services. Runs as a mod reset callback, after
+// the launcher's package choices are committed and before the game boots. Mod activation disables
+// every entry hook first, so a feature that is off leaves the stock code running.
+void applyPcSettings()
+{
+    g_layout = makeLayout();
+    configureExtraObjects();
+    applyCpuBoost();
+    const bool extra = extraObjects().capacity != 0;
     gba_mod_set_function_hook_enabled(kHeapHookId, layout().heap);
     gba_mod_set_function_hook_enabled(kPoolHookId, layout().actors);
     gba_mod_set_function_hook_enabled(kSortHookId,
                                       layout().actors && envNumber("ROTK_PC_RENDER_SORT", 1) != 0);
-    const bool extra = extraObjects().capacity != 0;
     gba_mod_set_function_hook_enabled(kPushOamHookId, extra);
     gba_mod_set_function_hook_enabled(kHideOamHookId, extra);
     gba_mod_set_function_hook_enabled(kEndFrameHookId, extra);
+    gba::g_rom_read32_override = layout().actors ? pcQueueLiterals : nullptr;
+    g_dma_observer = extra ? pcObserveDma : nullptr;
+    gba::g_extra_obj_provider = extra ? pcExtraObjects : nullptr;
 }
 
-}  // namespace
+// Every package feature names a trusted plugin. The settings themselves are read in
+// applyPcSettings, so the plugins only need to exist.
+void featureActivated() {}
 
-extern "C" void (*g_dma_observer)(int channel, std::uint32_t src, std::uint32_t dst, std::uint32_t bytes);
+}  // namespace
 
 int main(int argc, char** argv)
 {
@@ -473,20 +525,23 @@ int main(int argc, char** argv)
     gba_mod_register_function_entry_plugin(kPushOamHookId, kPushOam, 1, pcPushOam);
     gba_mod_register_function_entry_plugin(kHideOamHookId, kHideOamEntry, 1, pcHideOamEntry);
     gba_mod_register_function_entry_plugin(kEndFrameHookId, kEndFrame, 1, pcEndFrame);
-#if defined(GBARECOMP_ENABLE_MODS)
-    // Mod activation clears every entry hook before its reset callbacks run.
-    gba_mod_register_reset_callback(enablePcServices);
-#endif
-    enablePcServices();
-    if (layout().actors) gba::g_rom_read32_override = pcQueueLiterals;
-    if (extraObjects().capacity != 0) {
-        g_dma_observer = pcObserveDma;
-        gba::g_extra_obj_provider = pcExtraObjects;
-    }
+    for (const char* plugin : {"rotk.pc.large-memory", "rotk.pc.actor-limits", "rotk.pc.sprite-limits",
+                               "rotk.pc.cpu-boost"})
+        gba_mod_register_activation_plugin(plugin, featureActivated);
+    gba_mod_register_reset_callback(applyPcSettings);
 
     gbarecomp::RunOptions options;
     options.builtin_game_name = ROTK_GAME_NAME;
     options.builtin_rom_sha1 = ROTK_ROM_SHA1;
     options.builtin_rom_crc32 = ROTK_ROM_CRC32;
+    options.mod_game_id = ROTK_MOD_GAME_ID;
+#if defined(ROTK_LAUNCHER)
+    std::vector<std::string> args(argv, argv + argc);
+    if (rotk_launcher_preboot(args, options)) return 0;  // the player quit the launcher
+    std::vector<char*> launchArgs;
+    for (std::string& arg : args) launchArgs.push_back(arg.data());
+    return gbarecomp::run_game(static_cast<int>(launchArgs.size()), launchArgs.data(), options);
+#else
     return gbarecomp::run_game(argc, argv, options);
+#endif
 }

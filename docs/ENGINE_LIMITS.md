@@ -86,6 +86,20 @@ entry the same way the skipped return would.
 `ROTK_PC_STRESS_SPAWN=N` asks the Expanded mod's debug lab to spawn N orc archers around the player. With
 400 the game ran 10,000 frames without errors, with 260+ actors queued for drawing at once.
 
+## Settings
+
+| Launcher feature (Mods page) | Option | Default | Environment override |
+| --- | --- | --- | --- |
+| Large game memory | Heap size, 4 to 48 MB | on, 32 | `ROTK_PC_HEAP_MB` (0 = stock) |
+| Bigger actor limits | Actors 256 to 2,048, overlay 40 to 320 | on, 1,024 / 160 | `ROTK_PC_ACTORS`, `ROTK_PC_OVERLAY_ACTORS`, `ROTK_PC_RENDER_SORT=0` |
+| More sprites on screen | Sprite pieces 256 to 2,048 | on, 1,024 | `ROTK_PC_MAX_SPRITES`, `ROTK_PC_EXTRA_OBJECTS` |
+| CPU boost | x2, x4, x8, x16 | on, x4 | `GBARECOMP_CPU_OVERCLOCK` (1 = stock) |
+
+The package is `mods/rotk.pc.manifest.toml.in`, configured per target with that ROM's SHA-1 and placed
+next to the executable. `src/main.cpp` resolves every setting in a mod reset callback, after the
+launcher commits and before the game boots. With all features off (or in netplay, which skips mods)
+the frame hashes match the original. Test-only: `ROTK_PC_OAM_LIMIT`, `ROTK_PC_STRESS_SPAWN`.
+
 ## Next
 
 1. Widescreen through the framework's expanded-view renderer.

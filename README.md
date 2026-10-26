@@ -16,6 +16,13 @@ repository or its releases.
 | Expanded PC edition (`--target expanded`) | The mod built from `game/` against your `rotk.gba` | Every mod version from here on is PC-only |
 | GBA edition | [ROTK-Expanded-experimental](https://github.com/Lillypad-14/ROTK-Expanded-experimental) | The finished GBA-compatible mod. It also runs here as a ROM |
 
+## Launcher and options
+
+The game opens a launcher first (GBARecomp's recomp-ui). Its **Mods** page lists the built-in
+"ROTK PC Enhancements" package. Each enhancement below can be switched off or tuned there, and with all
+of them off the game runs exactly like the original. Environment variables override the launcher for
+tests and scripts. Headless runs (`--frames`, `--no-window`, `--tcp`) skip the launcher.
+
 ## What is already different from a GBA
 
 - 64 MiB of extra RAM at `0x12000000` (`GBARECOMP_HOST_RAM_MB`), and the game heap lives there (32 MiB by

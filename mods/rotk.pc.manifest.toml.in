@@ -1,0 +1,122 @@
+# Built-in package for the PC enhancements. CMake fills in the target ROM and copies it to
+# <exe>/mods/packages/rotk.pc/<version>/manifest.toml. The features are read by src/main.cpp.
+format_version = 1
+id = "rotk.pc"
+version = "1.0.0"
+name = "ROTK PC Enhancements"
+author = "ROTK Recompiled"
+description = "Lifts GBA limits. With every feature off the game runs exactly like the original."
+license = "MIT"
+resolver = "declarative"
+save_compatibility = "shared"
+
+[[target]]
+game_id = "@ROTK_MOD_GAME_ID@"
+rom_sha1 = "@ROTK_ROM_SHA1@"
+
+[[feature]]
+id = "large-memory"
+name = "Large game memory"
+description = "Moves the game's heap from 246 KB of GBA work RAM into PC memory, so busy scenes and mods cannot run out."
+group = "Engine"
+default_enabled = true
+
+[[option]]
+feature = "large-memory"
+id = "heap-mb"
+label = "Heap size (MB)"
+type = "integer"
+default = 32
+min = 4
+max = 48
+step = 4
+
+[[feature]]
+id = "actor-limits"
+name = "Bigger actor limits"
+description = "Room for more enemies, projectiles and effects at once (GBA: 256 actors, 40 overlay). Also fixes draw order past 256 actors."
+group = "Engine"
+default_enabled = true
+
+[[option]]
+feature = "actor-limits"
+id = "main-actors"
+label = "Actors"
+type = "integer"
+default = 1024
+min = 256
+max = 2048
+step = 64
+
+[[option]]
+feature = "actor-limits"
+id = "overlay-actors"
+label = "Overlay actors"
+type = "integer"
+default = 160
+min = 40
+max = 320
+step = 8
+
+[[feature]]
+id = "sprite-limits"
+name = "More sprites on screen"
+description = "Draws sprite pieces past the GBA's 128, so crowds stop disappearing."
+group = "Engine"
+default_enabled = true
+
+[[option]]
+feature = "sprite-limits"
+id = "max-sprites"
+label = "Sprite pieces"
+type = "integer"
+default = 1024
+min = 256
+max = 2048
+step = 128
+
+[[feature]]
+id = "cpu-boost"
+name = "CPU boost"
+description = "Gives the game more CPU time per frame so busy fights stop slowing down. Music and game speed are unchanged."
+group = "Performance"
+default_enabled = true
+
+[[option]]
+feature = "cpu-boost"
+id = "speed"
+label = "Speed"
+type = "choice"
+default = "4"
+
+[[option.choice]]
+value = "2"
+label = "x2"
+
+[[option.choice]]
+value = "4"
+label = "x4"
+
+[[option.choice]]
+value = "8"
+label = "x8"
+
+[[option.choice]]
+value = "16"
+label = "x16"
+
+[[plugin]]
+feature = "large-memory"
+id = "rotk.pc.large-memory"
+
+[[plugin]]
+feature = "actor-limits"
+id = "rotk.pc.actor-limits"
+
+[[plugin]]
+feature = "sprite-limits"
+id = "rotk.pc.sprite-limits"
+
+[[plugin]]
+feature = "cpu-boost"
+id = "rotk.pc.cpu-boost"
