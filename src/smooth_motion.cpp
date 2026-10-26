@@ -400,6 +400,12 @@ void smoothSetDisplayedBuffer(int buffer)
     g.displayed = buffer;
 }
 
+int smoothBgShift(int bg, int axis)
+{
+    if (!g.enabled || !g.interpolate || bg < 0 || bg > 3 || axis < 0 || axis > 1) return 0;
+    return g.bgOffset[bg][axis];
+}
+
 const std::uint8_t* smoothAdjustExtra(const std::uint8_t* pieces, std::uint32_t count)
 {
     if (!g.interpolate || !pieces || count == 0) return pieces;

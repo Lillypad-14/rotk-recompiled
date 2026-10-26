@@ -52,8 +52,6 @@ pixel-identical to the original.
 ## Known gaps
 
 - Particles and parallax were added after the first in-game test and have not been seen in-game yet.
-- Widescreen draws its margins from the cell maps at the tick's camera; the shifted world layers may
-  disagree with them by the half step. Test with widescreen off first.
 - Without the CPU boost the next tick is often not ready in time, and those frames repeat as before.
 
 Options: "Smooth particles" and "Smooth parallax background" (both on). Env overrides:

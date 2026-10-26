@@ -90,7 +90,8 @@ add_executable(RotkAudioRateCheck EXCLUDE_FROM_ALL tests/audio_rate_test.cpp)
 target_include_directories(RotkAudioRateCheck PRIVATE "${SDL2_INCLUDE_DIR}")
 target_link_libraries(RotkAudioRateCheck PRIVATE "${SDL2_LIBRARY}")
 
-add_executable(RotkWidescreenEdgeCheck EXCLUDE_FROM_ALL tests/widescreen_edge_test.cpp src/widescreen.cpp $<TARGET_OBJECTS:RotkCart>)
+add_executable(RotkWidescreenEdgeCheck EXCLUDE_FROM_ALL tests/widescreen_edge_test.cpp src/widescreen.cpp
+    src/smooth_motion.cpp src/transparency.cpp $<TARGET_OBJECTS:RotkCart>)
 target_include_directories(RotkWidescreenEdgeCheck PRIVATE src ${ROTK_HOST_INCLUDES})
 target_link_gbarecomp_runtime_stack(RotkWidescreenEdgeCheck)
 gbarecomp_target_link_host_stack(RotkWidescreenEdgeCheck PRIVATE)

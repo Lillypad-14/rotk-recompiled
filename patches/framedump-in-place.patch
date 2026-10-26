@@ -1,0 +1,20 @@
+--- a/src/runtime/runtime.cpp
++++ b/src/runtime/runtime.cpp
+@@ -4276,6 +4276,17 @@ int run_game(int argc, char** argv, const RunOptions& opts) {
+                     }
+                     present_live_frame();
+                 }
++                // Framedump also covers present-in-place, the default windowed
++                // path and the only one diagnostic replays run on.
++                if (framedump_dir && present_frame && frame >= framedump_start &&
++                    framedump_written < framedump_max) {
++                    char p[512];
++                    std::snprintf(p, sizeof(p), "%s/f_%06llu.png", framedump_dir,
++                                  static_cast<unsigned long long>(frame));
++                    write_png(p, live_fb.data(), ppu.render_width(),
++                              ppu.render_height());
++                    if (++framedump_written >= framedump_max) host_quit = true;
++                }
+                 if (phase_active) fp_t2 = FramePhaseRing::now_ns();
+                 drain_host_audio();
+                 // Windowed present-in-place stays inside one step_once() for

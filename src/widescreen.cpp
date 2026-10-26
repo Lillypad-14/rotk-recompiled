@@ -9,12 +9,13 @@
 #include "mod_function_hooks.h"
 #include "mod_runtime.h"
 #include "runtime_arm.h"
+#include "smooth_motion.h"
 
 // How ROTK draws a level (see docs/WIDESCREEN.md):
 //
 // - BG3 and BG2 are the world layers. Each frame the game copies the visible 31x21 tiles into their
 //   screenblocks; the hardware scroll only adds the 0..7 pixel fine offset. VRAM column 0 is world
-//   tile camera.x >> 3, row 0 is world tile camera.y >> 3.
+//   tile tileCamera.x >> 3, row 0 is world tile tileCamera.y >> 3.
 // - The whole level stays in EWRAM as metatiles: per layer a u16 cell map (one cell per 4x4 tiles)
 //   and a block table of 16 tilemap entries per cell value.
 // - BG1 is a repeating 256x256 parallax pattern that wraps on its own.
@@ -35,7 +36,15 @@ constexpr std::uint16_t kMaxViewWidth = 400;
 
 constexpr std::uint32_t kSceneCurrentId = 0x030041B0u;   // g_SceneCurrent.id
 constexpr std::uint32_t kSceneGameplay = 1u;
+constexpr std::uint32_t kSceneInGameDialog = 0x11u;     // overlay on the gameplay layers
 constexpr std::uint32_t kCameraPositions = 0x030020F8u;  // Vector2Int g_CameraPositions[2]
+// gfx_updatePlayerCameraScroll stores the clamped camera in three per-player arrays and the fine
+// scroll of both world layers before the commit call. The tile builder (0x0800D3CC) and the
+// screenblock DMA (0x0800D590) read only kTileCameras; staging starts after it, at 0x03005890.
+constexpr std::uint32_t kTileCameras = 0x03005880u;      // Vector2Int[2]
+constexpr std::uint32_t kTileCameraCopies = 0x03005FA0u;  // Vector2Int[2], same values
+constexpr std::uint32_t kBg3FineScrollX = 0x03005FB8u;   // u16, active player's camera.x & 7
+constexpr std::uint32_t kBg2FineScrollX = 0x0300211Eu;   // u16, likewise for BG2
 constexpr std::uint32_t kActivePlayerIndex = 0x03003F59u;  // g_PlayerGlobals.activePlayerIndex
 constexpr std::uint32_t kWorldWidthTiles = 0x03005F90u;
 constexpr std::uint32_t kWorldHeightTiles = 0x03005F88u;
@@ -45,7 +54,6 @@ constexpr std::uint32_t kBg3Blocks = 0x03005FBCu;
 constexpr std::uint32_t kBg2CellMap = 0x0300586Cu;
 constexpr std::uint32_t kBg2Blocks = 0x03005FC0u;
 constexpr std::uint32_t kVramBase = 0x06000000u;
-constexpr std::uint32_t kFineScrollX = 0x03005FB8u;      // u16, camera.x & 7 of the active player
 constexpr std::uint32_t kCallViaSl = 0x0804E0B8u;        // _call_via_sl
 constexpr std::uint32_t kCameraCommitReturn = 0x0803EC49u;  // its call in gfx_updatePlayerCameraScroll
 constexpr const char* kCameraHookId = "rotk.pc.widescreen-camera";
@@ -121,11 +129,12 @@ int floorDiv8(int value)
     return value >= 0 ? value >> 3 : -((7 - value) >> 3);
 }
 
+// The camera the screenblock DMA copies from, so the margins continue exactly the tiles in VRAM.
 void latchCamera()
 {
     const std::uint32_t player = bus_read_u8(kActivePlayerIndex) & 1u;
-    g_latchedCameraX = static_cast<int>(bus_read_u32(kCameraPositions + player * 8u));
-    g_latchedCameraY = static_cast<int>(bus_read_u32(kCameraPositions + player * 8u + 4u));
+    g_latchedCameraX = static_cast<int>(bus_read_u32(kTileCameras + player * 8u));
+    g_latchedCameraY = static_cast<int>(bus_read_u32(kTileCameras + player * 8u + 4u));
 }
 
 extern "C" int rotkWorldTile(int bg, int hardwareX, int screenY, std::uint16_t* entry)
@@ -133,8 +142,10 @@ extern "C" int rotkWorldTile(int bg, int hardwareX, int screenY, std::uint16_t* 
     if (bg == 1) return gba::kWsTilemapKeepWrapped;
     if (!g_frame.world || (bg != 2 && bg != 3)) return gba::kWsTilemapUnavailable;
     WorldLayer& layer = g_frame.layers[bg];
-    const int tileX = (g_frame.cameraX >> 3) + floorDiv8(hardwareX + layer.hofs);
-    const int tileY = (g_frame.cameraY >> 3) + floorDiv8(screenY + layer.vofs);
+    // The renderer picks the pixel within the tile with the line's scroll, which smooth motion
+    // shifts on in-between frames; the tile must follow the same scroll.
+    const int tileX = (g_frame.cameraX >> 3) + floorDiv8(hardwareX + layer.hofs + smoothBgShift(bg, 0));
+    const int tileY = (g_frame.cameraY >> 3) + floorDiv8(screenY + layer.vofs + smoothBgShift(bg, 1));
     if (tileX < 0 || tileY < 0 || tileX >= g_frame.worldTilesX || tileY >= g_frame.worldTilesY)
         return gba::kWsTilemapUnavailable;
     if (layer.cachedX == tileX && layer.cachedY == tileY && layer.cachedScanline == screenY) {
@@ -152,9 +163,11 @@ extern "C" int rotkWorldTile(int bg, int hardwareX, int screenY, std::uint16_t* 
 }
 
 // gfx_updatePlayerCameraScroll clamps the active player's camera to [0, worldWidth - 240], stores it
-// and then calls the scroll commit through _call_via_sl. At that call the camera is re-clamped to
-// [left margin, worldWidth - 240 - right margin], which equals clamping the unclamped camera to the
-// wide view. Levels narrower than the wide view are centred.
+// with both world layers' fine scroll and then, for the active player only, calls the scroll commit
+// through _call_via_sl. At that call the camera is re-clamped to [left margin, worldWidth - 240 -
+// right margin], which equals clamping the unclamped camera to the wide view. Levels narrower than
+// the wide view are centred. Every copy the game just stored gets the clamped x: the tile builder
+// and the DMA read kTileCameras, so a stale copy there shows tiles for the unclamped camera.
 int clampCameraToView(std::uint32_t, int, ArmCpuState* cpu)
 {
     if (cpu->R[14] != kCameraCommitReturn || !g_ws_active ||
@@ -168,11 +181,12 @@ int clampCameraToView(std::uint32_t, int, ArmCpuState* cpu)
     int clamped = camera < low ? low : camera > high ? high : camera;
     if (high < low) clamped = (low + high) / 2;
     if (clamped == camera) return 0;
-    bus_write_u32(kCameraPositions + player * 8u, static_cast<std::uint32_t>(clamped));
-    // 0x03005880 is the BG3 tile staging buffer, NOT another camera array.
-    // Writing the clamp there replaces four tile entries with a camera value
-    // exactly when the player reaches either horizontal view boundary.
-    bus_write_u16(kFineScrollX, static_cast<std::uint16_t>(clamped & 7));
+    const std::uint32_t value = static_cast<std::uint32_t>(clamped);
+    bus_write_u32(kCameraPositions + player * 8u, value);
+    bus_write_u32(kTileCameras + player * 8u, value);
+    bus_write_u32(kTileCameraCopies + player * 8u, value);
+    bus_write_u16(kBg3FineScrollX, static_cast<std::uint16_t>(clamped & 7));
+    bus_write_u16(kBg2FineScrollX, static_cast<std::uint16_t>(clamped & 7));
     return 0;
 }
 
@@ -287,11 +301,36 @@ int noteFxBuildQueues(std::uint32_t, int, ArmCpuState*)
     return 0;
 }
 
+// ROTK_PC_TRACE_MARGINS: the margins are only seamless while the cell-map lookup reproduces the
+// game's own screenblocks. Reports frames where it does not for the visible 30x20 tiles.
+void traceMarginSource(const std::uint8_t* io, unsigned long long frame)
+{
+    for (int bg = 2; bg <= 3; ++bg) {
+        const std::uint32_t map = kVramBase + ((ioHalf(io, 0x08 + bg * 2) >> 8) & 31u) * 0x800u;
+        const WorldLayer& layer = g_frame.layers[bg];
+        int mismatches = 0, firstColumn = -1, firstRow = -1;
+        for (int row = 0; row < 20; ++row)
+            for (int column = 0; column < 30; ++column) {
+                const int tileX = (g_frame.cameraX >> 3) + column, tileY = (g_frame.cameraY >> 3) + row;
+                const std::uint32_t cell = static_cast<std::uint32_t>((tileY >> 2) * static_cast<int>(g_frame.cellsPerRow) + (tileX >> 2));
+                const std::uint16_t block = bus_read_u16(layer.cellMap + cell * 2u);
+                const std::uint16_t want = bus_read_u16(layer.blocks + block * 32u + static_cast<std::uint32_t>((tileY & 3) * 8 + (tileX & 3) * 2));
+                if (want == bus_read_u16(map + static_cast<std::uint32_t>(row * 32 + column) * 2u)) continue;
+                if (!mismatches++) { firstColumn = column; firstRow = row; }
+            }
+        if (mismatches)
+            std::fprintf(stderr, "[rotk] widescreen margins: frame %llu BG%d %d/600 tiles differ from VRAM (first %d,%d), camera %d,%d\n",
+                         frame, bg, mismatches, firstColumn, firstRow, g_frame.cameraX, g_frame.cameraY);
+    }
+}
+
 void widescreenFrame(const gbarecomp::ExtendedViewFrameInfo* info)
 {
     const std::uint8_t* io = info->io;
     const std::uint16_t dispcnt = io ? ioHalf(io, 0) : 0;
-    g_frame.world = io && bus_read_u32(kSceneCurrentId) == kSceneGameplay && (dispcnt & 7u) == 0 &&
+    const std::uint32_t scene = bus_read_u32(kSceneCurrentId);
+    // In-game dialogue draws its box over the frozen gameplay layers: keep the wide view.
+    g_frame.world = io && (scene == kSceneGameplay || scene == kSceneInGameDialog) && (dispcnt & 7u) == 0 &&
                     (dispcnt & 0x0C00u) == 0x0C00u;
     gba::g_ws_pillarbox = g_frame.world ? 0 : 1;
     gba::g_ws_tilemap_provider = g_frame.world ? rotkWorldTile : nullptr;
@@ -311,6 +350,12 @@ void widescreenFrame(const gbarecomp::ExtendedViewFrameInfo* info)
     gba::g_ws_bg_x_provider = g_frame.hud ? rotkHudBgX : nullptr;
     gba::g_ws_bg_x_provider_layers = 1u << 0;
     gba::g_ws_obj_attr_x_provider = g_frame.hud ? rotkHudObjX : nullptr;
+    // A state load or reset jumps the frame count: until the game's next DMA the latch is stale, but
+    // the loaded tile camera matches the loaded VRAM.
+    // (A live resize republishes the same frame.)
+    static std::uint64_t lastFrame = 0;
+    if (info->frame_count != lastFrame + 1 && info->frame_count != lastFrame) latchCamera();
+    lastFrame = info->frame_count;
     if (!g_frame.world) return;
     g_frame.cameraX = g_latchedCameraX;
     g_frame.cameraY = g_latchedCameraY;
@@ -327,6 +372,8 @@ void widescreenFrame(const gbarecomp::ExtendedViewFrameInfo* info)
         g_frame.layers[bg].hofs = ioHalf(io, 0x10 + bg * 4) & 0x1FF;
         g_frame.layers[bg].vofs = ioHalf(io, 0x12 + bg * 4) & 0x1FF;
     }
+    static const bool traceMargins = std::getenv("ROTK_PC_TRACE_MARGINS") != nullptr;
+    if (traceMargins) traceMarginSource(io, info->frame_count);
 }
 
 void widescreenInit(std::uint32_t, std::uint32_t)

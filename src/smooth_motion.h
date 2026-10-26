@@ -28,6 +28,10 @@ void smoothEndFrame(int buffer);
 // The buffer the VBlank handler last copied to OAM.
 void smoothSetDisplayedBuffer(int buffer);
 
+// Pixels the current presented frame adds to `bg`'s scroll on `axis` (0 = x, 1 = y): the halfway
+// shift on an interpolated frame, otherwise 0. Valid while that frame's scanlines are drawn.
+int smoothBgShift(int bg, int axis);
+
 // Moves extra pieces (OAM format, `count` entries of 8 bytes) like hardware OAM on an interpolated
 // frame. Returns the pointer to draw from.
 const std::uint8_t* smoothAdjustExtra(const std::uint8_t* pieces, std::uint32_t count);

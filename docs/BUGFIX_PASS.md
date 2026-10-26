@@ -6,6 +6,8 @@ This pass addresses widescreen map-edge corruption and HD-audio starvation click
 
 The horizontal camera clamp wrote a supposed second camera value to `0x03005880 + player * 8`. That address is actually the BG3 tile staging buffer. On a clamp it replaced tilemap entries with the camera coordinate. The camera still clamps, but the extra staging-buffer write is removed.
 
+Correction (later the same day): 0x03005880 is the tile camera the builder and screenblock DMA read; staging starts at 0x03005890. Removing the write caused the map-edge misalignment it was meant to fix. See the polish pass in [WIDESCREEN.md](WIDESCREEN.md).
+
 `RotkWidescreenEdgeCheck` exercises the registered hook against a real bus and canary tile entries, at both horizontal boundaries for both camera slots and five view margins. The preservation assertion failed before the correction and passes afterward. It also checks margin tile lookup and invalidation across scanlines/frames.
 
 Adjacent margin pixels now reuse their metatile lookup within one scanline. The cache is invalidated across scanlines and every published frame, keeping live tile changes visible. This removes redundant memory reads; no FPS improvement is claimed from the available measurements.
