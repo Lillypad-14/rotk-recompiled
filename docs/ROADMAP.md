@@ -29,3 +29,20 @@ Larger sprite/effect capacity needs a renderer and submission path that can repr
 
 Once a playable route and service replacement are qualified, investigate larger actor pools, heavier spell effects, wider views, more flexible interfaces, and host storage.
 Keep changes to gameplay timing and simulation explicit, with reproducible fight scenarios and saved-state checks. These enhancements are not claimed by the initial boot experiment.
+
+## 6. Visual upgrades beyond the GBA (ideas, 2026-10-26)
+
+Each would be a launcher option in the rotk.pc package. In suggested order after the HD audio mixer:
+
+1. 60 fps motion: the game updates about every 2.2 vblanks; draw in-between frames by interpolating
+   actor and camera positions on the host. Gameplay timing stays unchanged.
+2. More effects on screen: raise the effect and particle pool caps (and the mod's effect cap) now that
+   actor and sprite limits are gone.
+3. Smooth rotation and scaling: the framework's higher internal resolution for affine graphics.
+4. Real transparency: per-sprite alpha in the host renderer instead of the GBA's single blend mode
+   (soft shadows, auras, translucent wraiths without flicker).
+5. More colours: per-level colour grading or lighting tints beyond 15-bit, 16-colour palettes.
+6. Overlay layers: weather, fog or vignettes through the framework's screen overlay, without using the
+   game's four background layers.
+7. Screen filters: CRT, LCD grid or smooth upscaling.
+8. Sharper HUD and text drawn by the host at full resolution.
