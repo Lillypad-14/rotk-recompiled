@@ -32,6 +32,7 @@ FRAMEWORK_PATCHES = [
     ROOT / "patches/hot-tick.patch",
     ROOT / "patches/yield-fast-path.patch",
     ROOT / "patches/framedump-in-place.patch",
+    ROOT / "patches/direct-ram-guards.patch",
 ]
 
 # recomp-ui (launcher) patches, applied the same way to external/recomp-ui.

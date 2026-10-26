@@ -80,3 +80,24 @@ Both fast-path snapshots matched the baseline byte for byte except for the eight
 The expanded focused test checks HALT, matching/unmatched debug breakpoints, mutable-code hook yields and VBlank deferral inside nested IRQs in addition to DMA/IRQ behavior. Native multiplayer session tests pass. Both stock and Expanded executables compile. The build wrapper's dependency staging encountered a locked DLL in the running game instance; that instance was not stopped or modified.
 
 The final normal movement replay retained image `8ace83e3f549df670bbcf5ba8c5e6aae88039887f6e8aa4b85fb360092e81bb2`, with zero missing frames and zero audio-stream underflows. Under the concurrent load it measured 59.349 Hz, three long gaps and 64 work-budget overruns. The previous build was also rechecked under that load: 59.166 Hz, 4 long gaps and 76 overruns. These loaded runs do not supersede the earlier isolated qualification or establish a normal-gameplay regression.
+
+## Direct live RAM guards (2026-10-26)
+
+The CPU-side patch `patches/direct-ram-guards.patch` binds stable EWRAM/IWRAM backing pointers when the active bus changes. Ordinary contiguous RAM instruction checks read those live bytes directly instead of calling the mapper callback. Wrapped instructions, nonstandard mappings and replacement callbacks retain the established code-view path. No instruction bytes or match decisions are cached: self-modifying writes remain visible on the next check. The generated cartridge code, graphics code and guest timing are unchanged by this patch.
+
+`RotkCodeViewCheck` now compares guard results against the existing code view across RAM mirrors and wrap boundaries, verifies live writes through aliases, switches between distinct buses, checks callback replacement/null callbacks and masked instructions, and exercises both direct and callback routes. Focused timing/yield and native multiplayer session tests pass. A same-process two-million-check measurement took 4.208 ms through the direct route and 6.267 ms through the callback route. This measures guard overhead, not whole-game FPS.
+
+The existing 1,800-frame crowd-action workload was repeated with Claude's widescreen fixes already present in both builds. No separate game instance was found at baseline. Samples exclude 120 warm-up frames:
+
+| Build/sample | Present Hz | Long gaps | Work-budget overruns |
+| --- | --- | --- | --- |
+| Before, first | 44.366 | 371 | 1,335 |
+| Direct guards, first | 59.647 | 0 | 22 |
+| Before, repeat | 59.672 | 0 | 19 |
+| Direct guards, repeat | 59.653 | 1 | 14 |
+
+The repeated reference recovered almost the same cadence as the new build, so the large first-pair FPS difference is not attributed to this patch. Host conditions remain variable. Both direct runs and the repeated reference match the first reference snapshot byte for byte except the eight-byte host-seconds field of the inactive RTC. Their image SHA-256 is `dba12c453ed3b4f68ad8981ca46c6d8b1086702f65c095f6b7157db704590c3d`; compare within this pass because the widescreen fixes changed the earlier image. All four runs have zero skipped/repeated guest frames, one HD-stream underflow, and unchanged NOT_STATIC coverage: three RAM misses and 243,569 interpreted instructions. This optimization does not resolve those misses or establish zero-drop/audio qualification.
+
+The initial post-build 1,800-frame normal movement replay measured 57.612 Hz, 37 long gaps, 214 work-budget overruns and 0 missing frames. It reported zero HD-stream underflows/dropped frames and unchanged NOT_STATIC coverage. Both stock and Expanded builds completed through the normal build wrapper, including patch application and dependency staging.
+
+The normal replay was subsequently checked on the reference build (57.876 Hz, 22 long gaps, 193 work-budget overruns) and repeated on direct guards (59.257 Hz, seven long gaps, 51 overruns). Both had zero missing frames and zero HD-stream underflows/dropped frames. Their snapshots match outside inactive RTC seconds, and their final image is `8287b05f4c32ea8148ccbf55a1f1c39aaedf5d7daef5ffac213ec96a15c70cf1`. The reference also exhibits timing spikes; these variable samples do not establish a consistent whole-game improvement or a zero-drop result. The new normal gameplay image was inspected.

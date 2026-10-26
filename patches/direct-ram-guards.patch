@@ -1,0 +1,65 @@
+--- a/src/armv4t/runtime_arm.cpp
++++ b/src/armv4t/runtime_arm.cpp
+@@ -1074,6 +1074,19 @@
+     for (auto& cached : g_native_ram_cache) cached = {};
+ }
+ 
++namespace {
++RuntimeRamCodeView g_guard_view_owner = nullptr;
++const uint8_t* g_guard_ewram = nullptr;
++const uint8_t* g_guard_iwram = nullptr;
++}
++
++extern "C" void runtime_bind_native_ram_guard_views(const uint8_t* ewram,
++                                                     const uint8_t* iwram) {
++    g_guard_view_owner = g_runtime_ram_code_view;
++    g_guard_ewram = ewram;
++    g_guard_iwram = iwram;
++}
++
+ extern "C" int runtime_native_ram_instruction_matches(uint32_t pc,
+     uint32_t opcode, uint32_t size) {
+     return runtime_native_ram_instruction_matches_masked(pc,opcode,size,0xFFFFFFFFu);
+@@ -1082,7 +1095,17 @@
+ extern "C" int runtime_native_ram_instruction_matches_masked(uint32_t pc,
+     uint32_t opcode, uint32_t size, uint32_t mask) {
+     if (!g_runtime_ram_code_view || (size != 2u && size != 4u)) return 0;
+-    const auto* bytes = g_runtime_ram_code_view(pc, size);
++    const uint8_t* bytes = nullptr;
++    if (g_runtime_ram_code_view == g_guard_view_owner) {
++        const uint32_t region = pc >> 24;
++        if (region == 2u && g_guard_ewram && (pc & 0x3ffffu) <= 0x40000u - size)
++            bytes = g_guard_ewram + (pc & 0x3ffffu);
++        else if (region == 3u && g_guard_iwram && (pc & 0x7fffu) <= 0x8000u - size)
++            bytes = g_guard_iwram + (pc & 0x7fffu);
++    }
++    // Keep the mapper/scratch behavior for wrapped and nonstandard views.
++    // These pointers expose live bytes: no opcode or match result is cached.
++    if (!bytes) bytes = g_runtime_ram_code_view(pc, size);
+     if (!bytes) return 0;
+     // Only two instruction widths are legal. Spell out the little-endian
+     // loads so this per-instruction guard does not retain a variable shift
+--- a/src/armv4t/runtime_arm.h
++++ b/src/armv4t/runtime_arm.h
+@@ -214,6 +214,10 @@
+ // The byte view is observational: no bus read, open-bus update or cycle charge.
+ typedef const uint8_t* (*RuntimeRamCodeView)(uint32_t address, uint32_t size);
+ extern RuntimeRamCodeView g_runtime_ram_code_view;
++// Optional stable live backing arrays for ordinary GBA RAM. Rebind together
++// with the active bus; replacing the code-view callback disables this shortcut.
++void runtime_bind_native_ram_guard_views(const uint8_t* ewram,
++                                         const uint8_t* iwram);
+ typedef struct RuntimeNativeRamTemplate {
+     const uint8_t* bytes;
+     uint32_t size;
+--- a/src/runtime/runtime_bus_bridge.cpp
++++ b/src/runtime/runtime_bus_bridge.cpp
+@@ -281,6 +281,8 @@
+         }
+         return g_active_bus->native_code_view(address, size);
+     };
++    runtime_bind_native_ram_guard_views(bus ? bus->ewram_ptr() : nullptr,
++                                       bus ? bus->iwram_ptr() : nullptr);
+     if (bus) {
+         bus->bind_wait_table(&g_runtime_waits);
+     } else if (gba::GbaBus* owner = gba::GbaBus::wait_table_owner()) {
