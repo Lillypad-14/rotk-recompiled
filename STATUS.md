@@ -63,6 +63,17 @@ recompiles `rotk/build/rotk_hack.gba` (32 MiB) with the stock roots plus the 918
 | ROM coverage | 22 ROM misses on the first run, 0 after adding them as roots; 233 guest fps headless |
 | Remaining misses | 21 IWRAM entries (self-modifying stock engine code, mostly the sound mixer); about 160 M interpreted instructions per 8,800 frames |
 
+## Actor and sprite limits (2026-10-26)
+
+| Check | Result |
+| --- | --- |
+| Vanilla first-map, 7,500 frames, 1,024/160 pools, host sort, extra sprites | Frame hash `4580a193...`, identical to stock |
+| Expanded route, 8,800 frames | Frame hash `beefab5f...`, identical to before |
+| `ROTK_PC_OAM_LIMIT=8` on both routes and a 400-enemy stress frame | Identical frame hashes, up to 128 pieces in the extra path |
+| `ROTK_PC_STRESS_SPAWN=400`, 10,000 frames | No errors, 260+ actors queued for drawing |
+
+Not measured yet: frame cost in a big fight.
+
 ## Next milestone
 
 Extend the first-map route with movement and combat, then compare it with mGBA. Investigate dispatch coverage using reviewed metadata and framework source changes, preserving a faithful reference build. Follow [the roadmap](docs/ROADMAP.md) before attempting Expanded support or engine replacement.

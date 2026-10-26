@@ -52,9 +52,42 @@ reachable, so the faithful build stays available for comparison.
 - Observed: the 7,500-frame first-map route reaches the same gameplay scene at x1 and x4. Not yet measured:
   lag frames in a busy fight (needs a fight route or the Expanded ROM's arena).
 
+## Actor pools (`src/main.cpp`)
+
+- A hook on `pool_buildFreeList` (0x080304E0) builds the main and overlay actor pools in host RAM
+  (default 1,024 and 160 slots, `ROTK_PC_ACTORS`, `ROTK_PC_OVERLAY_ACTORS`; 256/40 keeps the stock pools)
+  and repoints `g_ActorPoolMain`/`g_ActorPoolOverlay`.
+- The collision, world-render and post-commit queues were fixed 256-entry IWRAM arrays filled without
+  bounds checks. Their ROM literals (and the copies inside the IWRAM sort and collision code, which the
+  game copies from ROM) now point at host RAM queues sized for every actor.
+- Host RAM starts with an info block ("RPC1", see the mod's `hacks/lib/pc_host.h`) so PC-aware mod code
+  can read the real capacities.
+- The IWRAM render sort (0x03002C30) loaded the queue count with `ldrb`, so 256 or more queued actors were
+  left unsorted. The host runs the same Shell sort with the full count (`ROTK_PC_RENDER_SORT=0` turns
+  the replacement off).
+
+## Sprite pieces past 128 (`patches/extra-objects.patch`, `src/main.cpp`)
+
+- `sprite_composeOam` pushes pieces with `sprite_pushOam`, which stops at 128. The host keeps the rest in
+  extra pages that mirror the game's double-buffered shadow OAM, and the PPU draws them after the
+  hardware entries in the same priority order. `ROTK_PC_EXTRA_OBJECTS` (default 896, 0 = off).
+- Check: `ROTK_PC_OAM_LIMIT=8` sends everything past 8 pieces through the extra path. The vanilla and
+  Expanded routes and a 400-enemy stress frame produce the same frame hashes as unlimited runs.
+- Still GBA-sized: 32 KiB of sprite tile memory and 32 rotation/scaling matrices.
+
+## Framework fix (`patches/hook-return.patch`)
+
+Mod function hooks that replace a call skipped the callee's return bookkeeping, leaking one
+call-return entry per call. Frequent hooks overflowed the stack. The generated guards now consume the
+entry the same way the skipped return would.
+
+## Stress test
+
+`ROTK_PC_STRESS_SPAWN=N` asks the Expanded mod's debug lab to spawn N orc archers around the player. With
+400 the game ran 10,000 frames without errors, with 260+ actors queued for drawing at once.
+
 ## Next
 
-1. Expanded ROM as a lab target (symbols from its linked ELF, its own identity and saves). Its
-   `mod_ram` calls `memory_addHeap` itself, so the PC flavour sets the heap there.
-2. Larger actor pools (256 main, 40 overlay), then the mod's BSS in host RAM.
-3. Host renderer: draw from game state instead of 128 OAM slots and 96 KiB VRAM.
+1. Widescreen through the framework's expanded-view renderer.
+2. Sprite tile memory beyond 32 KiB, when a scene runs out.
+3. Measure frame cost in big fights, host saves, audio, 60 fps.

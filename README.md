@@ -21,6 +21,12 @@ repository or its releases.
 - 64 MiB of extra RAM at `0x12000000` (`GBARECOMP_HOST_RAM_MB`), and the game heap lives there (32 MiB by
   default, `ROTK_PC_HEAP_MB`) instead of about 246 KiB of EWRAM.
 - Optional CPU overclock (`GBARECOMP_CPU_OVERCLOCK`, x4 in the launchers) so busy scenes stop slowing down.
+- Actor pools of 1,024 main and 160 overlay slots instead of 256 and 40 (`ROTK_PC_ACTORS`,
+  `ROTK_PC_OVERLAY_ACTORS`), with the per-actor collision and render queues sized to match. Tested with
+  more than 256 actors on screen.
+- Up to 1,024 sprite pieces per frame instead of the GBA's 128 OAM entries (`ROTK_PC_EXTRA_OBJECTS`).
+- The engine's draw-order sort works past 256 queued actors (the original counted them in a byte).
+- With these at their stock values the game renders exactly like the original (same frame hashes).
 - Details and measurements: [docs/ENGINE_LIMITS.md](docs/ENGINE_LIMITS.md), [STATUS.md](STATUS.md).
   Next steps: [docs/ROADMAP.md](docs/ROADMAP.md).
 
