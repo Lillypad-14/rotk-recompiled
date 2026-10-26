@@ -33,6 +33,7 @@ FRAMEWORK_PATCHES = [
     ROOT / "patches/yield-fast-path.patch",
     ROOT / "patches/framedump-in-place.patch",
     ROOT / "patches/direct-ram-guards.patch",
+    ROOT / "patches/hd-icons.patch",
 ]
 
 # recomp-ui (launcher) patches, applied the same way to external/recomp-ui.

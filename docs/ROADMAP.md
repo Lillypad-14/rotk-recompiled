@@ -46,3 +46,5 @@ Each would be a launcher option in the rotk.pc package. In suggested order after
    game's four background layers.
 7. Screen filters: CRT, LCD grid or smooth upscaling.
 8. Sharper HUD and text drawn by the host at full resolution.
+9. HD art: full-resolution, full-color art in place of GBA tiles. HD skill icons are built;
+   AI-upscaled or redrawn stock art (levels, portraits, items, HUD) is planned in [HD_ART.md](HD_ART.md).

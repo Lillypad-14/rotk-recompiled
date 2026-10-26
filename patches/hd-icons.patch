@@ -1,0 +1,387 @@
+diff --git a/src/gba/gba_high_resolution.cpp b/src/gba/gba_high_resolution.cpp
+index e9147c4..7c3f76d 100644
+--- a/src/gba/gba_high_resolution.cpp
++++ b/src/gba/gba_high_resolution.cpp
+@@ -2,8 +2,12 @@
+ #include "gba_color.h"
+ 
+ #include <algorithm>
++#include <cmath>
+ #include <cstring>
++#include <map>
+ #include <stdexcept>
++#include <unordered_map>
++#include <utility>
+ 
+ namespace gba {
+ namespace {
+@@ -13,7 +17,84 @@ int64_t ref28(const uint8_t* p) {
+     return int32_t(n << 4) >> 4;
+ }
+ int64_t delta28(int64_t n) { return int32_t(uint32_t(n) << 4) >> 4; }
++
++constexpr unsigned kTileBytes = 32;
++constexpr unsigned kBgVram = 0x10000;
++
++uint64_t tile_hash(const uint8_t* tile) {
++    uint64_t h = 1469598103934665603ull;
++    for (unsigned i = 0; i < kTileBytes; ++i) h = (h ^ tile[i]) * 1099511628211ull;
++    return h;
++}
++
++struct HdRegistry {
++    std::vector<HdTileImage> images;
++    // Tiles that occur once in all images: (image, tile index). They anchor a
++    // block; tiles shared between images (common frames) cannot.
++    std::unordered_map<uint64_t, std::pair<uint16_t, uint16_t>> anchors;
++    // Each image resampled to cover its tiles at one internal scale.
++    std::map<std::pair<unsigned, unsigned>, std::vector<uint8_t>> scaled;
++    unsigned matched = 0;
++};
++HdRegistry& hd_registry() { static HdRegistry registry; return registry; }
++
++// Premultiplied RGBA resample: area average when shrinking, bilinear when growing.
++std::vector<uint8_t> resample(const HdTileImage& image, unsigned out_w, unsigned out_h) {
++    std::vector<uint8_t> out(size_t(out_w) * out_h * 4);
++    const float sx = float(image.width) / out_w, sy = float(image.height) / out_h;
++    auto texel = [&](int x, int y, unsigned c) {
++        x = std::clamp(x, 0, int(image.width) - 1); y = std::clamp(y, 0, int(image.height) - 1);
++        return float(image.rgba[(size_t(y) * image.width + x) * 4 + c]);
++    };
++    for (unsigned y = 0; y < out_h; ++y)
++        for (unsigned x = 0; x < out_w; ++x)
++            for (unsigned c = 0; c < 4; ++c) {
++                float value = 0;
++                if (sx <= 1.0f && sy <= 1.0f) {
++                    const float fx = (x + 0.5f) * sx - 0.5f, fy = (y + 0.5f) * sy - 0.5f;
++                    const int x0 = int(std::floor(fx)), y0 = int(std::floor(fy));
++                    const float wx = fx - x0, wy = fy - y0;
++                    value = (texel(x0, y0, c) * (1 - wx) + texel(x0 + 1, y0, c) * wx) * (1 - wy) +
++                            (texel(x0, y0 + 1, c) * (1 - wx) + texel(x0 + 1, y0 + 1, c) * wx) * wy;
++                } else {
++                    const float x0 = x * sx, x1 = x0 + sx, y0 = y * sy, y1 = y0 + sy;
++                    float sum = 0, weight = 0;
++                    for (int ty = int(y0); ty < int(std::ceil(y1)); ++ty) {
++                        const float wy = std::min(y1, ty + 1.0f) - std::max(y0, float(ty));
++                        for (int tx = int(x0); tx < int(std::ceil(x1)); ++tx) {
++                            const float w = wy * (std::min(x1, tx + 1.0f) - std::max(x0, float(tx)));
++                            sum += texel(tx, ty, c) * w; weight += w;
++                        }
++                    }
++                    value = weight > 0 ? sum / weight : 0;
++                }
++                out[(size_t(y) * out_w + x) * 4 + c] = uint8_t(std::clamp(value + 0.5f, 0.0f, 255.0f));
++            }
++    return out;
++}
+ }
++
++void hd_tiles_set(std::vector<HdTileImage> images) {
++    HdRegistry& registry = hd_registry();
++    registry = HdRegistry{};
++    std::unordered_map<uint64_t, unsigned> counts;
++    for (const auto& image : images)
++        for (size_t t = 0; t + kTileBytes <= image.tiles.size(); t += kTileBytes)
++            ++counts[tile_hash(image.tiles.data() + t)];
++    static const uint8_t blank[kTileBytes] = {};
++    const uint64_t blank_hash = tile_hash(blank);
++    for (size_t i = 0; i < images.size(); ++i)
++        for (size_t t = 0; t + kTileBytes <= images[i].tiles.size(); t += kTileBytes) {
++            const uint64_t h = tile_hash(images[i].tiles.data() + t);
++            if (h != blank_hash && counts[h] == 1)
++                registry.anchors[h] = {uint16_t(i), uint16_t(t / kTileBytes)};
++        }
++    registry.images = std::move(images);
++}
++
++bool hd_tiles_active() { return !hd_registry().images.empty(); }
++
++unsigned hd_tiles_matched() { return hd_registry().matched; }
+ const char* GbaHighResolutionFrame::sampler_implementation() {
+ #if defined(GBARECOMP_HD_SAMPLER_HLE)
+     return "HLE (cached indexed affine surface)";
+@@ -71,16 +152,120 @@ void GbaHighResolutionFrame::begin_frame() {
+     previous_ = {};
+     std::fill(written_.begin(), written_.end(), 0);
+     written_lines_ = 0;
++    hd_frame_prepared_ = false;
++}
++void GbaHighResolutionFrame::match_hd_tiles(uint16_t dispcnt, const uint8_t* io,
++                                            const uint8_t* vram) {
++    hd_frame_prepared_ = true;
++    hd_frame_matched_ = 0;
++    const HdRegistry& registry = hd_registry();
++    const unsigned mode = dispcnt & 7;
++    for (unsigned bg = 0; bg < 4; ++bg) {
++        HdLayer& layer = hd_layers_[bg];
++        layer.any = false;
++        const uint16_t cnt = u16(io + 0x08 + bg * 2);
++        if (!(dispcnt & (0x100u << bg)) || mode > 1 || (mode == 1 && bg >= 2) || (cnt & 0x80)) continue;
++        const unsigned chars = ((cnt >> 2) & 3) * 0x4000, screen = ((cnt >> 8) & 31) * 0x800;
++        const unsigned tw = (cnt & 0x4000) ? 64 : 32, th = (cnt & 0x8000) ? 64 : 32;
++        layer.tiles_w = tw; layer.tiles_h = th;
++        layer.cells.assign(size_t(tw) * th, HdCell{});
++        layer.rows.assign(th, 0);
++        auto entry_at = [&](unsigned tx, unsigned ty) -> uint16_t {
++            tx %= tw; ty %= th;
++            const unsigned address = screen + ((tx >> 5) + (ty >> 5) * (tw / 32)) * 0x800 +
++                                     ((ty & 31) * 32 + (tx & 31)) * 2;
++            return address + 1 < kBgVram ? u16(vram + address) : 0;
++        };
++        auto tile_at = [&](uint16_t entry) -> const uint8_t* {
++            const unsigned address = chars + (entry & 0x3ffu) * kTileBytes;
++            return address + kTileBytes <= kBgVram ? vram + address : nullptr;
++        };
++        for (unsigned ty = 0; ty < th; ++ty)
++            for (unsigned tx = 0; tx < tw; ++tx) {
++                if (layer.cells[size_t(ty) * tw + tx].image) continue;
++                const uint16_t entry = entry_at(tx, ty);
++                const uint8_t* tile = tile_at(entry);
++                if ((entry & 0x0c00) || !tile) continue;
++                const auto anchor = registry.anchors.find(tile_hash(tile));
++                if (anchor == registry.anchors.end()) continue;
++                const HdTileImage& image = registry.images[anchor->second.first];
++                const unsigned ox = tx + tw - anchor->second.second % image.tiles_w;
++                const unsigned oy = ty + th - anchor->second.second / image.tiles_w;
++                bool whole = true;
++                for (unsigned r = 0; r < image.tiles_h && whole; ++r)
++                    for (unsigned c = 0; c < image.tiles_w && whole; ++c) {
++                        const uint16_t e = entry_at(ox + c, oy + r);
++                        const uint8_t* t = tile_at(e);
++                        whole = !(e & 0x0c00) && t &&
++                            std::memcmp(t, image.tiles.data() + (r * image.tiles_w + c) * kTileBytes, kTileBytes) == 0;
++                    }
++                if (!whole) continue;
++                for (unsigned r = 0; r < image.tiles_h; ++r)
++                    for (unsigned c = 0; c < image.tiles_w; ++c) {
++                        const unsigned cx = (ox + c) % tw, cy = (oy + r) % th;
++                        layer.cells[size_t(cy) * tw + cx] = {uint16_t(anchor->second.first + 1), uint8_t(c), uint8_t(r)};
++                        layer.rows[cy] = 1;
++                    }
++                layer.any = true;
++                ++hd_frame_matched_;
++            }
++    }
++}
++bool GbaHighResolutionFrame::prepare_hd_line(int y, uint16_t dispcnt, const uint8_t* io) {
++    hd_line_layers_ = 0;
++    for (unsigned bg = 0; bg < 4; ++bg) {
++        const HdLayer& layer = hd_layers_[bg];
++        if (!layer.any || !(dispcnt & (0x100u << bg))) continue;
++        const uint16_t cnt = u16(io + 0x08 + bg * 2);
++        const unsigned hofs = u16(io + 0x10 + bg * 4) & 0x1ff, vofs = u16(io + 0x12 + bg * 4) & 0x1ff;
++        const unsigned ty = (unsigned(y) + vofs) & (layer.tiles_h * 8 - 1);
++        if (!layer.rows[ty >> 3]) continue;
++        auto& pixels = hd_pixels_[bg];
++        pixels.assign(width_, HdPixel{});
++        bool any = false;
++        for (unsigned x = 0; x < width_; ++x) {
++            const int hx = int(x) - int(ox_);
++            if (hx < 0 || hx >= 240) continue;
++            const unsigned tx = (unsigned(hx) + hofs) & (layer.tiles_w * 8 - 1);
++            const HdCell& cell = layer.cells[size_t(ty >> 3) * layer.tiles_w + (tx >> 3)];
++            if (!cell.image) continue;
++            pixels[x] = {cell.image, uint16_t(cell.column * 8 + (tx & 7)), uint16_t(cell.row * 8 + (ty & 7))};
++            any = true;
++        }
++        if (!any) continue;
++        hd_line_layers_ |= 1u << bg;
++        hd_keys_[bg] = int((cnt & 3) * 256 + 128 + bg);
++    }
++    return hd_line_layers_ != 0;
++}
++bool GbaHighResolutionFrame::sample_hd(const HdPixel& at, unsigned sx, unsigned sy, Pixel& out) const {
++    HdRegistry& registry = hd_registry();
++    const HdTileImage& image = registry.images[at.image - 1u];
++    const unsigned w = image.tiles_w * 8 * scale_, h = image.tiles_h * 8 * scale_;
++    auto& scaled = registry.scaled[{unsigned(at.image), scale_}];
++    if (scaled.empty()) scaled = resample(image, w, h);
++    const unsigned x = std::min(at.u * scale_ + sx, w - 1), y = std::min(at.v * scale_ + sy, h - 1);
++    const uint8_t* texel = scaled.data() + (size_t(y) * w + x) * 4;
++    if (!texel[3]) return false;
++    out.hd = true;
++    out.rgb = {texel[0], texel[1], texel[2]};
++    out.alpha = texel[3];
++    return true;
+ }
+ bool GbaHighResolutionFrame::begin_line(int y, unsigned ox, unsigned oy,
+     uint16_t dispcnt, const uint8_t* io, const uint8_t* vram, const uint8_t* pal,
+     HighResolutionAffineProvider provider, bool filter) {
+-    selected_ = 0; affine_ = {};
+-    if (!provider || y < 0 || y >= 160 || (dispcnt & 0x80)) {
++    selected_ = 0; affine_ = {}; hd_line_layers_ = 0;
++    if (y < 0 || y >= 160 || (dispcnt & 0x80)) {
+         previous_ = {}; return false;
+     }
++    ox_ = ox;
++    if (hd_tiles_active()) {
++        if (!hd_frame_prepared_) match_hd_tiles(dispcnt, io, vram);
++        prepare_hd_line(y, dispcnt, io);
++    }
+     const unsigned mode = dispcnt & 7;
+-    for (unsigned i = 0; i < 2; ++i) {
++    for (unsigned i = 0; i < 2 && provider; ++i) {
+         const unsigned layer = 2 + i;
+         if (!(dispcnt & (0x100u << layer)) ||
+             !(mode == 2 || (mode == 1 && layer == 2)) || !provider(layer, y)) {
+@@ -108,8 +293,9 @@ bool GbaHighResolutionFrame::begin_line(int y, unsigned ox, unsigned oy,
+         previous_[i] = a;
+         selected_ |= 1u << layer;
+     }
+-    if (!selected_) return false;
+-    ++affine_lines_;
++    if (!provider) previous_ = {};
++    if (!selected_ && !hd_line_layers_) return false;
++    if (selected_) ++affine_lines_;
+     ox_ = ox; row_ = unsigned(y + int(oy));
+     vram_ = vram; pal_ = pal; filter_ = filter;
+     bldcnt_ = u16(io + 0x50); alpha_ = u16(io + 0x52);
+@@ -133,6 +319,7 @@ void GbaHighResolutionFrame::insert(Pixel& top, Pixel& second, const Pixel& p) {
+ void GbaHighResolutionFrame::submit(unsigned x, uint16_t color, int key,
+     uint8_t layer, bool target1, bool target2) {
+     if (selected_ & (1u << layer)) return;
++    if (layer < 4 && (hd_line_layers_ & (1u << layer)) && hd_pixels_[layer][x].image) return;
+     insert(top_[x], second_[x], {color, key, layer, target1, target2, true});
+ }
+ // Keep the cached sample inside the subpixel loop so the compiler can hoist
+@@ -218,6 +405,33 @@ void GbaHighResolutionFrame::write_color(uint8_t* dst, const Pixel& top,
+     else if (top.target1 && effect == 3) c = color::darken_gba555(c, brightness_);
+     color::to_rgb888(c, dst);
+ }
++// write_color for stacks holding an HD sample: the same effects, computed on
++// 8-bit channels so the art keeps its full color.
++void GbaHighResolutionFrame::write_color_rgb(uint8_t* dst, const Pixel& top,
++                                            const Pixel& second) const {
++    auto channels = [](const Pixel& p, int out[3]) {
++        uint8_t rgb[3];
++        if (p.hd) { rgb[0] = p.rgb[0]; rgb[1] = p.rgb[1]; rgb[2] = p.rgb[2]; }
++        else color::to_rgb888(p.color, rgb);
++        for (unsigned i = 0; i < 3; ++i) out[i] = rgb[i];
++    };
++    int t[3], s[3] = {0, 0, 0};
++    channels(top, t);
++    if (second.valid) channels(second, s);
++    if (top.hd && top.alpha < 255)
++        for (unsigned i = 0; i < 3; ++i) t[i] += s[i] * (255 - top.alpha) / 255;
++    const unsigned effect = (bldcnt_ >> 6) & 3;
++    const bool alpha = (effect == 1 || top.layer == 4) && top.target1 &&
++        second.valid && second.target2 && !(top.layer == 4 && second.layer == 4);
++    const int eva = std::min(16, int(alpha_ & 31)), evb = std::min(16, int((alpha_ >> 8) & 31));
++    for (unsigned i = 0; i < 3; ++i) {
++        int c = t[i];
++        if (alpha) c = (t[i] * eva + s[i] * evb) / 16;
++        else if (top.target1 && effect == 2) c = t[i] + (255 - t[i]) * int(brightness_) / 16;
++        else if (top.target1 && effect == 3) c = t[i] - t[i] * int(brightness_) / 16;
++        dst[i] = uint8_t(std::clamp(c, 0, 255));
++    }
++}
+ void GbaHighResolutionFrame::wrote_line(unsigned y) {
+     if (y < height_ && !written_[y]) { written_[y] = 1; ++written_lines_; }
+ }
+@@ -267,7 +481,18 @@ void GbaHighResolutionFrame::resolve() {
+                         bool((windows_[x] & 0x20) && (bldcnt_ & (1u << layer))),
+                         bool(bldcnt_ & (0x100u << layer)), true});
+                 }
+-                write_color(dst, top, second);
++                for (unsigned bg = 0; bg < 4 && hd_line_layers_; ++bg) {
++                    if (!(hd_line_layers_ & (1u << bg)) || !(windows_[x] & (1u << bg))) continue;
++                    const HdPixel& at = hd_pixels_[bg][x];
++                    Pixel p;
++                    if (!at.image || !sample_hd(at, sx, sy, p)) continue;
++                    p.key = hd_keys_[bg]; p.layer = uint8_t(bg); p.valid = true;
++                    p.target1 = (windows_[x] & 0x20) && (bldcnt_ & (1u << bg));
++                    p.target2 = (bldcnt_ & (0x100u << bg)) != 0;
++                    insert(top, second, p);
++                }
++                if (top.hd || second.hd) write_color_rgb(dst, top, second);
++                else write_color(dst, top, second);
+             }
+             for (auto& r : rows) { r.u += r.pa; r.v += r.pc; }
+         }
+@@ -293,5 +518,6 @@ void GbaHighResolutionFrame::latch() {
+     if (written_lines_ != height_) { complete_ = false; return; }
+     std::memcpy(latched_.data(), work_.data(), work_.size());
+     complete_ = true; ++frames_;
++    hd_registry().matched = hd_frame_matched_;
+ }
+ } // namespace gba
+diff --git a/src/gba/gba_high_resolution.h b/src/gba/gba_high_resolution.h
+index c431b30..da84235 100644
+--- a/src/gba/gba_high_resolution.h
++++ b/src/gba/gba_high_resolution.h
+@@ -9,6 +9,22 @@ namespace gba {
+ // Title authorization is read-only and evaluated at the real raster boundary.
+ using HighResolutionAffineProvider = bool (*)(int bg, int screen_y);
+ 
++// Host replacement art for regular 4bpp BG tiles, keyed by tile data like an
++// emulator texture pack. An image stands for a block of tiles_w x tiles_h
++// tiles and draws, at the internal resolution, wherever a text BG's tilemap
++// holds that exact block unflipped, in any palette bank. Presentation only.
++struct HdTileImage {
++    unsigned width = 0, height = 0;    // pixels of `rgba`
++    unsigned tiles_w = 0, tiles_h = 0; // native tiles the image covers
++    std::vector<uint8_t> rgba;         // premultiplied alpha, row major
++    std::vector<uint8_t> tiles;        // 4bpp tile data, 32 bytes per tile, row major
++};
++// Replaces the registered images. Empty disables matching.
++void hd_tiles_set(std::vector<HdTileImage> images);
++bool hd_tiles_active();
++// Image blocks drawn on the latest published frame.
++unsigned hd_tiles_matched();
++
+ // Downstream presentation only. Native layers retain their authored pixels;
+ // approved affine BGs are sampled again at fractional output coordinates and
+ // inserted into the same priority/window/blend stack. No guest state is owned
+@@ -46,6 +62,28 @@ private:
+         int key = 0x7fffffff;
+         uint8_t layer = 5;
+         bool target1 = false, target2 = false, valid = false;
++        // HD tile sample: `rgb` premultiplied by `alpha` replaces `color`.
++        bool hd = false;
++        uint8_t alpha = 255;
++        std::array<uint8_t, 3> rgb{};
++    };
++    // A tilemap cell covered by an HD image: image index + 1 (0 = none) and
++    // the cell's tile column and row inside the image.
++    struct HdCell {
++        uint16_t image = 0;
++        uint8_t column = 0, row = 0;
++    };
++    struct HdLayer {
++        std::vector<HdCell> cells; // map entries, row major in tiles
++        std::vector<uint8_t> rows; // map rows holding at least one cell
++        unsigned tiles_w = 0, tiles_h = 0;
++        bool any = false;
++    };
++    // An HD sample position for one native pixel: image + 1 and texel (u, v)
++    // in native pixels inside the image.
++    struct HdPixel {
++        uint16_t image = 0;
++        uint16_t u = 0, v = 0;
+     };
+     struct Affine {
+         bool active = false;
+@@ -66,7 +104,11 @@ private:
+     static void insert(Pixel& top, Pixel& second, const Pixel& candidate);
+     bool sample(const Affine& bg, int64_t u, int64_t v, uint16_t& color) const;
+     void write_color(uint8_t* dst, const Pixel& top, const Pixel& second) const;
++    void write_color_rgb(uint8_t* dst, const Pixel& top, const Pixel& second) const;
+     void wrote_line(unsigned y);
++    void match_hd_tiles(uint16_t dispcnt, const uint8_t* io, const uint8_t* vram);
++    bool prepare_hd_line(int y, uint16_t dispcnt, const uint8_t* io);
++    bool sample_hd(const HdPixel& at, unsigned sx, unsigned sy, Pixel& out) const;
+     unsigned scale_, width_ = 0, height_ = 0, ox_ = 0, row_ = 0;
+     uint16_t bldcnt_ = 0, alpha_ = 0;
+     unsigned brightness_ = 0, selected_ = 0;
+@@ -78,6 +120,11 @@ private:
+     std::array<uint16_t, 256> palette_{};
+     std::array<uint64_t, 256> filter_palette_{};
+     std::vector<Pixel> top_, second_;
++    std::array<HdLayer, 4> hd_layers_;
++    std::array<std::vector<HdPixel>, 4> hd_pixels_; // per BG, per output column
++    std::array<int, 4> hd_keys_{};
++    unsigned hd_line_layers_ = 0, hd_frame_matched_ = 0;
++    bool hd_frame_prepared_ = false;
+     std::vector<uint8_t> windows_, black_, written_, work_, latched_, scratch_;
+     unsigned written_lines_ = 0;
+     uint64_t frames_ = 0, affine_lines_ = 0, samples_ = 0;

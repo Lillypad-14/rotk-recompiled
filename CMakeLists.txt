@@ -45,8 +45,11 @@ add_library(RotkCart OBJECT ${CART_SOURCES})
 target_include_directories(RotkCart PRIVATE ${ROTK_HOST_INCLUDES})
 target_link_gbarecomp_runtime_stack(RotkCart)
 
-add_executable(${ROTK_EXECUTABLE} src/main.cpp src/widescreen.cpp src/hd_audio.cpp src/smooth_motion.cpp src/transparency.cpp $<TARGET_OBJECTS:RotkCart>)
+add_executable(${ROTK_EXECUTABLE} src/main.cpp src/widescreen.cpp src/hd_audio.cpp src/hd_icons.cpp
+    src/smooth_motion.cpp src/transparency.cpp $<TARGET_OBJECTS:RotkCart>)
 target_include_directories(${ROTK_EXECUTABLE} PRIVATE ${ROTK_HOST_INCLUDES})
+# stb_image decodes the HD art packs.
+target_include_directories(${ROTK_EXECUTABLE} PRIVATE "${RECOMP_UI_ROOT}/src/third_party")
 target_link_gbarecomp_runtime_stack(${ROTK_EXECUTABLE})
 gbarecomp_target_link_host_stack(${ROTK_EXECUTABLE} PRIVATE)
 target_compile_definitions(${ROTK_EXECUTABLE} PRIVATE
@@ -79,6 +82,17 @@ set(ROTK_MOD_GAME_ID "rotk")
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/mods/rotk.pc.manifest.toml.in"
     "${CMAKE_CURRENT_BINARY_DIR}/mods/packages/rotk.pc/1.0.0/manifest.toml" @ONLY)
 target_compile_definitions(${ROTK_EXECUTABLE} PRIVATE ROTK_MOD_GAME_ID="${ROTK_MOD_GAME_ID}")
+
+# HD art packs from the romhack (skill_icon_art.py build --hd-out), one folder per pack.
+file(GLOB ROTK_HD_PACKS LIST_DIRECTORIES true CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/game/hacks/patches/*/icons_hd"
+    "${CMAKE_CURRENT_SOURCE_DIR}/game/hacks/patches/*/*_icons_hd")
+foreach(pack ${ROTK_HD_PACKS})
+    file(RELATIVE_PATH name "${CMAKE_CURRENT_SOURCE_DIR}/game/hacks/patches" "${pack}")
+    string(REPLACE "/" "_" name "${name}")
+    file(GLOB pack_files CONFIGURE_DEPENDS "${pack}/*")
+    file(COPY ${pack_files} DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/mods/packages/rotk.pc/1.0.0/hd/${name}")
+endforeach()
 
 add_executable(RotkHostRamCheck EXCLUDE_FROM_ALL tests/host_ram_test.cpp)
 target_sources(RotkHostRamCheck PRIVATE $<TARGET_OBJECTS:RotkCart>)

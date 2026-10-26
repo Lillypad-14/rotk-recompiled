@@ -10,6 +10,7 @@
 #include "gba_memory.h"
 #include "gba_ppu.h"
 #include "hd_audio.h"
+#include "hd_icons.h"
 #include "smooth_motion.h"
 #include "transparency.h"
 #include "mod_function_hooks.h"
@@ -586,6 +587,7 @@ int main(int argc, char** argv)
     options.builtin_rom_crc32 = ROTK_ROM_CRC32;
     options.mod_game_id = ROTK_MOD_GAME_ID;
     rotk::widescreenRegister(options);
+    rotk::hdIconsRegister(options);
 #if defined(ROTK_LAUNCHER)
     std::vector<std::string> args(argv, argv + argc);
     if (rotk_launcher_preboot(args, options)) return 0;  // the player quit the launcher

@@ -194,6 +194,33 @@ value = "50"
 label = "Strong (50%)"
 
 [[feature]]
+id = "hd-icons"
+name = "HD skill icons"
+description = "Draws the custom skill icons from the original art at full resolution and in full color instead of the GBA's 32x24, 16-color version."
+group = "Display"
+default_enabled = false
+
+[[option]]
+feature = "hd-icons"
+id = "resolution"
+label = "Render resolution"
+description = "The internal resolution the HD art is drawn at, as a multiple of the GBA screen. Higher is sharper and costs more."
+type = "choice"
+default = "4"
+
+[[option.choice]]
+value = "3"
+label = "3x"
+
+[[option.choice]]
+value = "4"
+label = "4x"
+
+[[option.choice]]
+value = "6"
+label = "6x"
+
+[[feature]]
 id = "stereo"
 name = "Stereo sound"
 description = "Plays the game in stereo, as on the GBA. Off mixes everything to mono."
@@ -253,6 +280,10 @@ id = "rotk.pc.smooth-motion"
 [[plugin]]
 feature = "transparency"
 id = "rotk.pc.transparency"
+
+[[plugin]]
+feature = "hd-icons"
+id = "rotk.pc.hd-icons"
 
 [[plugin]]
 feature = "stereo"
