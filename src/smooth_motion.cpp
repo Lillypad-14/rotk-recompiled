@@ -1,5 +1,6 @@
 #include "smooth_motion.h"
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -12,6 +13,7 @@
 #include "mod_function_hooks.h"
 #include "mod_runtime.h"
 #include "runtime_arm.h"
+#include "transparency.h"
 
 namespace rotk {
 namespace {
@@ -27,8 +29,11 @@ namespace {
 //             piece moves by half of its actor's position change, minus the camera shift for world
 //             actors.
 //
-// Changes over kMaxStep pixels are scene cuts or teleports and stay as they are. Untagged pieces
-// (particles) and the HUD and parallax layers do not move.
+//   particles fx_drawParticle pieces are tagged with their particle record the same way.
+//   parallax  BG1 moves by its learnt ratio to the camera.
+//
+// Changes over kMaxStep pixels are scene cuts or teleports and stay as they are. The HUD does not
+// move.
 
 constexpr std::uint32_t kComposeOam = 0x08002484u;     // sprite_composeOam(Actor*)
 constexpr std::uint32_t kDrawParticle = 0x08039324u;  // fx_drawParticle, the other piece pusher
@@ -42,6 +47,10 @@ constexpr std::uint32_t kActorFlags = 0xE8u;
 constexpr std::uint32_t kActorListId = 0xFFu;
 constexpr std::uint32_t kActorScreenSpace = 0x200000u;   // drawn without the camera
 constexpr std::uint8_t kListOverlay = 1u;
+constexpr std::uint32_t kParticleRenderX = 0x1Au;        // integer half of FxParticle.renderPosition
+constexpr std::uint32_t kParticleRenderY = 0x1Eu;
+constexpr std::uint32_t kParticleFlags = 0x3Eu;
+constexpr std::uint16_t kParticleScreenSpace = 0x200u;
 constexpr std::uint32_t kMaxPieces = 128u + 3800u;
 constexpr int kMaxStep = 32;
 constexpr const char* kHookId = "rotk.pc-smooth-compose";
@@ -61,6 +70,8 @@ struct Tag {
 
 struct State {
     bool enabled = false;
+    bool particles = true;  // option "particles"
+    bool parallax = true;   // option "parallax"
     // Per shadow buffer.
     std::vector<Tag> tags[2];
     std::uint32_t pieces[2] = {};
@@ -80,6 +91,10 @@ struct State {
     int bgOffset[4][2] = {};
     std::vector<std::int8_t> objOffset;  // dx, dy per piece
     std::vector<std::uint8_t> extraCopy;
+    // BG1 parallax: scroll and camera at the last tick, and scroll change per camera pixel.
+    bool parallaxValid = false;
+    int parallaxScroll[2] = {}, parallaxCamera[2] = {};
+    float parallaxRatio[2] = {};
     std::uint64_t frames = 0, interpolated = 0, movedBg = 0, movedObj = 0;
 };
 
@@ -131,11 +146,26 @@ int composeOamEntry(std::uint32_t, int, ArmCpuState* cpu)
     return 0;  // observe only
 }
 
-// Pieces pushed after this belong to no actor (native calls do not keep the caller in LR, so the
-// owner is the latest sprite_composeOam until a particle or the end of the frame).
-int drawParticleEntry(std::uint32_t, int, ArmCpuState*)
+// fx_drawParticle(FxParticle*): its pieces belong to the particle, keyed by its record like an
+// actor. Native calls do not keep the caller in LR, so a piece's owner is the latest compose or
+// particle entry until the end of the frame.
+int drawParticleEntry(std::uint32_t, int, ArmCpuState* cpu)
 {
+    const int buffer = composingBuffer();
     g.actor = 0;
+    if (buffer < 0 || !g.particles) return 0;
+    if (!g.composing[buffer]) {
+        g.positions[buffer].clear();
+        g.composing[buffer] = true;
+    }
+    const std::uint32_t particle = cpu->R[0];
+    Position position;
+    position.x = static_cast<std::int16_t>(bus_read_u16(particle + kParticleRenderX));
+    position.y = static_cast<std::int16_t>(bus_read_u16(particle + kParticleRenderY));
+    position.screen = (bus_read_u16(particle + kParticleFlags) & kParticleScreenSpace) != 0;
+    g.actor = particle;
+    g.position = position;
+    g.positions[buffer][particle] = position;
     return 0;
 }
 
@@ -149,12 +179,41 @@ int cameraShift(int delta, int fine)
     return shift;
 }
 
+// Signed difference of two `bits`-wide wrapping values.
+int wrapDelta(int delta, int bits)
+{
+    const int size = 1 << bits;
+    delta &= size - 1;
+    return delta >= size / 2 ? delta - size : delta;
+}
+
+// BG1 is a parallax pattern whose next scroll is not stored anywhere before the commit. It follows
+// the camera at a fixed ratio, learnt from the change between the last two ticks.
+void learnParallax(const std::uint8_t* io, int shown)
+{
+    const int scroll[2] = {io[0x14] | io[0x15] << 8, io[0x16] | io[0x17] << 8};
+    const int camera[2] = {g.cameraX[shown], g.cameraY[shown]};
+    for (int axis = 0; axis < 2 && g.parallaxValid; ++axis) {
+        const int cameraDelta = camera[axis] - g.parallaxCamera[axis];
+        if (cameraDelta == 0 || cameraDelta < -kMaxStep || cameraDelta > kMaxStep) continue;
+        const float ratio = static_cast<float>(wrapDelta(scroll[axis] - g.parallaxScroll[axis], 9)) / cameraDelta;
+        if (ratio >= -2.0f && ratio <= 2.0f) g.parallaxRatio[axis] = ratio;
+    }
+    for (int axis = 0; axis < 2; ++axis) {
+        g.parallaxScroll[axis] = scroll[axis];
+        g.parallaxCamera[axis] = camera[axis];
+    }
+    g.parallaxValid = true;
+}
+
 void prepareFrame(const std::uint8_t* io)
 {
     ++g.frames;
     g.interpolate = false;
     const int shown = g.displayed;
-    if (!g.enabled || shown < 0 || g.vblanksShown != 1) return;
+    if (!g.enabled || shown < 0) return;
+    if (g.vblanksShown == 0) learnParallax(io, shown);
+    if (g.vblanksShown != 1) return;
     const int next = 1 - shown;
     if (g.composing[next] || g.composed[next] <= g.composed[shown]) return;  // next tick not ready
 
@@ -168,6 +227,10 @@ void prepareFrame(const std::uint8_t* io)
         shiftY = cameraShift(cameraDy, (io[0x1E] | io[0x1F] << 8) & 7);
         g.bgOffset[2][0] = g.bgOffset[3][0] = shiftX;
         g.bgOffset[2][1] = g.bgOffset[3][1] = shiftY;
+        if (g.parallax && (io[1] & 0x02u)) {  // BG1 on
+            g.bgOffset[1][0] = static_cast<int>(std::lround(g.parallaxRatio[0] * cameraDx * 0.5f));
+            g.bgOffset[1][1] = static_cast<int>(std::lround(g.parallaxRatio[1] * cameraDy * 0.5f));
+        }
     }
 
     // Sprite pieces of the displayed buffer: their actor's halfway position, through the presented
@@ -213,6 +276,7 @@ void moveObject(std::uint8_t* entry, int dx, int dy)
 
 void presentScanline(std::uint32_t y, std::uint8_t* io, std::uint8_t* oam)
 {
+    transparencyScanline(y, io, oam);  // first: it replaces whole entries that smoothing then moves
     if (y == 0) prepareFrame(io);
     if (!g.interpolate) return;
     for (unsigned layer = 0; layer < 4; ++layer)
@@ -250,13 +314,25 @@ void enable()
     gba_mod_set_function_hook_enabled("rotk.pc-push-oam", 1);
     gba_mod_set_function_hook_enabled("rotk.pc-hide-oam", 1);
     gba_mod_set_function_hook_enabled("rotk.pc-end-frame", 1);
-    gba::g_present_scanline_hook = presentScanline;
+    smoothRefreshPresentHook();
     std::fprintf(stderr, "[rotk] smooth motion on\n");
+}
+
+// A boolean sub-option: the environment variable when set ("0" is off), else the package option,
+// else on.
+bool subOption(const char* env, const char* option)
+{
+    if (const char* value = std::getenv(env)) return std::string(value) != "0";
+    const char* value = gba_mod_option_value("rotk.pc", "smooth-motion", option);
+    return !value || std::string(value) != "false";
 }
 
 void smoothActivated()
 {
-    if (!std::getenv("ROTK_PC_SMOOTH")) enable();
+    if (std::getenv("ROTK_PC_SMOOTH")) return;
+    enable();
+    g.particles = subOption("ROTK_PC_SMOOTH_PARTICLES", "particles");
+    g.parallax = subOption("ROTK_PC_SMOOTH_PARALLAX", "parallax");
 }
 
 }  // namespace
@@ -272,12 +348,21 @@ void smoothMotionRegister()
 void smoothMotionApply()
 {
     g = State{};
-    gba::g_present_scanline_hook = nullptr;
+    smoothRefreshPresentHook();
     gba_mod_set_function_hook_enabled(kHookId, 0);
     gba_mod_set_function_hook_enabled(kParticleHookId, 0);
     // ROTK_PC_SMOOTH overrides the package feature (whose activation runs after this).
     if (const char* env = std::getenv("ROTK_PC_SMOOTH"))
-        if (std::string(env) != "0") enable();
+        if (std::string(env) != "0") {
+            enable();
+            g.particles = subOption("ROTK_PC_SMOOTH_PARTICLES", "particles");
+            g.parallax = subOption("ROTK_PC_SMOOTH_PARALLAX", "parallax");
+        }
+}
+
+void smoothRefreshPresentHook()
+{
+    gba::g_present_scanline_hook = g.enabled || transparencyActive() ? presentScanline : nullptr;
 }
 
 bool smoothMotionActive()

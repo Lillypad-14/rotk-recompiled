@@ -11,6 +11,7 @@
 #include "gba_ppu.h"
 #include "hd_audio.h"
 #include "smooth_motion.h"
+#include "transparency.h"
 #include "mod_function_hooks.h"
 #include "mod_runtime.h"
 #include "runtime_arm.h"
@@ -475,6 +476,7 @@ void pcObserveDma(int, std::uint32_t source, std::uint32_t destination, std::uin
     }
     rotk::widescreenSetDisplayedBuffer(extra.displayedBuffer);
     rotk::smoothSetDisplayedBuffer(extra.displayedBuffer);
+    rotk::transparencySetDisplayed(extra.displayedBuffer, extra.displayedHalf);
 }
 
 const std::uint8_t* pcExtraObjects(std::uint32_t* count)
@@ -485,7 +487,10 @@ const std::uint8_t* pcExtraObjects(std::uint32_t* count)
         return nullptr;
     }
     *count = extra.counts[extra.displayedBuffer];
-    return rotk::smoothAdjustExtra(extra.pages[extra.displayedBuffer][extra.displayedHalf], *count);
+    const std::uint8_t* const* pages = extra.pages[extra.displayedBuffer];
+    const std::uint8_t* pieces =
+        rotk::transparencyAdjustExtra(pages[extra.displayedHalf], pages[0], pages[1], *count);
+    return rotk::smoothAdjustExtra(pieces, *count);
 }
 
 void setEnv(const char* name, const char* value)
@@ -535,6 +540,7 @@ void applyPcSettings()
     applyCpuBoost();
     applyStereoDefault();
     rotk::smoothMotionApply();
+    rotk::transparencyApply();
     const bool extra = extraObjects().capacity != 0;
     const bool observePieces = extra || rotk::smoothMotionActive();
     gba_mod_set_function_hook_enabled(kHeapHookId, layout().heap);
@@ -569,6 +575,7 @@ int main(int argc, char** argv)
         gba_mod_register_activation_plugin(plugin, featureActivated);
     rotk::hdAudioRegister();
     rotk::smoothMotionRegister();
+    rotk::transparencyRegister();
     g_stereoFromEnv = std::getenv("GBARECOMP_AUDIO_STEREO") != nullptr;
     gba_mod_register_activation_plugin("rotk.pc.stereo", stereoActivated);
     gba_mod_register_reset_callback(applyPcSettings);

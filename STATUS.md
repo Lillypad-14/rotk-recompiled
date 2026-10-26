@@ -1,5 +1,7 @@
 # Measured status — 2026-10-25
 
+2026-10-26: [PC bugfix pass](docs/BUGFIX_PASS.md) corrects widescreen camera writes corrupting BG3 tile staging, reduces HD-stream starvation clicks, and adds isolated paced tests. Both editions rebuilt. The 600-frame widescreen gameplay test completes at about 57.6 FPS; uneven pacing remains unresolved.
+
 This is an isolated stock-ROM experiment. The Expanded ROM, main decompilation checkout, previous recomp build, and their saves are unchanged.
 
 ## Built and observed

@@ -45,7 +45,6 @@ constexpr std::uint32_t kBg3Blocks = 0x03005FBCu;
 constexpr std::uint32_t kBg2CellMap = 0x0300586Cu;
 constexpr std::uint32_t kBg2Blocks = 0x03005FC0u;
 constexpr std::uint32_t kVramBase = 0x06000000u;
-constexpr std::uint32_t kCameraCopies = 0x03005880u;     // Vector2Int[2], copy of the clamped camera
 constexpr std::uint32_t kFineScrollX = 0x03005FB8u;      // u16, camera.x & 7 of the active player
 constexpr std::uint32_t kCallViaSl = 0x0804E0B8u;        // _call_via_sl
 constexpr std::uint32_t kCameraCommitReturn = 0x0803EC49u;  // its call in gfx_updatePlayerCameraScroll
@@ -87,6 +86,9 @@ struct WorldLayer {
     std::uint32_t blocks = 0;
     int hofs = 0;
     int vofs = 0;
+    // Adjacent pixels are sampled without guest execution between them.
+    int cachedX = -1, cachedY = -1, cachedScanline = -1;
+    std::uint16_t cachedEntry = 0;
 };
 
 struct FrameState {
@@ -130,14 +132,22 @@ extern "C" int rotkWorldTile(int bg, int hardwareX, int screenY, std::uint16_t* 
 {
     if (bg == 1) return gba::kWsTilemapKeepWrapped;
     if (!g_frame.world || (bg != 2 && bg != 3)) return gba::kWsTilemapUnavailable;
-    const WorldLayer& layer = g_frame.layers[bg];
+    WorldLayer& layer = g_frame.layers[bg];
     const int tileX = (g_frame.cameraX >> 3) + floorDiv8(hardwareX + layer.hofs);
     const int tileY = (g_frame.cameraY >> 3) + floorDiv8(screenY + layer.vofs);
     if (tileX < 0 || tileY < 0 || tileX >= g_frame.worldTilesX || tileY >= g_frame.worldTilesY)
         return gba::kWsTilemapUnavailable;
+    if (layer.cachedX == tileX && layer.cachedY == tileY && layer.cachedScanline == screenY) {
+        *entry = layer.cachedEntry;
+        return gba::kWsTilemapReplace;
+    }
     const std::uint32_t cell = static_cast<std::uint32_t>((tileY >> 2) * static_cast<int>(g_frame.cellsPerRow) + (tileX >> 2));
     const std::uint16_t block = bus_read_u16(layer.cellMap + cell * 2u);
     *entry = bus_read_u16(layer.blocks + block * 32u + static_cast<std::uint32_t>((tileY & 3) * 8 + (tileX & 3) * 2));
+    layer.cachedX = tileX;
+    layer.cachedY = tileY;
+    layer.cachedScanline = screenY;
+    layer.cachedEntry = *entry;
     return gba::kWsTilemapReplace;
 }
 
@@ -159,7 +169,9 @@ int clampCameraToView(std::uint32_t, int, ArmCpuState* cpu)
     if (high < low) clamped = (low + high) / 2;
     if (clamped == camera) return 0;
     bus_write_u32(kCameraPositions + player * 8u, static_cast<std::uint32_t>(clamped));
-    bus_write_u32(kCameraCopies + player * 8u, static_cast<std::uint32_t>(clamped));
+    // 0x03005880 is the BG3 tile staging buffer, NOT another camera array.
+    // Writing the clamp there replaces four tile entries with a camera value
+    // exactly when the player reaches either horizontal view boundary.
     bus_write_u16(kFineScrollX, static_cast<std::uint16_t>(clamped & 7));
     return 0;
 }
@@ -311,6 +323,7 @@ void widescreenFrame(const gbarecomp::ExtendedViewFrameInfo* info)
     g_frame.layers[2].cellMap = bus_read_u32(kBg2CellMap);
     g_frame.layers[2].blocks = bus_read_u32(kBg2Blocks);
     for (int bg = 2; bg <= 3; ++bg) {
+        g_frame.layers[bg].cachedScanline = -1;
         g_frame.layers[bg].hofs = ioHalf(io, 0x10 + bg * 4) & 0x1FF;
         g_frame.layers[bg].vofs = ioHalf(io, 0x12 + bg * 4) & 0x1FF;
     }

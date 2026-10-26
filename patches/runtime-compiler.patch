@@ -1,0 +1,79 @@
+diff --git a/src/runtime/overlay_abi.h b/src/runtime/overlay_abi.h
+index 09d9e9a..2373493 100644
+--- a/src/runtime/overlay_abi.h
++++ b/src/runtime/overlay_abi.h
+@@ -24,7 +24,7 @@
+ extern "C" {
+ #endif
+ 
+-#define GBA_OVERLAY_ABI_VERSION 6u
++#define GBA_OVERLAY_ABI_VERSION 7u
+ 
+ typedef struct GbaOverlayCallbacks {
+     uint32_t abi_version;  // must equal GBA_OVERLAY_ABI_VERSION
+@@ -110,6 +110,8 @@ typedef struct GbaOverlayCallbacks {
+     uint32_t (*runtime_exception_return_refill)(uint32_t target_pc);
+     uint32_t (*runtime_prefetch_stall_delta)(uint32_t wait, uint32_t pc,
+                                              uint32_t thumb);
++    // ABI v7: generated interior-entry prologues consume the host resume PC.
++    uint32_t* runtime_resume_pc;
+ } GbaOverlayCallbacks;
+ 
+ // Exported by every overlay DLL:
+diff --git a/src/runtime/overlay_compile.cpp b/src/runtime/overlay_compile.cpp
+index 553481c..d390c7e 100644
+--- a/src/runtime/overlay_compile.cpp
++++ b/src/runtime/overlay_compile.cpp
+@@ -67,11 +67,15 @@ std::string gxx_path() {
+     if (const char* e = std::getenv("GBARECOMP_HEAL_CXX")) {
+         if (e[0]) return e;
+     }
++#ifdef GBARECOMP_DEFAULT_HEAL_CXX
++    return GBARECOMP_DEFAULT_HEAL_CXX;
++#else
+ #if defined(_WIN32)
+     return "C:/msys64/mingw64/bin/g++.exe";
+ #else
+     return "c++";
+ #endif
++#endif
+ }
+ 
+ // The bundled, toolchain-free C compiler used to build overlay DLLs on a player
+@@ -389,9 +393,11 @@ bool overlay_compile_one(const OverlayWorkItem& w,
+         const int rc = run_process(cmd, logpath.string(), err);
+         if (rc != 0) {
+             if (err) {
++                const std::string detail = *err;
+                 *err = std::string(heal_backend_name(backend)) + " exit " +
+                        std::to_string(rc) + " compiling " + cpath.string() +
+-                       " — see " + logpath.string();
++                       " — see " + logpath.string() +
++                       (detail.empty() ? "" : "; " + detail);
+             }
+             fs::remove(dlltmp, ec);
+             return false;
+diff --git a/src/runtime/overlay_loader.cpp b/src/runtime/overlay_loader.cpp
+index d6c4656..4120979 100644
+--- a/src/runtime/overlay_loader.cpp
++++ b/src/runtime/overlay_loader.cpp
+@@ -259,6 +259,7 @@ void fill_callbacks() {
+     g_callbacks.abi_version = GBA_OVERLAY_ABI_VERSION;
+ 
+     g_callbacks.cpu                = &g_cpu;
++    g_callbacks.runtime_resume_pc  = &g_runtime_resume_pc;
+     g_callbacks.runtime_insn_trace = &g_runtime_insn_trace;
+     g_callbacks.runtime_trace_enabled = &g_runtime_trace_enabled;
+     g_callbacks.runtime_cycles     = &g_runtime_cycles;
+diff --git a/src/runtime/overlay_runtime_arm.h b/src/runtime/overlay_runtime_arm.h
+index e01ebe8..2881f30 100644
+--- a/src/runtime/overlay_runtime_arm.h
++++ b/src/runtime/overlay_runtime_arm.h
+@@ -24,6 +24,7 @@ extern const GbaOverlayCallbacks* g_ovl;
+ // The host register file, reached through the callbacks pointer. Generated
+ // code reads/writes g_cpu.R[...] / g_cpu.cpsr exactly as in the static build.
+ #define g_cpu (*g_ovl->cpu)
++#define g_runtime_resume_pc (*g_ovl->runtime_resume_pc)
+ #define g_runtime_insn_trace (*g_ovl->runtime_insn_trace)
+ #define g_runtime_cycles (*g_ovl->runtime_cycles)
+ #define g_runtime_break_pc (*g_ovl->runtime_break_pc)

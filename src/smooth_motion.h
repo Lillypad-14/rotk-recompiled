@@ -12,6 +12,9 @@ void smoothMotionRegister();
 // Resolves the setting and enables the hooks. Called from applyPcSettings.
 void smoothMotionApply();
 
+// Installs the presentation scanline hook while smooth motion or real transparency is on.
+void smoothRefreshPresentHook();
+
 // True while the feature needs the sprite push/end-frame observers.
 bool smoothMotionActive();
 

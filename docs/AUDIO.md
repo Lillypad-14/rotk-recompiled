@@ -85,6 +85,8 @@ known engine signature.
 
 ## Env
 
+The 2026-10-26 [bugfix pass](BUGFIX_PASS.md) adds a short fade around HD-stream starvation/restart and a two-chunk priming cushion. This reduces buffering discontinuities; real-device listening and all audio transitions remain to be checked.
+
 `ROTK_PC_HD_AUDIO` = 0 | 1 | verify (overrides the package), `ROTK_PC_HD_AUDIO_INTERP` = cubic | linear
 | guest, `ROTK_PC_HD_AUDIO_WAV` (HD dump, 65,536 Hz stereo; also lets env mode 1 replace without the
 package stream), `ROTK_PC_HD_AUDIO_GUEST_WAV` (verify only, 16,384 Hz), `ROTK_PC_HD_AUDIO_DEBUG`.

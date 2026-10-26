@@ -25,13 +25,18 @@ pixel-identical to the original.
 - Framework hook `g_present_scanline_hook` (patches/smooth-present.patch): `GbaPpu::render_scanline`
   hands the line's BG register image and an OAM copy to the host before drawing.
 - Observers (no behaviour change): `sprite_composeOam` entry records the actor and its position,
-  `fx_drawParticle` entry ends that actor, the existing `sprite_pushOam` hook tags each piece,
+  `fx_drawParticle` entry does the same for a particle, the existing `sprite_pushOam` hook tags each piece,
   `sprite_endFrame` records the camera of the finished buffer. LR is not used to find the caller,
   since native calls do not keep it.
 - On the repeated vblank, when the other buffer finished composing after the displayed one:
   - camera shift = half of the camera change, limited so fine scroll + shift stays in 0..8 (the
     copied tiles cover 8 pixels more than the view), added to BG3/BG2 in gameplay scenes;
   - each tagged piece moves by half of its actor's change, minus the camera shift for world actors;
+  - particles: `fx_drawParticle` pieces are tagged with the particle record like an actor (screen
+    position = integer renderPosition at +0x1A/+0x1E minus the camera, screen-space when flag 0x200
+    at +0x3E is set);
+  - BG1 parallax: its next scroll is not stored before the commit, so it moves by its scroll/camera
+    ratio learnt from the last two ticks (limited to -2..2, BG1 enabled, gameplay only);
   - changes over 32 pixels (cuts, teleports) are not interpolated.
 
 ## Checks (2026-10-26)
@@ -41,14 +46,16 @@ pixel-identical to the original.
   real tick frames identical, about 40% of frames interpolated on the routes.
 - A short walk (stock, frames 5021..5024): the repeated frames 5022 and 5024 are new in-between frames,
   the player sprite moves.
-- Not seen yet: camera scrolling. Both test routes stay on the first map, where the crebain tutorial
-  box keeps blocking movement, so the camera never moves headless. Needs an in-game test.
+- Camera scrolling: the headless routes never scroll (the first map's crebain tutorial box keeps
+  blocking movement); the user tested walking in-game and it works.
 
 ## Known gaps
 
-- Particles (`fx_drawParticle`) and BG1 parallax still move at 30 fps.
+- Particles and parallax were added after the first in-game test and have not been seen in-game yet.
 - Widescreen draws its margins from the cell maps at the tick's camera; the shifted world layers may
   disagree with them by the half step. Test with widescreen off first.
 - Without the CPU boost the next tick is often not ready in time, and those frames repeat as before.
 
-Env: `ROTK_PC_SMOOTH` = 0 | 1 overrides the package feature.
+Options: "Smooth particles" and "Smooth parallax background" (both on). Env overrides:
+`ROTK_PC_SMOOTH` = 0 | 1 for the feature, `ROTK_PC_SMOOTH_PARTICLES` and `ROTK_PC_SMOOTH_PARALLAX`
+= 0 | 1 for the options.

@@ -21,6 +21,11 @@ if(NOT EXISTS "${ROTK_CART_DIR}/dispatch_table.cpp")
     message(FATAL_ERROR "Generate private code first: python tools/lab.py prepare")
 endif()
 add_subdirectory("${GBARECOMP_ROOT}" framework EXCLUDE_FROM_ALL)
+# Runtime recovery must use this build's toolchain, not a developer-specific
+# C:/msys64 path. The explicit GBARECOMP_HEAL_CXX override still takes priority.
+set_property(SOURCE "${GBARECOMP_ROOT}/src/runtime/overlay_compile.cpp"
+    TARGET_DIRECTORY gbarecomp_runtime APPEND PROPERTY COMPILE_DEFINITIONS
+    "GBARECOMP_DEFAULT_HEAL_CXX=\"${CMAKE_CXX_COMPILER}\"")
 get_target_property(RUNTIME_DEFINITIONS gbarecomp_runtime INTERFACE_COMPILE_DEFINITIONS)
 if(NOT "GBARECOMP_HAVE_SDL2" IN_LIST RUNTIME_DEFINITIONS)
     message(FATAL_ERROR "SDL2 was not found; a headless-only stub is not a playable port")
@@ -37,7 +42,7 @@ add_library(RotkCart OBJECT ${CART_SOURCES})
 target_include_directories(RotkCart PRIVATE ${ROTK_HOST_INCLUDES})
 target_link_gbarecomp_runtime_stack(RotkCart)
 
-add_executable(${ROTK_EXECUTABLE} src/main.cpp src/widescreen.cpp src/hd_audio.cpp src/smooth_motion.cpp $<TARGET_OBJECTS:RotkCart>)
+add_executable(${ROTK_EXECUTABLE} src/main.cpp src/widescreen.cpp src/hd_audio.cpp src/smooth_motion.cpp src/transparency.cpp $<TARGET_OBJECTS:RotkCart>)
 target_include_directories(${ROTK_EXECUTABLE} PRIVATE ${ROTK_HOST_INCLUDES})
 target_link_gbarecomp_runtime_stack(${ROTK_EXECUTABLE})
 gbarecomp_target_link_host_stack(${ROTK_EXECUTABLE} PRIVATE)
@@ -81,3 +86,22 @@ gbarecomp_target_link_host_stack(RotkHostRamCheck PRIVATE)
 add_executable(RotkAudioRateCheck EXCLUDE_FROM_ALL tests/audio_rate_test.cpp)
 target_include_directories(RotkAudioRateCheck PRIVATE "${SDL2_INCLUDE_DIR}")
 target_link_libraries(RotkAudioRateCheck PRIVATE "${SDL2_LIBRARY}")
+
+add_executable(RotkWidescreenEdgeCheck EXCLUDE_FROM_ALL tests/widescreen_edge_test.cpp src/widescreen.cpp $<TARGET_OBJECTS:RotkCart>)
+target_include_directories(RotkWidescreenEdgeCheck PRIVATE src ${ROTK_HOST_INCLUDES})
+target_link_gbarecomp_runtime_stack(RotkWidescreenEdgeCheck)
+gbarecomp_target_link_host_stack(RotkWidescreenEdgeCheck PRIVATE)
+if(ROTK_LAUNCHER)
+    target_link_libraries(RotkWidescreenEdgeCheck PRIVATE RotkLauncher)
+endif()
+
+add_executable(RotkAudioEnvelopeCheck EXCLUDE_FROM_ALL tests/audio_envelope_test.cpp)
+target_include_directories(RotkAudioEnvelopeCheck PRIVATE src)
+
+add_executable(RotkRuntimeCompilerCheck EXCLUDE_FROM_ALL tests/runtime_compiler_test.cpp $<TARGET_OBJECTS:RotkCart>)
+target_include_directories(RotkRuntimeCompilerCheck PRIVATE ${ROTK_HOST_INCLUDES})
+target_link_gbarecomp_runtime_stack(RotkRuntimeCompilerCheck)
+gbarecomp_target_link_host_stack(RotkRuntimeCompilerCheck PRIVATE)
+if(ROTK_LAUNCHER)
+    target_link_libraries(RotkRuntimeCompilerCheck PRIVATE RotkLauncher)
+endif()

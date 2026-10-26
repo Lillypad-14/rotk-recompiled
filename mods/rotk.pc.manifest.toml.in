@@ -146,9 +146,52 @@ default = false
 [[feature]]
 id = "smooth-motion"
 name = "Smooth motion (60 fps)"
-description = "The game updates 30 times a second. This draws a halfway frame in between, so scrolling and movement look like 60 fps. Gameplay is unchanged. Works best with CPU boost. Work in progress: particles still move at 30 fps."
+description = "The game updates 30 times a second. This draws a halfway frame in between, so scrolling and movement look like 60 fps. Gameplay is unchanged. Works best with CPU boost."
 group = "Display"
 default_enabled = false
+
+[[option]]
+feature = "smooth-motion"
+id = "particles"
+label = "Smooth particles"
+description = "Also draws spell sparkles and other particles at 60 fps. Off keeps them at the game's 30 fps."
+type = "boolean"
+default = true
+
+[[option]]
+feature = "smooth-motion"
+id = "parallax"
+label = "Smooth parallax background"
+description = "Also scrolls the far background layer at 60 fps. Off keeps it at the game's 30 fps."
+type = "boolean"
+default = true
+
+[[feature]]
+id = "transparency"
+name = "Real transparency"
+description = "Draws see-through effects such as water and ice reflections as real transparency instead of the GBA's every-other-frame flicker."
+group = "Display"
+default_enabled = false
+
+[[option]]
+feature = "transparency"
+id = "strength"
+label = "Reflection strength"
+description = "How visible see-through effects are. The GBA flicker looked like about 50%."
+type = "choice"
+default = "35"
+
+[[option.choice]]
+value = "25"
+label = "Faint (25%)"
+
+[[option.choice]]
+value = "35"
+label = "Medium (35%)"
+
+[[option.choice]]
+value = "50"
+label = "Strong (50%)"
 
 [[feature]]
 id = "stereo"
@@ -206,6 +249,10 @@ id = "rotk.pc.widescreen"
 [[plugin]]
 feature = "smooth-motion"
 id = "rotk.pc.smooth-motion"
+
+[[plugin]]
+feature = "transparency"
+id = "rotk.pc.transparency"
 
 [[plugin]]
 feature = "stereo"

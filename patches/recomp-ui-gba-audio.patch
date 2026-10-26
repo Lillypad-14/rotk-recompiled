@@ -1,0 +1,15 @@
+diff --git a/src/consoles/gba/gba_profile.h b/src/consoles/gba/gba_profile.h
+index 3eff430..a38dd66 100644
+--- a/src/consoles/gba/gba_profile.h
++++ b/src/consoles/gba/gba_profile.h
+@@ -109,6 +109,10 @@ static const SystemProfile kSystemProfileGba = {
+     /* screen_kind_count */ LNG_GBA_SCREEN_KIND_COUNT,
+     /* rom_filter        */ { kGbaRomPatterns, LNG_GBA_ROM_PATTERN_COUNT,
+                               "Game Boy Advance ROM (.gba)" },
++    /* renderer_labels   */ NULL,
++    // gbarecomp opens the device at its native rate and never reads the
++    // launcher's sample rate, so the AUDIO panel shows Volume only.
++    /* hide_audio_freq   */ 1,
+ };
+ 
+ // ---- name aliases + ABI capability defaults -------------------------------------

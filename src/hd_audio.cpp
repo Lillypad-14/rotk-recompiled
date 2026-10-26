@@ -1,4 +1,5 @@
 #include "hd_audio.h"
+#include "audio_envelope.h"
 
 #include <algorithm>
 #include <cmath>
@@ -163,6 +164,7 @@ constexpr std::uint32_t kRingFrames = 1u << 14;
 float g_ringL[kRingFrames], g_ringR[kRingFrames];
 std::uint32_t g_ringRead = 0, g_ringFill = 0;
 bool g_ringPrimed = false;
+AudioEnvelope g_envelope;
 
 const std::uint8_t* g_rom = nullptr;
 std::size_t g_romSize = 0;
@@ -506,15 +508,17 @@ std::size_t pullStream(void*, std::int16_t* dst, std::size_t max_frames)
         return static_cast<std::int16_t>(s > 32767.0f ? 32767.0f : s < -32767.0f ? -32767.0f : s);
     };
     for (std::size_t i = 0; i < max_frames; ++i) {
-        if (!g_ringPrimed && g_ringFill >= 276u * kOversample) g_ringPrimed = true;
+        if (!g_ringPrimed && g_ringFill >= 2u * 276u * kOversample) g_ringPrimed = true;
         if (!g_ringPrimed || g_ringFill == 0) {
             if (g_ringPrimed) ++g_stats.underflows;
             g_ringPrimed = false;
+            g_envelope.reset();
             dst[2 * i] = dst[2 * i + 1] = 0;
             continue;
         }
-        dst[2 * i] = pcm(g_ringL[g_ringRead]);
-        dst[2 * i + 1] = pcm(g_ringR[g_ringRead]);
+        const auto frame = g_envelope.apply(g_ringL[g_ringRead], g_ringR[g_ringRead], g_ringFill);
+        dst[2 * i] = pcm(frame[0]);
+        dst[2 * i + 1] = pcm(frame[1]);
         g_ringRead = (g_ringRead + 1u) & (kRingFrames - 1u);
         --g_ringFill;
     }
@@ -636,6 +640,7 @@ void hdAudioApply()
     g_havePrediction = false;
     g_ringRead = g_ringFill = 0;
     g_ringPrimed = false;
+    g_envelope.reset();
     gba_mod_set_function_hook_enabled(kHookId, g_mode != Mode::Off);
 }
 

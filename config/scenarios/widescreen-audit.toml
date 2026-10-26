@@ -1,0 +1,33 @@
+format_version = 1
+[[package]]
+id = "rotk.pc"
+version = "1.0.0"
+
+[[feature]]
+package_id = "rotk.pc"
+id = "cpu-boost"
+[feature.values]
+speed = "4"
+
+[[feature]]
+package_id = "rotk.pc"
+id = "widescreen"
+enabled = true
+[feature.values]
+width = "284"
+hud-edges = "false"
+
+[[feature]]
+package_id = "rotk.pc"
+id = "smooth-motion"
+enabled = false
+
+[[feature]]
+package_id = "rotk.pc"
+id = "hd-audio"
+enabled = true
+
+[[feature]]
+package_id = "rotk.pc"
+id = "transparency"
+enabled = false

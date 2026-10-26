@@ -61,6 +61,8 @@ needs: culling constants, map margins from the game's full map, HUD backgrounds 
 
 ## Next
 
+The 2026-10-26 [bugfix pass](BUGFIX_PASS.md) removed a camera-clamp write into BG3's tile staging buffer and added boundary regression checks. The native camera array is the only camera storage updated by the clamp.
+
 1. Other culling: enemy spawners, projectiles and effects that check the camera themselves.
 2. Co-op (two cameras) and cutscene camera pans.
 3. Adaptive width (follow the window aspect) as an extra choice.
