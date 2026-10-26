@@ -107,3 +107,13 @@ note = "_call_via_sl: from gfx_updatePlayerCameraScroll, widescreen re-clamps th
 addr = 0x08000C38
 mode = "thumb"
 note = "actor_updateVisibility: widescreen widens the on-screen box by the view margins (src/widescreen.cpp)."
+
+[[mod_function_hook]]
+addr = 0x08000708
+mode = "thumb"
+note = "actor_tickAllInList: observed only, widescreen tags the HUD pieces composed before fx_buildRenderQueues (src/widescreen.cpp)."
+
+[[mod_function_hook]]
+addr = 0x08038728
+mode = "thumb"
+note = "fx_buildRenderQueues: observed only, ends the HUD pieces of actor_tickAllInList (src/widescreen.cpp)."

@@ -402,6 +402,7 @@ int pcPushOam(std::uint32_t, int, ArmCpuState* cpu)
     if (count == 0) extra.counts[buffer] = 0;
     if (count < extra.hardwareLimit) {
         extra.lastPushExtra = false;
+        rotk::widescreenNotePiece(buffer, count);
         return 0;
     }
     if (extra.counts[buffer] >= extra.capacity) {
@@ -415,6 +416,7 @@ int pcPushOam(std::uint32_t, int, ArmCpuState* cpu)
         peak = extra.counts[buffer] + 1u;
         std::fprintf(stderr, "[rotk] extra sprite pieces peak %u\n", peak);
     }
+    rotk::widescreenNotePiece(buffer, kHardwareObjects + extra.counts[buffer]);
     const std::uint32_t slot = extra.counts[buffer]++ * 8u;
     for (std::uint32_t i = 0; i < 8u; ++i) {
         const std::uint8_t value = bus_read_u8(cpu->R[1] + i);
@@ -466,6 +468,7 @@ void pcObserveDma(int, std::uint32_t source, std::uint32_t destination, std::uin
             extra.displayedHalf = half;
         }
     }
+    rotk::widescreenSetDisplayedBuffer(extra.displayedBuffer);
 }
 
 const std::uint8_t* pcExtraObjects(std::uint32_t* count)

@@ -50,10 +50,18 @@ needs: culling constants, map margins from the game's full map, HUD backgrounds 
 - Checks: seamless margins on the first map, the 400-enemy crowd draws and moves in the margins,
   widescreen off keeps the vanilla and Expanded hashes.
 
+- HUD: on frames with the standard gameplay HUD (BG0 row 18 starts with the red bar tile 0x28 at
+  column 3 and the blue bar tile 0x30 at column 19, row 19 has the panel filler 0x0005, rows 4-15 are
+  empty), `g_ws_bg_x_provider` anchors BG0 columns 0-10 to the left edge and 19-29 to the right edge,
+  keeps 11-18 (ornament, or the Expanded mod's meter) centred and repeats the filler along the panel.
+  HUD sprites (pieces pushed between `actor_tickAllInList`'s entry and `fx_buildRenderQueues`, i.e.
+  the fixed render queue) move to their side with `g_ws_obj_attr_x_provider`. Dialogue boxes, menus
+  and cutscenes keep the native layout. `sprite_composeOam` is not hooked: in the Expanded build its
+  entry is a trampoline and a hook there changed the frames even with widescreen off.
+
 ## Next
 
-1. HUD: anchor BG0 status elements and HUD sprites to the wide screen's edges (MinishCap uses
-   `g_ws_bg_x_provider` for its HUD layer and `g_ws_obj_attr_x_provider` for HUD sprites).
-2. Other culling: enemy spawners, projectiles and effects that check the camera themselves.
-3. Co-op (two cameras) and cutscene camera pans.
-4. Adaptive width (follow the window aspect) as an extra choice.
+1. Other culling: enemy spawners, projectiles and effects that check the camera themselves.
+2. Co-op (two cameras) and cutscene camera pans.
+3. Adaptive width (follow the window aspect) as an extra choice.
+4. In-game dialogue during gameplay: check it keeps its layout (the HUD rule should leave it alone).

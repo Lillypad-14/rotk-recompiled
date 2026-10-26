@@ -14,4 +14,9 @@ void widescreenRegister(gbarecomp::RunOptions& options);
 // camera the hardware tilemaps were built from.
 void widescreenObserveDma(std::uint32_t source, std::uint32_t destination);
 
+// Called for every sprite piece the game pushes (OAM index, or 128 and up for extra pieces) into
+// shadow OAM buffer 0 or 1, and with the buffer the VBlank handler last copied to OAM.
+void widescreenNotePiece(int buffer, std::uint32_t index);
+void widescreenSetDisplayedBuffer(int buffer);
+
 }  // namespace rotk

@@ -2,6 +2,8 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <string>
+#include <vector>
 
 #include "gba_ppu.h"
 #include "mod_function_hooks.h"
@@ -61,6 +63,24 @@ constexpr std::uint32_t kFlagOnScreen = 1u << 12;
 constexpr std::uint32_t kFlagAlwaysVisible = 1u << 21;
 constexpr std::uint32_t kFlagOnActivePlayerScreen = 1u << 30;
 constexpr std::uint32_t kListOverlay = 1u;
+// actor_tickAllInList ticks every actor, then composes the fixed render queue (ALWAYS_VISIBLE actors,
+// the HUD), then calls fx_buildRenderQueues before the world. Pieces pushed in between are HUD.
+// (sprite_composeOam itself is not hooked: the Expanded mod places a trampoline at its entry.)
+constexpr std::uint32_t kTickAllInList = 0x08000708u;     // actor_tickAllInList(list, commit)
+constexpr std::uint32_t kFxBuildQueues = 0x08038728u;     // fx_buildRenderQueues()
+constexpr const char* kTickListHookId = "rotk.pc.widescreen-tick-list";
+constexpr const char* kFxQueuesHookId = "rotk.pc.widescreen-fx-queues";
+constexpr std::uint32_t kMaxPieces = 4096u;
+
+// Gameplay HUD on BG0 (30 x 20 tiles): portrait and red bar on the left (columns 0-10), a mirrored
+// ornament in the middle (columns 11-18; the Expanded mod draws a meter there instead), blue bar and
+// compass on the right (columns 19-29), and a
+// dark panel along row 19 built from filler tile 0x0005. In the wide view the left and right
+// groups move to the screen edges, the ornament stays centred and the panel filler fills the gaps.
+constexpr int kHudLeftEnd = 88;      // native x where the ornament starts
+constexpr int kHudRightStart = 152;  // native x where the right group starts
+constexpr int kHudPanelTop = 152;    // first scanline of the panel row
+constexpr int kHudFillerX = 72;      // a column of filler tiles on the panel row
 
 struct WorldLayer {
     std::uint32_t cellMap = 0;
@@ -71,6 +91,7 @@ struct WorldLayer {
 
 struct FrameState {
     bool world = false;          // gameplay with the world layers in use
+    bool hud = false;            // the standard gameplay HUD is on screen
     int cameraX = 0;             // latched with the frame's world-row copy
     int cameraY = 0;
     int worldTilesX = 0;
@@ -81,6 +102,10 @@ struct FrameState {
 };
 
 FrameState g_frame;
+std::vector<std::uint8_t> g_hudPieces[2];  // per shadow OAM buffer: piece index -> HUD actor
+int g_displayedBuffer = -1;
+bool g_composingHud = false;
+bool g_hudEdges = false;  // option "hud-edges": move the HUD to the wide screen's edges
 int g_latchedCameraX = 0;
 int g_latchedCameraY = 0;
 
@@ -185,6 +210,71 @@ int updateVisibilityWide(std::uint32_t, int, ArmCpuState* cpu)
     return 1;
 }
 
+constexpr int kHudTopRows = 24;          // scanlines of the top-left box
+constexpr int kHudBottomStart = 128;     // first scanline of the bottom HUD
+constexpr int kHudLostFrames = 30;       // frames without the HUD before the native layout returns
+
+// The gameplay HUD layout: both bars and the panel filler where expected.
+bool standardHud(const std::uint8_t* io)
+{
+    const std::uint32_t map = kVramBase + ((ioHalf(io, 0x08) >> 8) & 31u) * 0x800u;
+    auto entry = [map](int row, int column) { return bus_read_u16(map + static_cast<std::uint32_t>(row * 32 + column) * 2u); };
+    return entry(18, 3) == 0x0028u && entry(18, 19) == 0x0030u && entry(19, 3) == 0x0005u;
+}
+
+bool hudRow(int screenY)
+{
+    return screenY < kHudTopRows || screenY >= kHudBottomStart;
+}
+
+extern "C" int rotkHudBgX(int, int outputX, int screenY, int* hardwareX)
+{
+    if (!g_frame.hud || !hudRow(screenY)) return 0;
+    const int left = static_cast<int>(g_ws_extra_left);
+    const int width = 240 + left + static_cast<int>(g_ws_extra_right);
+    if (outputX < kHudLeftEnd) *hardwareX = outputX;
+    else if (outputX >= width - (240 - kHudRightStart)) *hardwareX = outputX - (width - 240);
+    else if (outputX >= left + kHudLeftEnd && outputX < left + kHudRightStart) *hardwareX = outputX - left;
+    else if (screenY >= kHudPanelTop) *hardwareX = kHudFillerX + ((outputX - kHudLeftEnd) & 7);
+    else return -1;
+    return 1;
+}
+
+int pieceWidth(std::uint16_t attr0, std::uint16_t attr1)
+{
+    static const int widths[3][4] = {{8, 16, 32, 64}, {16, 32, 32, 64}, {8, 8, 16, 32}};
+    const unsigned shape = attr0 >> 14;
+    return shape < 3 ? widths[shape][attr1 >> 14] : 8;
+}
+
+extern "C" int rotkHudObjX(int index, std::uint16_t attr0, std::uint16_t attr1, std::uint16_t, int* x)
+{
+    if (!g_frame.hud || g_displayedBuffer < 0 || index < 0 ||
+        static_cast<std::uint32_t>(index) >= g_hudPieces[g_displayedBuffer].size() ||
+        !g_hudPieces[g_displayedBuffer][static_cast<std::uint32_t>(index)])
+        return 0;
+    int top = attr0 & 0xFF;
+    if (top >= 160) top -= 256;
+    if (!hudRow(top) && !hudRow(top + 7)) return 0;
+    int native = attr1 & 0x1FF;
+    if (native & 0x100) native -= 0x200;
+    *x = native + pieceWidth(attr0, attr1) / 2 < 120 ? native - static_cast<int>(g_ws_extra_left)
+                                                     : native + static_cast<int>(g_ws_extra_right);
+    return 1;
+}
+
+int noteTickAllInList(std::uint32_t, int, ArmCpuState*)
+{
+    g_composingHud = true;
+    return 0;
+}
+
+int noteFxBuildQueues(std::uint32_t, int, ArmCpuState*)
+{
+    g_composingHud = false;
+    return 0;
+}
+
 void widescreenFrame(const gbarecomp::ExtendedViewFrameInfo* info)
 {
     const std::uint8_t* io = info->io;
@@ -193,6 +283,22 @@ void widescreenFrame(const gbarecomp::ExtendedViewFrameInfo* info)
                     (dispcnt & 0x0C00u) == 0x0C00u;
     gba::g_ws_pillarbox = g_frame.world ? 0 : 1;
     gba::g_ws_tilemap_provider = g_frame.world ? rotkWorldTile : nullptr;
+    static int hudMissing = kHudLostFrames;
+    const bool hudSeen = g_hudEdges && g_frame.world && standardHud(io);
+    static bool lastSeen = false;
+    static int flips = 0;
+    if (hudSeen != lastSeen && flips < 40 && std::getenv("ROTK_PC_TRACE_HUD")) {
+        ++flips;
+        std::fprintf(stderr, "[rotk] hud signature %s at frame %llu, state %s %s%s", hudSeen ? "seen" : "lost",
+                     static_cast<unsigned long long>(info->frame_count), hudSeen ? "" : "missing", "", "\n");
+    }
+    lastSeen = hudSeen;
+    if (hudSeen) hudMissing = 0;
+    else if (hudMissing < kHudLostFrames) ++hudMissing;
+    g_frame.hud = g_hudEdges && g_frame.world && hudMissing < kHudLostFrames;
+    gba::g_ws_bg_x_provider = g_frame.hud ? rotkHudBgX : nullptr;
+    gba::g_ws_bg_x_provider_layers = 1u << 0;
+    gba::g_ws_obj_attr_x_provider = g_frame.hud ? rotkHudObjX : nullptr;
     if (!g_frame.world) return;
     g_frame.cameraX = g_latchedCameraX;
     g_frame.cameraY = g_latchedCameraY;
@@ -220,6 +326,7 @@ void widescreenInit(std::uint32_t, std::uint32_t)
 // margins it must reproduce the original frames exactly.
 void widescreenReset()
 {
+    g_hudEdges = false;
     if (std::getenv("ROTK_PC_TEST_VISIBILITY")) gba_mod_set_function_hook_enabled(kVisibilityHookId, 1);
 }
 
@@ -229,6 +336,13 @@ void widescreenActivated()
     gba_mod_set_view_width(width ? std::atoi(width) : 284);
     gba_mod_set_function_hook_enabled(kCameraHookId, 1);
     gba_mod_set_function_hook_enabled(kVisibilityHookId, 1);
+    const char* hudEdges = gba_mod_option_value(kPackageId, kFeatureId, "hud-edges");
+    g_hudEdges = hudEdges && std::string(hudEdges) == "true";
+    if (!g_hudEdges) return;
+    gba_mod_set_function_hook_enabled(kTickListHookId, 1);
+    gba_mod_set_function_hook_enabled(kFxQueuesHookId, 1);
+    gba_mod_set_function_hook_enabled("rotk.pc-push-oam", 1);
+    for (auto& pieces : g_hudPieces) pieces.assign(kMaxPieces, 0);
 }
 
 }  // namespace
@@ -239,6 +353,8 @@ void widescreenRegister(gbarecomp::RunOptions& options)
     gba_mod_register_reset_callback(widescreenReset);
     gba_mod_register_function_entry_plugin(kCameraHookId, kCallViaSl, 1, clampCameraToView);
     gba_mod_register_function_entry_plugin(kVisibilityHookId, kUpdateVisibility, 1, updateVisibilityWide);
+    gba_mod_register_function_entry_plugin(kTickListHookId, kTickAllInList, 1, noteTickAllInList);
+    gba_mod_register_function_entry_plugin(kFxQueuesHookId, kFxBuildQueues, 1, noteFxBuildQueues);
     options.mod_owns_adaptive_view = true;
     options.max_view_width = kMaxViewWidth;
     options.extended_view_init = widescreenInit;
@@ -250,6 +366,17 @@ void widescreenObserveDma(std::uint32_t, std::uint32_t destination)
     if (g_frame.bg3Screenblock != 0 && destination >= g_frame.bg3Screenblock &&
         destination < g_frame.bg3Screenblock + 0x800u)
         latchCamera();
+}
+
+void widescreenNotePiece(int buffer, std::uint32_t index)
+{
+    if (buffer >= 0 && buffer < 2 && index < g_hudPieces[buffer].size())
+        g_hudPieces[buffer][index] = g_composingHud ? 1u : 0u;
+}
+
+void widescreenSetDisplayedBuffer(int buffer)
+{
+    g_displayedBuffer = buffer;
 }
 
 }  // namespace rotk

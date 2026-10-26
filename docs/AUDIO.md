@@ -26,3 +26,22 @@ cmake --build build/host --target RotkAudioRateCheck audio_playback_tests audio_
 ```
 
 Normal-device listening, song/effect accuracy against mGBA, extended gameplay, and save/load audio transitions remain unqualified. Other timer, FIFO, CPU-timing or sound-driver translation bugs could remain. Use `Play.cmd` to assess the correction with normal audio.
+
+# Plan: native HD audio mixer (not started)
+
+ROTK mixes in software: ARM code in IWRAM (copied from the IwramStaticsImage at ROM 0x08FF9F98) resamples
+8-bit samples with linear interpolation (16.16 position), applies volume, accumulates the voices and
+feeds DirectSound at 32,768 Hz. It patches its own shift operands (0x03000B70..0x03000BCC), so it runs
+in the interpreter, and it cost about 29% of the CPU in a 16-enemy fight on the GBA edition. Mixer
+entries: 0x03000604, 684, 6A4, 728, 7C0, 8A4, 8C8, 9B0, B38.
+
+Goal: a launcher feature "HD audio" (original mixer as fallback) that mixes the same voices on the
+host at 48 kHz in float, with better interpolation and no 8-bit DirectSound quantization, through
+GBARecomp's trusted mod PCM pull stream (docs/MOD_AUDIO.md in the framework), muting the guest FIFO
+output while it is on. Voice and channel caps can be lifted as with the other limits.
+
+1. Reverse-engineer the voice state the mixer reads (sample pointer, step, volume, pan, loop) and how
+   the music/sfx driver sets it up.
+2. Host mixer fed from that state, replacing the mixer entries with hooks.
+3. Check: identical voice state through both mixers, compare the output numerically (audio is not
+   covered by the frame hashes), then listen against mGBA.

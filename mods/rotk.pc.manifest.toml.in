@@ -108,7 +108,7 @@ label = "x16"
 [[feature]]
 id = "widescreen"
 name = "Widescreen"
-description = "Shows more of the level to the left and right during gameplay. Menus keep their original width with black bars. Work in progress: enemies near the edges may appear late and the HUD stays centred."
+description = "Shows more of the level to the left and right during gameplay. Menus keep their original width with black bars. Work in progress: some enemies near the edges may appear late."
 group = "Display"
 default_enabled = false
 
@@ -134,6 +134,14 @@ label = "2:1"
 [[option.choice]]
 value = "374"
 label = "21:9"
+
+[[option]]
+feature = "widescreen"
+id = "hud-edges"
+label = "HUD at screen edges"
+description = "Moves the health and spirit bars to the edges of the wide screen. Off keeps the HUD centred as on the GBA."
+type = "boolean"
+default = false
 
 [[plugin]]
 feature = "large-memory"
