@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -121,14 +122,13 @@ struct ConsoleState {
     std::uint64_t lastFrame = 0;     // frame count of the last published frame
     int hudMissing = kHudLostFrames; // frames since the HUD signature was last seen
     bool hudSeen = false;
-    bool coop = false;               // a co-op console: no HUD edges and no smooth motion
+    std::vector<std::uint8_t> hudPieces[2];  // per shadow OAM buffer: piece index -> HUD actor
+    int displayedBuffer = -1;        // the shadow buffer the VBlank handler last copied to OAM
+    bool composingHud = false;       // pieces pushed now belong to the HUD
 };
 
 ConsoleState g_states[3];            // solo, co-op console 1, co-op console 2
 ConsoleState* g_state = &g_states[0];
-std::vector<std::uint8_t> g_hudPieces[2];  // per shadow OAM buffer: piece index -> HUD actor
-int g_displayedBuffer = -1;
-bool g_composingHud = false;
 bool g_hudEdges = false;  // option "hud-edges": move the HUD to the wide screen's edges
 bool g_enabled = false;
 
@@ -157,9 +157,8 @@ extern "C" int rotkWorldTile(int bg, int hardwareX, int screenY, std::uint16_t* 
     WorldLayer& layer = g_state->frame.layers[bg];
     // The renderer picks the pixel within the tile with the line's scroll, which smooth motion
     // shifts on in-between frames; the tile must follow the same scroll.
-    const int shiftX = g_state->coop ? 0 : smoothBgShift(bg, 0), shiftY = g_state->coop ? 0 : smoothBgShift(bg, 1);
-    const int tileX = (g_state->frame.cameraX >> 3) + floorDiv8(hardwareX + layer.hofs + shiftX);
-    const int tileY = (g_state->frame.cameraY >> 3) + floorDiv8(screenY + layer.vofs + shiftY);
+    const int tileX = (g_state->frame.cameraX >> 3) + floorDiv8(hardwareX + layer.hofs + smoothBgShift(bg, 0));
+    const int tileY = (g_state->frame.cameraY >> 3) + floorDiv8(screenY + layer.vofs + smoothBgShift(bg, 1));
     if (tileX < 0 || tileY < 0 || tileX >= g_state->frame.worldTilesX || tileY >= g_state->frame.worldTilesY)
         return gba::kWsTilemapUnavailable;
     if (layer.cachedX == tileX && layer.cachedY == tileY && layer.cachedScanline == screenY) {
@@ -287,9 +286,10 @@ int pieceWidth(std::uint16_t attr0, std::uint16_t attr1)
 
 extern "C" int rotkHudObjX(int index, std::uint16_t attr0, std::uint16_t attr1, std::uint16_t, int* x)
 {
-    if (!g_state->frame.hud || g_displayedBuffer < 0 || index < 0 ||
-        static_cast<std::uint32_t>(index) >= g_hudPieces[g_displayedBuffer].size() ||
-        !g_hudPieces[g_displayedBuffer][static_cast<std::uint32_t>(index)])
+    const int shown = g_state->displayedBuffer;
+    if (!g_state->frame.hud || shown < 0 || index < 0 ||
+        static_cast<std::uint32_t>(index) >= g_state->hudPieces[shown].size() ||
+        !g_state->hudPieces[shown][static_cast<std::uint32_t>(index)])
         return 0;
     int top = attr0 & 0xFF;
     if (top >= 160) top -= 256;
@@ -303,13 +303,13 @@ extern "C" int rotkHudObjX(int index, std::uint16_t attr0, std::uint16_t attr1, 
 
 int noteTickAllInList(std::uint32_t, int, ArmCpuState*)
 {
-    g_composingHud = true;
+    g_state->composingHud = true;
     return 0;
 }
 
 int noteFxBuildQueues(std::uint32_t, int, ArmCpuState*)
 {
-    g_composingHud = false;
+    g_state->composingHud = false;
     return 0;
 }
 
@@ -354,7 +354,7 @@ void widescreenFrame(const gbarecomp::ExtendedViewFrameInfo* info)
     // In-game dialogue draws its box over the frozen gameplay layers: keep the wide view.
     g_state->frame.world = io && (scene == kSceneGameplay || scene == kSceneInGameDialog) &&
                            (dispcnt & 7u) == 0 && (dispcnt & 0x0C00u) == 0x0C00u;
-    const bool hudSeen = g_hudEdges && !g_state->coop && g_state->frame.world && standardHud(io);
+    const bool hudSeen = g_hudEdges && g_state->frame.world && standardHud(io);
     static int flips = 0;
     if (hudSeen != g_state->hudSeen && flips < 40 && std::getenv("ROTK_PC_TRACE_HUD")) {
         ++flips;
@@ -364,7 +364,7 @@ void widescreenFrame(const gbarecomp::ExtendedViewFrameInfo* info)
     g_state->hudSeen = hudSeen;
     if (hudSeen) g_state->hudMissing = 0;
     else if (g_state->hudMissing < kHudLostFrames) ++g_state->hudMissing;
-    g_state->frame.hud = g_hudEdges && !g_state->coop && g_state->frame.world && g_state->hudMissing < kHudLostFrames;
+    g_state->frame.hud = g_hudEdges && g_state->frame.world && g_state->hudMissing < kHudLostFrames;
     installProviders();
     // A state load or reset jumps the frame count: until the game's next DMA the latch is stale, but
     // the loaded tile camera matches the loaded VRAM.
@@ -419,7 +419,7 @@ void widescreenActivated()
     gba_mod_set_function_hook_enabled(kTickListHookId, 1);
     gba_mod_set_function_hook_enabled(kFxQueuesHookId, 1);
     gba_mod_set_function_hook_enabled("rotk.pc-push-oam", 1);
-    for (auto& pieces : g_hudPieces) pieces.assign(kMaxPieces, 0);
+    for (auto& pieces : g_states[0].hudPieces) pieces.assign(kMaxPieces, 0);
 }
 
 }  // namespace
@@ -454,16 +454,17 @@ void widescreenStartCoop()
 {
     for (int console = 1; console <= 2; ++console) {
         g_states[console] = ConsoleState{};
-        g_states[console].coop = true;
+        if (g_hudEdges)
+            for (auto& pieces : g_states[console].hudPieces) pieces.assign(kMaxPieces, 0);
     }
-    gba_mod_set_function_hook_runs_suspended(kCameraHookId, 1);
-    gba_mod_set_function_hook_runs_suspended(kVisibilityHookId, 1);
+    for (const char* id : {kCameraHookId, kVisibilityHookId, kTickListHookId, kFxQueuesHookId})
+        gba_mod_set_function_hook_runs_suspended(id, 1);
 }
 
 void widescreenEndCoop()
 {
-    gba_mod_set_function_hook_runs_suspended(kCameraHookId, 0);
-    gba_mod_set_function_hook_runs_suspended(kVisibilityHookId, 0);
+    for (const char* id : {kCameraHookId, kVisibilityHookId, kTickListHookId, kFxQueuesHookId})
+        gba_mod_set_function_hook_runs_suspended(id, 0);
     widescreenSelectConsole(-1);
 }
 
@@ -477,13 +478,13 @@ void widescreenSelectConsole(int console)
 
 void widescreenNotePiece(int buffer, std::uint32_t index)
 {
-    if (buffer >= 0 && buffer < 2 && index < g_hudPieces[buffer].size())
-        g_hudPieces[buffer][index] = g_composingHud ? 1u : 0u;
+    if (buffer >= 0 && buffer < 2 && index < g_state->hudPieces[buffer].size())
+        g_state->hudPieces[buffer][index] = g_state->composingHud ? 1u : 0u;
 }
 
 void widescreenSetDisplayedBuffer(int buffer)
 {
-    g_displayedBuffer = buffer;
+    g_state->displayedBuffer = buffer;
 }
 
 }  // namespace rotk

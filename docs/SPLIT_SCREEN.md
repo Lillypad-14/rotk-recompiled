@@ -21,9 +21,8 @@ The game's own two-player link co-op, with both consoles on this PC.
 Widescreen works in co-op: both consoles get the window's width (284 by default), with world
 margins, camera clamping and the widened actor visibility, and menus pillarboxed. Each console has
 its own widescreen state (`widescreenSelectConsole`, switched by the session's bind hook), and its
-camera and visibility hooks keep running while the others are suspended. The HUD stays in its
-native layout (HUD at the edges needs the extra-sprite hooks). Both consoles use the same margins,
-so their simulations agree.
+hooks keep running while the others are suspended. HUD at the edges works on both screens when its
+option is on. Both consoles use the same margins, so their simulations agree.
 
 Smooth motion, real transparency and the extra sprite pages also work in co-op, each with its own
 state per console (`pcFeaturesSelectConsole` in src/main.cpp). Smooth motion rarely has an
@@ -121,9 +120,8 @@ budget); local chunks on menus 3.8 ms mean on a quiet machine.
 
 ## Open
 
-1. More PC features inside co-op: HUD at the edges (its piece tracking is per console now, but it
-   is untested there), HD icons (needs the high-resolution renderer per console), the larger engine
-   limits (the host heap and actor pools are one per process).
+1. More PC features inside co-op: HD icons (needs the high-resolution renderer per console), the
+   larger engine limits (the host heap and actor pools are one per process).
 2. The audio mixer interpreted on both consoles remains a large cost (interpreter step, state
    copies); native RAM templates for it (roadmap section 2) would help single-player too.
 3. The framework pieces live only in the `external/gbarecomp` working tree, not in `patches/`.
