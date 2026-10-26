@@ -111,13 +111,26 @@ struct FrameState {
     WorldLayer layers[4];        // indexed by BG; only 2 and 3 are used
 };
 
-FrameState g_frame;
+constexpr int kHudLostFrames = 30;       // frames without the HUD before the native layout returns
+
+// One console's view state: the solo game's, or a split-screen co-op console's.
+struct ConsoleState {
+    FrameState frame;
+    int latchedCameraX = 0;          // the camera of the last world-row copy
+    int latchedCameraY = 0;
+    std::uint64_t lastFrame = 0;     // frame count of the last published frame
+    int hudMissing = kHudLostFrames; // frames since the HUD signature was last seen
+    bool hudSeen = false;
+    bool coop = false;               // a co-op console: no HUD edges and no smooth motion
+};
+
+ConsoleState g_states[3];            // solo, co-op console 1, co-op console 2
+ConsoleState* g_state = &g_states[0];
 std::vector<std::uint8_t> g_hudPieces[2];  // per shadow OAM buffer: piece index -> HUD actor
 int g_displayedBuffer = -1;
 bool g_composingHud = false;
 bool g_hudEdges = false;  // option "hud-edges": move the HUD to the wide screen's edges
-int g_latchedCameraX = 0;
-int g_latchedCameraY = 0;
+bool g_enabled = false;
 
 std::uint16_t ioHalf(const std::uint8_t* io, std::size_t offset)
 {
@@ -133,26 +146,27 @@ int floorDiv8(int value)
 void latchCamera()
 {
     const std::uint32_t player = bus_read_u8(kActivePlayerIndex) & 1u;
-    g_latchedCameraX = static_cast<int>(bus_read_u32(kTileCameras + player * 8u));
-    g_latchedCameraY = static_cast<int>(bus_read_u32(kTileCameras + player * 8u + 4u));
+    g_state->latchedCameraX = static_cast<int>(bus_read_u32(kTileCameras + player * 8u));
+    g_state->latchedCameraY = static_cast<int>(bus_read_u32(kTileCameras + player * 8u + 4u));
 }
 
 extern "C" int rotkWorldTile(int bg, int hardwareX, int screenY, std::uint16_t* entry)
 {
     if (bg == 1) return gba::kWsTilemapKeepWrapped;
-    if (!g_frame.world || (bg != 2 && bg != 3)) return gba::kWsTilemapUnavailable;
-    WorldLayer& layer = g_frame.layers[bg];
+    if (!g_state->frame.world || (bg != 2 && bg != 3)) return gba::kWsTilemapUnavailable;
+    WorldLayer& layer = g_state->frame.layers[bg];
     // The renderer picks the pixel within the tile with the line's scroll, which smooth motion
     // shifts on in-between frames; the tile must follow the same scroll.
-    const int tileX = (g_frame.cameraX >> 3) + floorDiv8(hardwareX + layer.hofs + smoothBgShift(bg, 0));
-    const int tileY = (g_frame.cameraY >> 3) + floorDiv8(screenY + layer.vofs + smoothBgShift(bg, 1));
-    if (tileX < 0 || tileY < 0 || tileX >= g_frame.worldTilesX || tileY >= g_frame.worldTilesY)
+    const int shiftX = g_state->coop ? 0 : smoothBgShift(bg, 0), shiftY = g_state->coop ? 0 : smoothBgShift(bg, 1);
+    const int tileX = (g_state->frame.cameraX >> 3) + floorDiv8(hardwareX + layer.hofs + shiftX);
+    const int tileY = (g_state->frame.cameraY >> 3) + floorDiv8(screenY + layer.vofs + shiftY);
+    if (tileX < 0 || tileY < 0 || tileX >= g_state->frame.worldTilesX || tileY >= g_state->frame.worldTilesY)
         return gba::kWsTilemapUnavailable;
     if (layer.cachedX == tileX && layer.cachedY == tileY && layer.cachedScanline == screenY) {
         *entry = layer.cachedEntry;
         return gba::kWsTilemapReplace;
     }
-    const std::uint32_t cell = static_cast<std::uint32_t>((tileY >> 2) * static_cast<int>(g_frame.cellsPerRow) + (tileX >> 2));
+    const std::uint32_t cell = static_cast<std::uint32_t>((tileY >> 2) * static_cast<int>(g_state->frame.cellsPerRow) + (tileX >> 2));
     const std::uint16_t block = bus_read_u16(layer.cellMap + cell * 2u);
     *entry = bus_read_u16(layer.blocks + block * 32u + static_cast<std::uint32_t>((tileY & 3) * 8 + (tileX & 3) * 2));
     layer.cachedX = tileX;
@@ -238,8 +252,6 @@ int updateVisibilityWide(std::uint32_t, int, ArmCpuState* cpu)
 
 constexpr int kHudTopRows = 24;          // scanlines of the top-left box
 constexpr int kHudBottomStart = 128;     // first scanline of the bottom HUD
-constexpr int kHudLostFrames = 30;       // frames without the HUD before the native layout returns
-
 // The gameplay HUD layout: both bars and the panel filler where expected.
 bool standardHud(const std::uint8_t* io)
 {
@@ -255,7 +267,7 @@ bool hudRow(int screenY)
 
 extern "C" int rotkHudBgX(int, int outputX, int screenY, int* hardwareX)
 {
-    if (!g_frame.hud || !hudRow(screenY)) return 0;
+    if (!g_state->frame.hud || !hudRow(screenY)) return 0;
     const int left = static_cast<int>(g_ws_extra_left);
     const int width = 240 + left + static_cast<int>(g_ws_extra_right);
     if (outputX < kHudLeftEnd) *hardwareX = outputX;
@@ -275,7 +287,7 @@ int pieceWidth(std::uint16_t attr0, std::uint16_t attr1)
 
 extern "C" int rotkHudObjX(int index, std::uint16_t attr0, std::uint16_t attr1, std::uint16_t, int* x)
 {
-    if (!g_frame.hud || g_displayedBuffer < 0 || index < 0 ||
+    if (!g_state->frame.hud || g_displayedBuffer < 0 || index < 0 ||
         static_cast<std::uint32_t>(index) >= g_hudPieces[g_displayedBuffer].size() ||
         !g_hudPieces[g_displayedBuffer][static_cast<std::uint32_t>(index)])
         return 0;
@@ -307,12 +319,12 @@ void traceMarginSource(const std::uint8_t* io, unsigned long long frame)
 {
     for (int bg = 2; bg <= 3; ++bg) {
         const std::uint32_t map = kVramBase + ((ioHalf(io, 0x08 + bg * 2) >> 8) & 31u) * 0x800u;
-        const WorldLayer& layer = g_frame.layers[bg];
+        const WorldLayer& layer = g_state->frame.layers[bg];
         int mismatches = 0, firstColumn = -1, firstRow = -1;
         for (int row = 0; row < 20; ++row)
             for (int column = 0; column < 30; ++column) {
-                const int tileX = (g_frame.cameraX >> 3) + column, tileY = (g_frame.cameraY >> 3) + row;
-                const std::uint32_t cell = static_cast<std::uint32_t>((tileY >> 2) * static_cast<int>(g_frame.cellsPerRow) + (tileX >> 2));
+                const int tileX = (g_state->frame.cameraX >> 3) + column, tileY = (g_state->frame.cameraY >> 3) + row;
+                const std::uint32_t cell = static_cast<std::uint32_t>((tileY >> 2) * static_cast<int>(g_state->frame.cellsPerRow) + (tileX >> 2));
                 const std::uint16_t block = bus_read_u16(layer.cellMap + cell * 2u);
                 const std::uint16_t want = bus_read_u16(layer.blocks + block * 32u + static_cast<std::uint32_t>((tileY & 3) * 8 + (tileX & 3) * 2));
                 if (want == bus_read_u16(map + static_cast<std::uint32_t>(row * 32 + column) * 2u)) continue;
@@ -320,8 +332,18 @@ void traceMarginSource(const std::uint8_t* io, unsigned long long frame)
             }
         if (mismatches)
             std::fprintf(stderr, "[rotk] widescreen margins: frame %llu BG%d %d/600 tiles differ from VRAM (first %d,%d), camera %d,%d\n",
-                         frame, bg, mismatches, firstColumn, firstRow, g_frame.cameraX, g_frame.cameraY);
+                         frame, bg, mismatches, firstColumn, firstRow, g_state->frame.cameraX, g_state->frame.cameraY);
     }
+}
+
+// The renderer's providers for the selected console's frame.
+void installProviders()
+{
+    gba::g_ws_pillarbox = g_state->frame.world ? 0 : 1;
+    gba::g_ws_tilemap_provider = g_state->frame.world ? rotkWorldTile : nullptr;
+    gba::g_ws_bg_x_provider = g_state->frame.hud ? rotkHudBgX : nullptr;
+    gba::g_ws_bg_x_provider_layers = 1u << 0;
+    gba::g_ws_obj_attr_x_provider = g_state->frame.hud ? rotkHudObjX : nullptr;
 }
 
 void widescreenFrame(const gbarecomp::ExtendedViewFrameInfo* info)
@@ -330,47 +352,40 @@ void widescreenFrame(const gbarecomp::ExtendedViewFrameInfo* info)
     const std::uint16_t dispcnt = io ? ioHalf(io, 0) : 0;
     const std::uint32_t scene = bus_read_u32(kSceneCurrentId);
     // In-game dialogue draws its box over the frozen gameplay layers: keep the wide view.
-    g_frame.world = io && (scene == kSceneGameplay || scene == kSceneInGameDialog) && (dispcnt & 7u) == 0 &&
-                    (dispcnt & 0x0C00u) == 0x0C00u;
-    gba::g_ws_pillarbox = g_frame.world ? 0 : 1;
-    gba::g_ws_tilemap_provider = g_frame.world ? rotkWorldTile : nullptr;
-    static int hudMissing = kHudLostFrames;
-    const bool hudSeen = g_hudEdges && g_frame.world && standardHud(io);
-    static bool lastSeen = false;
+    g_state->frame.world = io && (scene == kSceneGameplay || scene == kSceneInGameDialog) &&
+                           (dispcnt & 7u) == 0 && (dispcnt & 0x0C00u) == 0x0C00u;
+    const bool hudSeen = g_hudEdges && !g_state->coop && g_state->frame.world && standardHud(io);
     static int flips = 0;
-    if (hudSeen != lastSeen && flips < 40 && std::getenv("ROTK_PC_TRACE_HUD")) {
+    if (hudSeen != g_state->hudSeen && flips < 40 && std::getenv("ROTK_PC_TRACE_HUD")) {
         ++flips;
         std::fprintf(stderr, "[rotk] hud signature %s at frame %llu, state %s %s%s", hudSeen ? "seen" : "lost",
                      static_cast<unsigned long long>(info->frame_count), hudSeen ? "" : "missing", "", "\n");
     }
-    lastSeen = hudSeen;
-    if (hudSeen) hudMissing = 0;
-    else if (hudMissing < kHudLostFrames) ++hudMissing;
-    g_frame.hud = g_hudEdges && g_frame.world && hudMissing < kHudLostFrames;
-    gba::g_ws_bg_x_provider = g_frame.hud ? rotkHudBgX : nullptr;
-    gba::g_ws_bg_x_provider_layers = 1u << 0;
-    gba::g_ws_obj_attr_x_provider = g_frame.hud ? rotkHudObjX : nullptr;
+    g_state->hudSeen = hudSeen;
+    if (hudSeen) g_state->hudMissing = 0;
+    else if (g_state->hudMissing < kHudLostFrames) ++g_state->hudMissing;
+    g_state->frame.hud = g_hudEdges && !g_state->coop && g_state->frame.world && g_state->hudMissing < kHudLostFrames;
+    installProviders();
     // A state load or reset jumps the frame count: until the game's next DMA the latch is stale, but
     // the loaded tile camera matches the loaded VRAM.
     // (A live resize republishes the same frame.)
-    static std::uint64_t lastFrame = 0;
-    if (info->frame_count != lastFrame + 1 && info->frame_count != lastFrame) latchCamera();
-    lastFrame = info->frame_count;
-    if (!g_frame.world) return;
-    g_frame.cameraX = g_latchedCameraX;
-    g_frame.cameraY = g_latchedCameraY;
-    g_frame.worldTilesX = bus_read_u16(kWorldWidthTiles);
-    g_frame.worldTilesY = bus_read_u16(kWorldHeightTiles);
-    g_frame.cellsPerRow = bus_read_u16(kCellMapWidth);
-    g_frame.bg3Screenblock = kVramBase + ((ioHalf(io, 0x0E) >> 8) & 31u) * 0x800u;
-    g_frame.layers[3].cellMap = bus_read_u32(kBg3CellMap);
-    g_frame.layers[3].blocks = bus_read_u32(kBg3Blocks);
-    g_frame.layers[2].cellMap = bus_read_u32(kBg2CellMap);
-    g_frame.layers[2].blocks = bus_read_u32(kBg2Blocks);
+    if (info->frame_count != g_state->lastFrame + 1 && info->frame_count != g_state->lastFrame) latchCamera();
+    g_state->lastFrame = info->frame_count;
+    if (!g_state->frame.world) return;
+    g_state->frame.cameraX = g_state->latchedCameraX;
+    g_state->frame.cameraY = g_state->latchedCameraY;
+    g_state->frame.worldTilesX = bus_read_u16(kWorldWidthTiles);
+    g_state->frame.worldTilesY = bus_read_u16(kWorldHeightTiles);
+    g_state->frame.cellsPerRow = bus_read_u16(kCellMapWidth);
+    g_state->frame.bg3Screenblock = kVramBase + ((ioHalf(io, 0x0E) >> 8) & 31u) * 0x800u;
+    g_state->frame.layers[3].cellMap = bus_read_u32(kBg3CellMap);
+    g_state->frame.layers[3].blocks = bus_read_u32(kBg3Blocks);
+    g_state->frame.layers[2].cellMap = bus_read_u32(kBg2CellMap);
+    g_state->frame.layers[2].blocks = bus_read_u32(kBg2Blocks);
     for (int bg = 2; bg <= 3; ++bg) {
-        g_frame.layers[bg].cachedScanline = -1;
-        g_frame.layers[bg].hofs = ioHalf(io, 0x10 + bg * 4) & 0x1FF;
-        g_frame.layers[bg].vofs = ioHalf(io, 0x12 + bg * 4) & 0x1FF;
+        g_state->frame.layers[bg].cachedScanline = -1;
+        g_state->frame.layers[bg].hofs = ioHalf(io, 0x10 + bg * 4) & 0x1FF;
+        g_state->frame.layers[bg].vofs = ioHalf(io, 0x12 + bg * 4) & 0x1FF;
     }
     static const bool traceMargins = std::getenv("ROTK_PC_TRACE_MARGINS") != nullptr;
     if (traceMargins) traceMarginSource(io, info->frame_count);
@@ -386,6 +401,7 @@ void widescreenInit(std::uint32_t, std::uint32_t)
 // margins it must reproduce the original frames exactly.
 void widescreenReset()
 {
+    g_enabled = false;
     g_hudEdges = false;
     if (std::getenv("ROTK_PC_TEST_VISIBILITY")) gba_mod_set_function_hook_enabled(kVisibilityHookId, 1);
 }
@@ -394,6 +410,7 @@ void widescreenActivated()
 {
     const char* width = gba_mod_option_value(kPackageId, kFeatureId, "width");
     gba_mod_set_view_width(width ? std::atoi(width) : 284);
+    g_enabled = true;
     gba_mod_set_function_hook_enabled(kCameraHookId, 1);
     gba_mod_set_function_hook_enabled(kVisibilityHookId, 1);
     const char* hudEdges = gba_mod_option_value(kPackageId, kFeatureId, "hud-edges");
@@ -423,9 +440,39 @@ void widescreenRegister(gbarecomp::RunOptions& options)
 
 void widescreenObserveDma(std::uint32_t, std::uint32_t destination)
 {
-    if (g_frame.bg3Screenblock != 0 && destination >= g_frame.bg3Screenblock &&
-        destination < g_frame.bg3Screenblock + 0x800u)
+    if (g_state->frame.bg3Screenblock != 0 && destination >= g_state->frame.bg3Screenblock &&
+        destination < g_state->frame.bg3Screenblock + 0x800u)
         latchCamera();
+}
+
+bool widescreenEnabled()
+{
+    return g_enabled && g_ws_active;
+}
+
+void widescreenStartCoop()
+{
+    for (int console = 1; console <= 2; ++console) {
+        g_states[console] = ConsoleState{};
+        g_states[console].coop = true;
+    }
+    gba_mod_set_function_hook_runs_suspended(kCameraHookId, 1);
+    gba_mod_set_function_hook_runs_suspended(kVisibilityHookId, 1);
+}
+
+void widescreenEndCoop()
+{
+    gba_mod_set_function_hook_runs_suspended(kCameraHookId, 0);
+    gba_mod_set_function_hook_runs_suspended(kVisibilityHookId, 0);
+    widescreenSelectConsole(-1);
+}
+
+void widescreenSelectConsole(int console)
+{
+    ConsoleState* state = console >= 0 && console < 2 ? &g_states[console + 1] : &g_states[0];
+    if (state == g_state) return;
+    g_state = state;
+    installProviders();
 }
 
 void widescreenNotePiece(int buffer, std::uint32_t index)

@@ -19,4 +19,12 @@ void widescreenObserveDma(std::uint32_t source, std::uint32_t destination);
 void widescreenNotePiece(int buffer, std::uint32_t index);
 void widescreenSetDisplayedBuffer(int buffer);
 
+// Split-screen co-op: whether the wide view is on (the co-op consoles then share it), fresh state
+// for both co-op consoles with the camera and visibility hooks serving them, and the console whose
+// state is in use (0 or 1, or -1 for the solo game).
+bool widescreenEnabled();
+void widescreenStartCoop();
+void widescreenEndCoop();
+void widescreenSelectConsole(int console);
+
 }  // namespace rotk

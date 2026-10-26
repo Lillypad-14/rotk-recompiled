@@ -1,8 +1,10 @@
 #include "local_coop.h"
 
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 #include "gba_bus.h"
 #include "gba_ppu.h"
@@ -10,6 +12,7 @@
 #include "mod_runtime.h"
 #include "multiplayer_session.h"
 #include "runtime_bus_bridge.h"
+#include "widescreen.h"
 
 extern "C" void (*g_dma_observer)(int channel, std::uint32_t src, std::uint32_t dst, std::uint32_t bytes);
 
@@ -54,8 +57,9 @@ std::uint16_t steerToMultiplayer(const MenuState& menu, std::uint64_t frame)
     return kA;
 }
 
-// The PC features' hooks are process-wide, so they would act on the session's consoles too. The
-// co-op consoles are plain GBAs: every hook is off while the session runs.
+// The PC features' hooks are process-wide, so they would act on the session's consoles too. Only
+// features with per-console state serve the co-op consoles (widescreen); every other hook is off
+// while the session runs.
 struct FeatureHooks {
     void (*present)(std::uint32_t, std::uint8_t*, std::uint8_t*) = nullptr;
     const std::uint8_t* (*extraObjects)(std::uint32_t*) = nullptr;
@@ -69,18 +73,25 @@ bool g_linked = false;
 std::uint64_t g_linkedAt = 0;  // session frame the consoles linked
 int g_cancelFrames = 0;
 
+void coopObserveDma(int, std::uint32_t source, std::uint32_t destination, std::uint32_t)
+{
+    widescreenObserveDma(source, destination);
+}
+
 void suspendFeatureHooks()
 {
     g_saved = {gba::g_present_scanline_hook, gba::g_extra_obj_provider, gba::g_rom_read32_override, g_dma_observer};
     gba::g_present_scanline_hook = nullptr;
     gba::g_extra_obj_provider = nullptr;
     gba::g_rom_read32_override = nullptr;
-    g_dma_observer = nullptr;
+    g_dma_observer = coopObserveDma;
     gba_mod_set_function_hooks_suspended(1);
+    widescreenStartCoop();
 }
 
 void resumeFeatureHooks()
 {
+    widescreenEndCoop();
     gba_mod_set_function_hooks_suspended(0);
     gba::g_present_scanline_hook = g_saved.present;
     gba::g_extra_obj_provider = g_saved.extraObjects;
@@ -146,6 +157,26 @@ bool frame(gbarecomp::LocalLinkFrame* link)
     link->screens = 2;
     link->buttons[0] = link->players[0];
     link->buttons[1] = link->players[1];
+    // Test aid: ROTK_PC_COOP_TEST_INPUTS=<file> plays both players from lines `frame p1 p2` (frames
+    // after the consoles link, pressed GBA button bits, held until the next line).
+    static const std::vector<std::array<std::uint32_t, 3>> script = [] {
+        std::vector<std::array<std::uint32_t, 3>> rows;
+        if (const char* path = std::getenv("ROTK_PC_COOP_TEST_INPUTS"))
+            if (std::FILE* file = std::fopen(path, "r")) {
+                char line[128];
+                std::array<std::uint32_t, 3> row{};
+                while (std::fgets(line, sizeof(line), file))
+                    if (line[0] != '#' && std::sscanf(line, "%u %u %u", &row[0], &row[1], &row[2]) == 3)
+                        rows.push_back(row);
+                std::fclose(file);
+            }
+        return rows;
+    }();
+    for (const auto& row : script)
+        if (row[0] <= link->frame - g_linkedAt) {
+            link->buttons[0] = static_cast<std::uint16_t>(row[1]);
+            link->buttons[1] = static_cast<std::uint16_t>(row[2]);
+        }
     // Test aid: ROTK_PC_COOP_TEST_EXIT_AFTER=N ends the session N frames after the consoles link.
     static const char* exitAfter = std::getenv("ROTK_PC_COOP_TEST_EXIT_AFTER");
     if (exitAfter && link->frame - g_linkedAt >= std::strtoull(exitAfter, nullptr, 10)) {
@@ -176,7 +207,17 @@ bool partnerKeepsSave()
     return !option || std::strcmp(option, "copy") != 0;
 }
 
-const gbarecomp::LocalLinkPlay kLocalLink{wanted, frame, finished, partnerKeepsSave};
+bool shareView()
+{
+    return widescreenEnabled();
+}
+
+void bindConsole(int console)
+{
+    widescreenSelectConsole(console);
+}
+
+const gbarecomp::LocalLinkPlay kLocalLink{wanted, frame, finished, partnerKeepsSave, shareView, bindConsole};
 
 void localCoopActivated()
 {

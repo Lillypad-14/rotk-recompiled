@@ -18,8 +18,15 @@ The game's own two-player link co-op, with both consoles on this PC.
    and the window returns to one screen. The save is backed up once per run to
    `<save>.before-link` first.
 
-The co-op consoles are plain GBAs: every PC feature hook is suspended while the session runs
-(mod function hooks, scanline, extra-object, ROM-read and DMA hooks) and the CPU boost does not
+Widescreen works in co-op: both consoles get the window's width (284 by default), with world
+margins, camera clamping and the widened actor visibility, and menus pillarboxed. Each console has
+its own widescreen state (`widescreenSelectConsole`, switched by the session's bind hook), and its
+camera and visibility hooks keep running while the others are suspended. The HUD stays in its
+native layout (HUD at the edges needs the extra-sprite hooks). Both consoles use the same margins,
+so their simulations agree.
+
+Every other PC feature is off during co-op (mod function hooks, scanline, extra-object and
+ROM-read hooks, the DMA observer apart from widescreen's camera latch), and the CPU boost does not
 apply.
 
 ## Player 2's save
@@ -50,6 +57,11 @@ Option "Player 2 save" (`player2-save`):
   still link. ROTK's handshake, level select and gameplay work with it.
 - Machine pause (`set_machine_paused`): a paused console's clock stops and it resumes without
   catching up.
+- Shared view (`LocalLinkPlay::share_view`): both consoles render at the window's margins, and
+  `extended_view_frame` runs at each console's frame start
+  (`runtime_set_session_frame_start_hook`). `LocalLinkPlay::bind` reports the active console
+  (`GbaMultiplayerSession::set_bind_observer`), and `gba_mod_set_function_hook_runs_suspended` keeps
+  chosen hooks running in the session.
 - Partner audio (`LocalLinkFrame::partner_audio`): console 1's samples are added to console 0's.
 - Partner save (`LocalLinkPlay::partner_keeps_save`): console 1's own save file,
   `<stem>.player2<ext>` beside the normal save.
@@ -85,6 +97,11 @@ budget); local chunks on menus 3.8 ms mean on a quiet machine.
 
 - `RotkSplitScreenSpike` (tests/split_screen_spike.cpp): headless runs with per-seat input scripts
   and side-by-side screenshots, and `play` mode (`PlaySplitScreenTest.cmd`).
+- In game, `ROTK_PC_COOP_TEST_INPUTS=<file>` plays both players from `frame p1 p2` lines counted
+  from the link. Widescreen check (2026-10-26): saves from `.private/split-screen/`, the solo
+  console scripted into Multiplayer, both players through the menus into the first level and 30 s
+  of fighting; 284-wide screens with seamless margins, `ROTK_PC_TRACE_MARGINS` silent except the
+  34-frame level-load fade at camera 0,0 on each console, 7.1 ms mean per frame.
 - Co-op fight timing: from `.private/expanded/play`, `GBARECOMP_SESSION_INTERPRETER=1
   SPLIT_LOCAL_CHUNK=1232 SPLIT_SAVE_P1=../../split-screen/p1.sram SPLIT_SAVE_P2=../../split-screen/p2.sram
   RotkSplitScreenSpike ../rotk.gba ../gba_bios.bin 10800 config/scenarios/split-screen-fight.txt OUT 600`.
@@ -99,7 +116,8 @@ budget); local chunks on menus 3.8 ms mean on a quiet machine.
 
 ## Open
 
-1. PC features inside co-op (needs per-console state for each feature).
+1. More PC features inside co-op (each needs per-console state): smooth motion, transparency,
+   HUD at the edges, the larger engine limits (the host heap and actor pools are one per process).
 2. The audio mixer interpreted on both consoles remains a large cost (interpreter step, state
    copies); native RAM templates for it (roadmap section 2) would help single-player too.
 3. The framework pieces live only in the `external/gbarecomp` working tree, not in `patches/`.
