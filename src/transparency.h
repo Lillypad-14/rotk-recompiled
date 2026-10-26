@@ -14,6 +14,10 @@ void transparencyApply();
 
 bool transparencyActive();
 
+// Split-screen co-op: fresh state with the solo game's settings for both co-op consoles, and the
+// console whose state is in use (0 or 1, or -1 for the solo game).
+void transparencyStartCoop();
+void transparencySelectConsole(int console);
 // The shadow buffer (0/1) and page (0/1) the VBlank handler last copied to OAM.
 void transparencySetDisplayed(int buffer, int page);
 

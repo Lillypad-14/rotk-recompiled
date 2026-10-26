@@ -25,9 +25,14 @@ camera and visibility hooks keep running while the others are suspended. The HUD
 native layout (HUD at the edges needs the extra-sprite hooks). Both consoles use the same margins,
 so their simulations agree.
 
-Every other PC feature is off during co-op (mod function hooks, scanline, extra-object and
-ROM-read hooks, the DMA observer apart from widescreen's camera latch), and the CPU boost does not
-apply.
+Smooth motion, real transparency and the extra sprite pages also work in co-op, each with its own
+state per console (`pcFeaturesSelectConsole` in src/main.cpp). Smooth motion rarely has an
+in-between frame there (about 65 of 4,500 frames per console in the scripted fight): it needs the
+next tick composed by the repeated vblank, which mostly happens with the CPU boost, and link
+sessions keep native timing.
+
+Off during co-op: the engine limits (larger heap, actor pools, render sort and the ROM-read
+override change the game's memory), HD icons, HD audio and the CPU boost.
 
 ## Player 2's save
 
@@ -116,8 +121,9 @@ budget); local chunks on menus 3.8 ms mean on a quiet machine.
 
 ## Open
 
-1. More PC features inside co-op (each needs per-console state): smooth motion, transparency,
-   HUD at the edges, the larger engine limits (the host heap and actor pools are one per process).
+1. More PC features inside co-op: HUD at the edges (its piece tracking is per console now, but it
+   is untested there), HD icons (needs the high-resolution renderer per console), the larger engine
+   limits (the host heap and actor pools are one per process).
 2. The audio mixer interpreted on both consoles remains a large cost (interpreter step, state
    copies); native RAM templates for it (roadmap section 2) would help single-player too.
 3. The framework pieces live only in the `external/gbarecomp` working tree, not in `patches/`.

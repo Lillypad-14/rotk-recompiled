@@ -57,9 +57,9 @@ std::uint16_t steerToMultiplayer(const MenuState& menu, std::uint64_t frame)
     return kA;
 }
 
-// The PC features' hooks are process-wide, so they would act on the session's consoles too. Only
-// features with per-console state serve the co-op consoles (widescreen); every other hook is off
-// while the session runs.
+// The PC features' hooks are process-wide, so they would act on the session's consoles too. The
+// presentation features keep per-console state and serve the co-op consoles (pcFeaturesStartCoop);
+// every other hook is off while the session runs, and so is the ROM-read override.
 struct FeatureHooks {
     void (*present)(std::uint32_t, std::uint8_t*, std::uint8_t*) = nullptr;
     const std::uint8_t* (*extraObjects)(std::uint32_t*) = nullptr;
@@ -73,25 +73,17 @@ bool g_linked = false;
 std::uint64_t g_linkedAt = 0;  // session frame the consoles linked
 int g_cancelFrames = 0;
 
-void coopObserveDma(int, std::uint32_t source, std::uint32_t destination, std::uint32_t)
-{
-    widescreenObserveDma(source, destination);
-}
-
 void suspendFeatureHooks()
 {
     g_saved = {gba::g_present_scanline_hook, gba::g_extra_obj_provider, gba::g_rom_read32_override, g_dma_observer};
-    gba::g_present_scanline_hook = nullptr;
-    gba::g_extra_obj_provider = nullptr;
     gba::g_rom_read32_override = nullptr;
-    g_dma_observer = coopObserveDma;
     gba_mod_set_function_hooks_suspended(1);
-    widescreenStartCoop();
+    pcFeaturesStartCoop();
 }
 
 void resumeFeatureHooks()
 {
-    widescreenEndCoop();
+    pcFeaturesEndCoop();
     gba_mod_set_function_hooks_suspended(0);
     gba::g_present_scanline_hook = g_saved.present;
     gba::g_extra_obj_provider = g_saved.extraObjects;
@@ -214,7 +206,7 @@ bool shareView()
 
 void bindConsole(int console)
 {
-    widescreenSelectConsole(console);
+    pcFeaturesSelectConsole(console);
 }
 
 const gbarecomp::LocalLinkPlay kLocalLink{wanted, frame, finished, partnerKeepsSave, shareView, bindConsole};

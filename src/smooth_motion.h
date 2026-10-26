@@ -15,6 +15,12 @@ void smoothMotionApply();
 // Installs the presentation scanline hook while smooth motion or real transparency is on.
 void smoothRefreshPresentHook();
 
+// Split-screen co-op: fresh state with the solo game's settings for both co-op consoles (their
+// compose and particle hooks keep running), and the console whose state is in use (0 or 1, or -1
+// for the solo game).
+void smoothStartCoop();
+void smoothEndCoop();
+void smoothSelectConsole(int console);
 // True while the feature needs the sprite push/end-frame observers.
 bool smoothMotionActive();
 

@@ -98,7 +98,8 @@ struct State {
     std::uint64_t frames = 0, interpolated = 0, movedBg = 0, movedObj = 0;
 };
 
-State g;
+State g_states[3];  // solo, co-op console 1, co-op console 2
+State* g = &g_states[0];
 
 int shadowBuffer(std::uint32_t shadow)
 {
@@ -130,9 +131,9 @@ int composeOamEntry(std::uint32_t, int, ArmCpuState* cpu)
 {
     const int buffer = composingBuffer();
     if (buffer < 0) return 0;
-    if (!g.composing[buffer]) {
-        g.positions[buffer].clear();
-        g.composing[buffer] = true;
+    if (!g->composing[buffer]) {
+        g->positions[buffer].clear();
+        g->composing[buffer] = true;
     }
     const std::uint32_t actor = cpu->R[0];
     Position position;
@@ -140,9 +141,9 @@ int composeOamEntry(std::uint32_t, int, ArmCpuState* cpu)
     position.y = static_cast<std::int32_t>(bus_read_u32(actor + kActorRenderY)) >> 16;
     position.screen = (bus_read_u32(actor + kActorFlags) & kActorScreenSpace) ||
                       bus_read_u8(actor + kActorListId) == kListOverlay;
-    g.actor = actor;
-    g.position = position;
-    g.positions[buffer][actor] = position;
+    g->actor = actor;
+    g->position = position;
+    g->positions[buffer][actor] = position;
     return 0;  // observe only
 }
 
@@ -152,20 +153,20 @@ int composeOamEntry(std::uint32_t, int, ArmCpuState* cpu)
 int drawParticleEntry(std::uint32_t, int, ArmCpuState* cpu)
 {
     const int buffer = composingBuffer();
-    g.actor = 0;
-    if (buffer < 0 || !g.particles) return 0;
-    if (!g.composing[buffer]) {
-        g.positions[buffer].clear();
-        g.composing[buffer] = true;
+    g->actor = 0;
+    if (buffer < 0 || !g->particles) return 0;
+    if (!g->composing[buffer]) {
+        g->positions[buffer].clear();
+        g->composing[buffer] = true;
     }
     const std::uint32_t particle = cpu->R[0];
     Position position;
     position.x = static_cast<std::int16_t>(bus_read_u16(particle + kParticleRenderX));
     position.y = static_cast<std::int16_t>(bus_read_u16(particle + kParticleRenderY));
     position.screen = (bus_read_u16(particle + kParticleFlags) & kParticleScreenSpace) != 0;
-    g.actor = particle;
-    g.position = position;
-    g.positions[buffer][particle] = position;
+    g->actor = particle;
+    g->position = position;
+    g->positions[buffer][particle] = position;
     return 0;
 }
 
@@ -192,56 +193,56 @@ int wrapDelta(int delta, int bits)
 void learnParallax(const std::uint8_t* io, int shown)
 {
     const int scroll[2] = {io[0x14] | io[0x15] << 8, io[0x16] | io[0x17] << 8};
-    const int camera[2] = {g.cameraX[shown], g.cameraY[shown]};
-    for (int axis = 0; axis < 2 && g.parallaxValid; ++axis) {
-        const int cameraDelta = camera[axis] - g.parallaxCamera[axis];
+    const int camera[2] = {g->cameraX[shown], g->cameraY[shown]};
+    for (int axis = 0; axis < 2 && g->parallaxValid; ++axis) {
+        const int cameraDelta = camera[axis] - g->parallaxCamera[axis];
         if (cameraDelta == 0 || cameraDelta < -kMaxStep || cameraDelta > kMaxStep) continue;
-        const float ratio = static_cast<float>(wrapDelta(scroll[axis] - g.parallaxScroll[axis], 9)) / cameraDelta;
-        if (ratio >= -2.0f && ratio <= 2.0f) g.parallaxRatio[axis] = ratio;
+        const float ratio = static_cast<float>(wrapDelta(scroll[axis] - g->parallaxScroll[axis], 9)) / cameraDelta;
+        if (ratio >= -2.0f && ratio <= 2.0f) g->parallaxRatio[axis] = ratio;
     }
     for (int axis = 0; axis < 2; ++axis) {
-        g.parallaxScroll[axis] = scroll[axis];
-        g.parallaxCamera[axis] = camera[axis];
+        g->parallaxScroll[axis] = scroll[axis];
+        g->parallaxCamera[axis] = camera[axis];
     }
-    g.parallaxValid = true;
+    g->parallaxValid = true;
 }
 
 void prepareFrame(const std::uint8_t* io)
 {
-    ++g.frames;
-    g.interpolate = false;
-    const int shown = g.displayed;
-    if (!g.enabled || shown < 0) return;
-    if (g.vblanksShown == 0) learnParallax(io, shown);
-    if (g.vblanksShown != 1) return;
+    ++g->frames;
+    g->interpolate = false;
+    const int shown = g->displayed;
+    if (!g->enabled || shown < 0) return;
+    if (g->vblanksShown == 0) learnParallax(io, shown);
+    if (g->vblanksShown != 1) return;
     const int next = 1 - shown;
-    if (g.composing[next] || g.composed[next] <= g.composed[shown]) return;  // next tick not ready
+    if (g->composing[next] || g->composed[next] <= g->composed[shown]) return;  // next tick not ready
 
-    for (auto& layer : g.bgOffset) layer[0] = layer[1] = 0;
+    for (auto& layer : g->bgOffset) layer[0] = layer[1] = 0;
     int shiftX = 0, shiftY = 0;
-    const int cameraDx = g.cameraX[next] - g.cameraX[shown], cameraDy = g.cameraY[next] - g.cameraY[shown];
+    const int cameraDx = g->cameraX[next] - g->cameraX[shown], cameraDy = g->cameraY[next] - g->cameraY[shown];
     const bool cameraFollows = small(cameraDx, cameraDy);
     if (bus_read_u32(kSceneCurrentId) == kSceneGameplay && cameraFollows) {
         // World layers BG3 and BG2 hold the camera's tiles; their scroll is only the fine offset.
         shiftX = cameraShift(cameraDx, (io[0x1C] | io[0x1D] << 8) & 7);
         shiftY = cameraShift(cameraDy, (io[0x1E] | io[0x1F] << 8) & 7);
-        g.bgOffset[2][0] = g.bgOffset[3][0] = shiftX;
-        g.bgOffset[2][1] = g.bgOffset[3][1] = shiftY;
-        if (g.parallax && (io[1] & 0x02u)) {  // BG1 on
-            g.bgOffset[1][0] = static_cast<int>(std::lround(g.parallaxRatio[0] * cameraDx * 0.5f));
-            g.bgOffset[1][1] = static_cast<int>(std::lround(g.parallaxRatio[1] * cameraDy * 0.5f));
+        g->bgOffset[2][0] = g->bgOffset[3][0] = shiftX;
+        g->bgOffset[2][1] = g->bgOffset[3][1] = shiftY;
+        if (g->parallax && (io[1] & 0x02u)) {  // BG1 on
+            g->bgOffset[1][0] = static_cast<int>(std::lround(g->parallaxRatio[0] * cameraDx * 0.5f));
+            g->bgOffset[1][1] = static_cast<int>(std::lround(g->parallaxRatio[1] * cameraDy * 0.5f));
         }
     }
 
     // Sprite pieces of the displayed buffer: their actor's halfway position, through the presented
     // camera for world actors.
-    const std::uint32_t pieces = g.pieces[shown];
-    g.objOffset.assign(static_cast<std::size_t>(pieces) * 2u, 0);
+    const std::uint32_t pieces = g->pieces[shown];
+    g->objOffset.assign(static_cast<std::size_t>(pieces) * 2u, 0);
     for (std::uint32_t i = 0; i < pieces; ++i) {
-        const Tag& tag = g.tags[shown][i];
+        const Tag& tag = g->tags[shown][i];
         if (!tag.actor) continue;
-        const auto found = g.positions[next].find(tag.actor);
-        if (found == g.positions[next].end() || found->second.screen != tag.position.screen) continue;
+        const auto found = g->positions[next].find(tag.actor);
+        if (found == g->positions[next].end() || found->second.screen != tag.position.screen) continue;
         const int dx = found->second.x - tag.position.x, dy = found->second.y - tag.position.y;
         if (!small(dx, dy)) continue;
         int ox = half(dx), oy = half(dy);
@@ -250,15 +251,15 @@ void prepareFrame(const std::uint8_t* io)
             ox -= shiftX;
             oy -= shiftY;
         }
-        g.objOffset[i * 2] = static_cast<std::int8_t>(ox);
-        g.objOffset[i * 2 + 1] = static_cast<std::int8_t>(oy);
+        g->objOffset[i * 2] = static_cast<std::int8_t>(ox);
+        g->objOffset[i * 2 + 1] = static_cast<std::int8_t>(oy);
     }
-    g.interpolate = true;
-    ++g.interpolated;
+    g->interpolate = true;
+    ++g->interpolated;
     bool obj = false;
-    for (const std::int8_t offset : g.objOffset) obj = obj || offset;
-    g.movedBg += shiftX || shiftY;
-    g.movedObj += obj;
+    for (const std::int8_t offset : g->objOffset) obj = obj || offset;
+    g->movedBg += shiftX || shiftY;
+    g->movedObj += obj;
 }
 
 void moveObject(std::uint8_t* entry, int dx, int dy)
@@ -278,35 +279,40 @@ void presentScanline(std::uint32_t y, std::uint8_t* io, std::uint8_t* oam)
 {
     transparencyScanline(y, io, oam);  // first: it replaces whole entries that smoothing then moves
     if (y == 0) prepareFrame(io);
-    if (!g.interpolate) return;
+    if (!g->interpolate) return;
     for (unsigned layer = 0; layer < 4; ++layer)
         for (unsigned axis = 0; axis < 2; ++axis) {
-            const int offset = g.bgOffset[layer][axis];
+            const int offset = g->bgOffset[layer][axis];
             if (!offset) continue;
             const unsigned reg = 0x10u + layer * 4u + axis * 2u;
             const int value = ((io[reg] | io[reg + 1] << 8) + offset) & 0x1FF;
             io[reg] = static_cast<std::uint8_t>(value);
             io[reg + 1] = static_cast<std::uint8_t>(value >> 8);
         }
-    const std::uint32_t hardware = g.pieces[g.displayed] < 128u ? g.pieces[g.displayed] : 128u;
+    const std::uint32_t hardware = g->pieces[g->displayed] < 128u ? g->pieces[g->displayed] : 128u;
     for (std::uint32_t i = 0; i < hardware; ++i) {
-        const int dx = g.objOffset[i * 2], dy = g.objOffset[i * 2 + 1];
+        const int dx = g->objOffset[i * 2], dy = g->objOffset[i * 2 + 1];
         if (dx || dy) moveObject(oam + i * 8u, dx, dy);
     }
 }
 
 void report()
 {
-    if (g.frames)
-        std::fprintf(stderr, "[rotk] smooth motion: %llu frames, %llu interpolated (%llu moved BG, %llu moved sprites)\n",
-                     static_cast<unsigned long long>(g.frames), static_cast<unsigned long long>(g.interpolated),
-                     static_cast<unsigned long long>(g.movedBg), static_cast<unsigned long long>(g.movedObj));
+    static const char* const names[3] = {"", " (co-op console 1)", " (co-op console 2)"};
+    for (int i = 0; i < 3; ++i) {
+        const State& state = g_states[i];
+        if (state.frames)
+            std::fprintf(stderr, "[rotk] smooth motion%s: %llu frames, %llu interpolated (%llu moved BG, %llu moved sprites)\n",
+                         names[i], static_cast<unsigned long long>(state.frames),
+                         static_cast<unsigned long long>(state.interpolated),
+                         static_cast<unsigned long long>(state.movedBg), static_cast<unsigned long long>(state.movedObj));
+    }
 }
 
 void enable()
 {
-    g.enabled = true;
-    for (auto& tags : g.tags) tags.assign(kMaxPieces, Tag{});
+    g->enabled = true;
+    for (auto& tags : g->tags) tags.assign(kMaxPieces, Tag{});
     gba_mod_set_function_hook_enabled(kHookId, 1);
     gba_mod_set_function_hook_enabled(kParticleHookId, 1);
     // The sprite push and end-frame observers of src/main.cpp feed the tags. With the extra sprite
@@ -331,8 +337,8 @@ void smoothActivated()
 {
     if (std::getenv("ROTK_PC_SMOOTH")) return;
     enable();
-    g.particles = subOption("ROTK_PC_SMOOTH_PARTICLES", "particles");
-    g.parallax = subOption("ROTK_PC_SMOOTH_PARALLAX", "parallax");
+    g->particles = subOption("ROTK_PC_SMOOTH_PARTICLES", "particles");
+    g->parallax = subOption("ROTK_PC_SMOOTH_PARALLAX", "parallax");
 }
 
 }  // namespace
@@ -347,7 +353,8 @@ void smoothMotionRegister()
 
 void smoothMotionApply()
 {
-    g = State{};
+    g = &g_states[0];
+    *g = State{};
     smoothRefreshPresentHook();
     gba_mod_set_function_hook_enabled(kHookId, 0);
     gba_mod_set_function_hook_enabled(kParticleHookId, 0);
@@ -355,67 +362,94 @@ void smoothMotionApply()
     if (const char* env = std::getenv("ROTK_PC_SMOOTH"))
         if (std::string(env) != "0") {
             enable();
-            g.particles = subOption("ROTK_PC_SMOOTH_PARTICLES", "particles");
-            g.parallax = subOption("ROTK_PC_SMOOTH_PARALLAX", "parallax");
+            g->particles = subOption("ROTK_PC_SMOOTH_PARTICLES", "particles");
+            g->parallax = subOption("ROTK_PC_SMOOTH_PARALLAX", "parallax");
         }
 }
 
 void smoothRefreshPresentHook()
 {
-    gba::g_present_scanline_hook = g.enabled || transparencyActive() ? presentScanline : nullptr;
+    gba::g_present_scanline_hook = g->enabled || transparencyActive() ? presentScanline : nullptr;
+}
+
+void smoothStartCoop()
+{
+    for (int console = 1; console <= 2; ++console) {
+        State& state = g_states[console];
+        state = State{};
+        state.enabled = g_states[0].enabled;
+        state.particles = g_states[0].particles;
+        state.parallax = g_states[0].parallax;
+        if (state.enabled)
+            for (auto& tags : state.tags) tags.assign(kMaxPieces, Tag{});
+    }
+    gba_mod_set_function_hook_runs_suspended(kHookId, 1);
+    gba_mod_set_function_hook_runs_suspended(kParticleHookId, 1);
+}
+
+void smoothEndCoop()
+{
+    gba_mod_set_function_hook_runs_suspended(kHookId, 0);
+    gba_mod_set_function_hook_runs_suspended(kParticleHookId, 0);
+    smoothSelectConsole(-1);
+}
+
+void smoothSelectConsole(int console)
+{
+    g = console >= 0 && console < 2 ? &g_states[console + 1] : &g_states[0];
 }
 
 bool smoothMotionActive()
 {
-    return g.enabled;
+    return g->enabled;
 }
 
 void smoothNotePiece(int buffer, std::uint32_t index)
 {
-    if (!g.enabled || buffer < 0 || index >= kMaxPieces) return;
+    if (!g->enabled || buffer < 0 || index >= kMaxPieces) return;
     Tag tag;
-    if (g.actor) {
-        tag.actor = g.actor;
-        tag.position = g.position;
+    if (g->actor) {
+        tag.actor = g->actor;
+        tag.position = g->position;
     }
-    g.tags[buffer][index] = tag;
-    if (index == 0 || index + 1u > g.pieces[buffer]) g.pieces[buffer] = index + 1u;
+    g->tags[buffer][index] = tag;
+    if (index == 0 || index + 1u > g->pieces[buffer]) g->pieces[buffer] = index + 1u;
 }
 
 void smoothEndFrame(int buffer)
 {
-    g.actor = 0;
-    if (!g.enabled || buffer < 0) return;
-    g.composing[buffer] = false;
+    g->actor = 0;
+    if (!g->enabled || buffer < 0) return;
+    g->composing[buffer] = false;
     const std::uint32_t camera = activeCamera();
-    g.cameraX[buffer] = static_cast<std::int32_t>(bus_read_u32(camera));
-    g.cameraY[buffer] = static_cast<std::int32_t>(bus_read_u32(camera + 4u));
-    g.composed[buffer] = ++g.serial;
+    g->cameraX[buffer] = static_cast<std::int32_t>(bus_read_u32(camera));
+    g->cameraY[buffer] = static_cast<std::int32_t>(bus_read_u32(camera + 4u));
+    g->composed[buffer] = ++g->serial;
 }
 
 void smoothSetDisplayedBuffer(int buffer)
 {
-    if (buffer == g.displayed) ++g.vblanksShown;
-    else g.vblanksShown = 0;
-    g.displayed = buffer;
+    if (buffer == g->displayed) ++g->vblanksShown;
+    else g->vblanksShown = 0;
+    g->displayed = buffer;
 }
 
 int smoothBgShift(int bg, int axis)
 {
-    if (!g.enabled || !g.interpolate || bg < 0 || bg > 3 || axis < 0 || axis > 1) return 0;
-    return g.bgOffset[bg][axis];
+    if (!g->enabled || !g->interpolate || bg < 0 || bg > 3 || axis < 0 || axis > 1) return 0;
+    return g->bgOffset[bg][axis];
 }
 
 const std::uint8_t* smoothAdjustExtra(const std::uint8_t* pieces, std::uint32_t count)
 {
-    if (!g.interpolate || !pieces || count == 0) return pieces;
-    g.extraCopy.assign(pieces, pieces + count * 8u);
-    const std::uint32_t tagged = g.objOffset.size() / 2u;
+    if (!g->interpolate || !pieces || count == 0) return pieces;
+    g->extraCopy.assign(pieces, pieces + count * 8u);
+    const std::uint32_t tagged = g->objOffset.size() / 2u;
     for (std::uint32_t k = 0; k < count && 128u + k < tagged; ++k) {
-        const int dx = g.objOffset[(128u + k) * 2], dy = g.objOffset[(128u + k) * 2 + 1];
-        if (dx || dy) moveObject(g.extraCopy.data() + k * 8u, dx, dy);
+        const int dx = g->objOffset[(128u + k) * 2], dy = g->objOffset[(128u + k) * 2 + 1];
+        if (dx || dy) moveObject(g->extraCopy.data() + k * 8u, dx, dy);
     }
-    return g.extraCopy.data();
+    return g->extraCopy.data();
 }
 
 }  // namespace rotk

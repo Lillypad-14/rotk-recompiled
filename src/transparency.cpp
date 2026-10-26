@@ -40,7 +40,8 @@ struct State {
     std::uint64_t frames = 0, framesWithPieces = 0;
 };
 
-State g;
+State g_states[3];  // solo, co-op console 1, co-op console 2
+State* g = &g_states[0];
 
 bool hidden(const std::uint8_t* entry)
 {
@@ -65,40 +66,40 @@ void makeSemiTransparent(std::uint8_t* dst, const std::uint8_t* page0)
 
 void prepareFrame()
 {
-    ++g.frames;
-    g.pieces.clear();
-    if (g.buffer < 0) return;
+    ++g->frames;
+    g->pieces.clear();
+    if (g->buffer < 0) return;
     const std::uint8_t* iwram = gbarecomp::active_bus()->iwram_ptr();
-    const std::uint32_t base = (g.buffer == 0 ? kOamShadowA : kOamShadowB) & 0x7FFFu;
+    const std::uint32_t base = (g->buffer == 0 ? kOamShadowA : kOamShadowB) & 0x7FFFu;
     const std::uint8_t* page0 = iwram + base;
     const std::uint8_t* page1 = page0 + kPageBytes;
     for (std::uint32_t i = 0; i < kHardwareObjects; ++i) {
         if (!seeThrough(page0 + i * 8u, page1 + i * 8u)) continue;
-        std::memcpy(g.entries[i], page0 + i * 8u, 8);
-        g.pieces.push_back(i);
+        std::memcpy(g->entries[i], page0 + i * 8u, 8);
+        g->pieces.push_back(i);
     }
-    g.framesWithPieces += !g.pieces.empty();
+    g->framesWithPieces += !g->pieces.empty();
     static const bool debug = std::getenv("ROTK_PC_TRANSPARENCY_DEBUG") != nullptr;
-    if (debug && !g.pieces.empty() && g.frames % 600 == 0)
-        for (const std::uint32_t i : g.pieces) {
+    if (debug && !g->pieces.empty() && g->frames % 600 == 0)
+        for (const std::uint32_t i : g->pieces) {
             const std::uint8_t* e0 = page0 + i * 8u;
             const std::uint8_t* e1 = page1 + i * 8u;
             std::fprintf(stderr, "[rotk] transparency frame %llu buffer %d page %d piece %u: %04x %04x %04x / %04x\n",
-                         static_cast<unsigned long long>(g.frames), g.buffer, g.page, i, e0[0] | e0[1] << 8,
+                         static_cast<unsigned long long>(g->frames), g->buffer, g->page, i, e0[0] | e0[1] << 8,
                          e0[2] | e0[3] << 8, e0[4] | e0[5] << 8, e1[0] | e1[1] << 8);
         }
 }
 
 void report()
 {
-    if (g.frames)
+    if (g->frames)
         std::fprintf(stderr, "[rotk] transparency: %llu frames, %llu with see-through pieces\n",
-                     static_cast<unsigned long long>(g.frames), static_cast<unsigned long long>(g.framesWithPieces));
+                     static_cast<unsigned long long>(g->frames), static_cast<unsigned long long>(g->framesWithPieces));
 }
 
 void enable()
 {
-    g.enabled = true;
+    g->enabled = true;
     smoothRefreshPresentHook();
     std::fprintf(stderr, "[rotk] real transparency on\n");
 }
@@ -117,7 +118,7 @@ void transparencyActivated()
 {
     if (std::getenv("ROTK_PC_TRANSPARENCY")) return;
     enable();
-    g.strength = strengthSetting();
+    g->strength = strengthSetting();
 }
 
 }  // namespace
@@ -130,57 +131,72 @@ void transparencyRegister()
 
 void transparencyApply()
 {
-    g = State{};
+    g = &g_states[0];
+    *g = State{};
     if (const char* env = std::getenv("ROTK_PC_TRANSPARENCY"))
         if (std::string(env) != "0") {
             enable();
-            g.strength = strengthSetting();
+            g->strength = strengthSetting();
         }
     smoothRefreshPresentHook();
 }
 
 bool transparencyActive()
 {
-    return g.enabled;
+    return g->enabled;
+}
+
+void transparencyStartCoop()
+{
+    for (int console = 1; console <= 2; ++console) {
+        g_states[console] = State{};
+        g_states[console].enabled = g_states[0].enabled;
+        g_states[console].strength = g_states[0].strength;
+    }
+}
+
+void transparencySelectConsole(int console)
+{
+    g = console >= 0 && console < 2 ? &g_states[console + 1] : &g_states[0];
 }
 
 void transparencySetDisplayed(int buffer, int page)
 {
-    g.buffer = buffer;
-    g.page = page;
+    g->buffer = buffer;
+    g->page = page;
 }
 
 void transparencyScanline(std::uint32_t y, std::uint8_t* io, std::uint8_t* oam)
 {
-    if (!g.enabled) return;
+    if (!g->enabled) return;
     if (y == 0) prepareFrame();
-    if (g.pieces.empty() && !g.extraSeeThrough) return;
-    for (const std::uint32_t i : g.pieces) makeSemiTransparent(oam + i * 8u, g.entries[i]);
+    if (g->pieces.empty() && !g->extraSeeThrough) return;
+    for (const std::uint32_t i : g->pieces) makeSemiTransparent(oam + i * 8u, g->entries[i]);
     // Semi-transparent sprites blend with the second targets at BLDALPHA. Keep the game's own alpha
     // blend when it runs one; otherwise mix the sprite at the chosen strength over every layer.
     if (((io[kBldCnt] >> 6) & 3u) != 1u) {
         io[kBldCnt + 1] = static_cast<std::uint8_t>(io[kBldCnt + 1] | 0x3Fu);
-        io[kBldAlpha] = static_cast<std::uint8_t>(g.strength);
-        io[kBldAlpha + 1] = static_cast<std::uint8_t>(16 - g.strength);
+        io[kBldAlpha] = static_cast<std::uint8_t>(g->strength);
+        io[kBldAlpha + 1] = static_cast<std::uint8_t>(16 - g->strength);
     }
 }
 
 const std::uint8_t* transparencyAdjustExtra(const std::uint8_t* pieces, const std::uint8_t* page0,
                                             const std::uint8_t* page1, std::uint32_t count)
 {
-    if (!g.enabled || !pieces || !page0 || !page1 || count == 0) {
-        g.extraSeeThrough = false;
+    if (!g->enabled || !pieces || !page0 || !page1 || count == 0) {
+        g->extraSeeThrough = false;
         return pieces;
     }
     bool any = false;
     for (std::uint32_t k = 0; k < count && !any; ++k) any = seeThrough(page0 + k * 8u, page1 + k * 8u);
-    g.extraSeeThrough = any;
+    g->extraSeeThrough = any;
     if (!any) return pieces;
-    g.extraCopy.assign(pieces, pieces + count * 8u);
+    g->extraCopy.assign(pieces, pieces + count * 8u);
     for (std::uint32_t k = 0; k < count; ++k)
         if (seeThrough(page0 + k * 8u, page1 + k * 8u))
-            makeSemiTransparent(g.extraCopy.data() + k * 8u, page0 + k * 8u);
-    return g.extraCopy.data();
+            makeSemiTransparent(g->extraCopy.data() + k * 8u, page0 + k * 8u);
+    return g->extraCopy.data();
 }
 
 }  // namespace rotk

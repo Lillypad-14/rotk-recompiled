@@ -363,19 +363,29 @@ struct ExtraObjects {
     bool lastPushExtra = false;        // the latest push went to an extra page
 };
 
-ExtraObjects g_extra;
+ExtraObjects g_extra;                 // the solo game's
+ExtraObjects g_coopExtra[2];          // the split-screen co-op consoles'
+ExtraObjects* g_currentExtra = &g_extra;
 
 ExtraObjects& extraObjects()
 {
-    return g_extra;
+    return *g_currentExtra;
+}
+
+void freePages(ExtraObjects& extra)
+{
+    for (auto& buffer : extra.pages)
+        for (auto& half : buffer) {
+            delete[] half;
+            half = nullptr;
+        }
 }
 
 // Sizes the extra pages from the "sprite-limits" feature (total pieces) or ROTK_PC_EXTRA_OBJECTS
 // (extra pieces). Runs before boot, so no frame is in flight.
 void configureExtraObjects()
 {
-    for (auto& buffer : g_extra.pages)
-        for (auto& half : buffer) delete[] half;
+    freePages(g_extra);
     g_extra = ExtraObjects{};
     const unsigned long total = pcSetting("ROTK_PC_MAX_SPRITES", "sprite-limits", "max-sprites", kHardwareObjects);
     unsigned long capacity = total > kHardwareObjects ? total - kHardwareObjects : 0;
@@ -563,6 +573,47 @@ void applyPcSettings()
 void featureActivated() {}
 
 }  // namespace
+
+namespace rotk {
+
+// Split-screen co-op (src/local_coop.cpp): the presentation features keep one state per console.
+// The engine limits (heap, actor pools, render sort) stay off, since they change the game's memory.
+void pcFeaturesStartCoop()
+{
+    for (ExtraObjects& extra : g_coopExtra) {
+        freePages(extra);
+        extra = ExtraObjects{};
+        extra.capacity = g_extra.capacity;
+        extra.hardwareLimit = g_extra.hardwareLimit;
+        if (extra.capacity)
+            for (auto& buffer : extra.pages)
+                for (auto& half : buffer) half = new std::uint8_t[extra.capacity * 8u]();
+    }
+    for (const char* id : {kPushOamHookId, kHideOamHookId, kEndFrameHookId})
+        gba_mod_set_function_hook_runs_suspended(id, 1);
+    widescreenStartCoop();
+    smoothStartCoop();
+    transparencyStartCoop();
+}
+
+void pcFeaturesEndCoop()
+{
+    for (const char* id : {kPushOamHookId, kHideOamHookId, kEndFrameHookId})
+        gba_mod_set_function_hook_runs_suspended(id, 0);
+    widescreenEndCoop();
+    smoothEndCoop();
+    pcFeaturesSelectConsole(-1);
+}
+
+void pcFeaturesSelectConsole(int console)
+{
+    g_currentExtra = console >= 0 && console < 2 ? &g_coopExtra[console] : &g_extra;
+    widescreenSelectConsole(console);
+    smoothSelectConsole(console);
+    transparencySelectConsole(console);
+}
+
+}  // namespace rotk
 
 int main(int argc, char** argv)
 {
