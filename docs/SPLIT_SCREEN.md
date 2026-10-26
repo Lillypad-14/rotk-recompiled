@@ -57,6 +57,14 @@ Option "Player 2 save" (`player2-save`):
 - Local link play (`RunOptions::local_link`, runtime.cpp `run_local_link`): the windowed runner
   polls `wanted()` each presented frame and runs the session in its window, with the game's
   `frame()` hook choosing each console's buttons and the screen count.
+- Local chunks end a console's turn by throwing (as single-player does), not by returning through
+  generated code (`set_local_chunks` turns return yields off). Generated SWI calls do not check for
+  a returned suspension, so a turn that ended inside a BIOS call let the caller run on with a stale
+  resume PC: a recorded player session crashed on a Thumb dispatch to the SWI vector at linked
+  frame 10,192, and half-restored registers can silently diverge the consoles (the "lost connection
+  after killing an enemy" reports). With throwing, the same session runs 18,500 frames with at most
+  57 frames between link messages. Co-op fights cost 8.6 ms per frame instead of 6.2 (median,
+  quiet machine), still inside the 16.7 ms budget.
 - Local chunk scheduler (`GbaMultiplayerSession::set_local_chunks`): each console runs a chunk
   (1,232 cycles, one scanline) with its devices ticked inline as in single-player, instead of
   lockstep slices of at most 63 cycles with a per-instruction batching check. IRQs run to completion
@@ -114,6 +122,11 @@ budget); local chunks on menus 3.8 ms mean on a quiet machine.
 
 - `RotkSplitScreenSpike` (tests/split_screen_spike.cpp): headless runs with per-seat input scripts
   and side-by-side screenshots, and `play` mode (`PlaySplitScreenTest.cmd`).
+- Every in-game session is recorded next to the save: `<save>.coop-<time>-1.sram` and `-2.sram`
+  (both consoles' saves at the start) and `<save>.coop-<time>.inputs.txt` (both players' buttons).
+  Replay one with the first as the save, the second as `rotk.player2.sram`, the inputs as
+  `ROTK_PC_COOP_TEST_INPUTS`, the player's mods state and a solo input script that picks
+  Multiplayer.
 - Link checks: with `ROTK_PC_COOP_TEST_INPUTS`, each console's scene and `g_MpLinkState` changes are
   logged (`ff00` once the game dropped the link), `ROTK_PC_COOP_TEST_FAST=1` runs unpaced,
   `ROTK_PC_COOP_TEST_SHOW_FROM=N` shows (and frame-dumps) from linked frame N, and

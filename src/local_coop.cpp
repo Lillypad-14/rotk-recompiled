@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
+#include <string>
 #include <vector>
 
 #include "gba_bus.h"
@@ -126,9 +128,50 @@ void muteMusic(gba::GbaBus& bus)
     bus.save().sram_write(kChecksum + 1, checksum >> 8);
 }
 
+// Every session is recorded next to the save, so a reported problem can be replayed exactly with
+// the test aids: <save>.coop-<time>-1.sram and -2.sram are both consoles' saves at the start, and
+// <save>.coop-<time>.inputs.txt both players' buttons as `frame p1 p2` lines counted from the link.
+std::FILE* g_recording = nullptr;
+std::uint32_t g_recorded = ~0u;
+
+void writeFile(const std::string& path, const std::vector<std::uint8_t>& bytes)
+{
+    if (std::FILE* file = std::fopen(path.c_str(), "wb")) {
+        std::fwrite(bytes.data(), 1, bytes.size(), file);
+        std::fclose(file);
+    }
+}
+
+void startRecording(const gbarecomp::LocalLinkFrame& link)
+{
+    if (g_recording) std::fclose(g_recording);
+    g_recording = nullptr;
+    g_recorded = ~0u;
+    if (!link.save_path || std::getenv("ROTK_PC_COOP_TEST_INPUTS")) return;
+    char stamp[32];
+    const std::time_t now = std::time(nullptr);
+    std::strftime(stamp, sizeof(stamp), ".coop-%Y%m%d-%H%M%S", std::localtime(&now));
+    const std::string base = std::string(link.save_path) + stamp;
+    writeFile(base + "-1.sram", link.machines[0]->bus.save().sram_bytes());
+    writeFile(base + "-2.sram", link.machines[1]->bus.save().sram_bytes());
+    g_recording = std::fopen((base + ".inputs.txt").c_str(), "w");
+    if (g_recording)
+        std::fprintf(g_recording, "# split-screen co-op session: frame p1 p2 (pressed GBA buttons), from the link\n");
+}
+
+void record(std::uint64_t frame, std::uint16_t one, std::uint16_t two)
+{
+    const std::uint32_t buttons = one | static_cast<std::uint32_t>(two) << 16;
+    if (!g_recording || buttons == g_recorded) return;
+    g_recorded = buttons;
+    std::fprintf(g_recording, "%llu %u %u\n", static_cast<unsigned long long>(frame), one, two);
+    std::fflush(g_recording);
+}
+
 bool frame(gbarecomp::LocalLinkFrame* link)
 {
     if (link->frame == 0) {
+        startRecording(*link);
         muteMusic(link->machines[1]->bus);
         link->partner_audio = true;
     }
@@ -149,6 +192,7 @@ bool frame(gbarecomp::LocalLinkFrame* link)
     link->screens = 2;
     link->buttons[0] = link->players[0];
     link->buttons[1] = link->players[1];
+    record(link->frame - g_linkedAt, link->buttons[0], link->buttons[1]);
     // Test aid: ROTK_PC_COOP_TEST_INPUTS=<file> plays both players from lines `frame p1 p2` (frames
     // after the consoles link, pressed GBA button bits, held until the next line).
     static const std::vector<std::array<std::uint32_t, 3>> script = [] {
@@ -169,7 +213,10 @@ bool frame(gbarecomp::LocalLinkFrame* link)
         // ROTK_PC_COOP_TEST_FAST.
         static const bool fast = std::getenv("ROTK_PC_COOP_TEST_FAST") != nullptr;
         static const char* showFrom = std::getenv("ROTK_PC_COOP_TEST_SHOW_FROM");
-        link->fast = fast && !(showFrom && link->frame - g_linkedAt >= std::strtoull(showFrom, nullptr, 10));
+        static const char* showEvery = std::getenv("ROTK_PC_COOP_TEST_SHOW_EVERY");
+        const std::uint64_t linked = link->frame - g_linkedAt;
+        link->fast = fast && !(showFrom && linked >= std::strtoull(showFrom, nullptr, 10)) &&
+                     !(showEvery && linked % std::strtoull(showEvery, nullptr, 10) == 0);
         static std::uint32_t scenes[2] = {~0u, ~0u};
         const MenuState consoles[2] = {one, two};
         // g_MpLinkState[4..5] (game/include/multiplayer.h): session state and this console's
