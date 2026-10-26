@@ -1,10 +1,12 @@
+2026-10-26 widescreen polish: map edges, smooth-motion margins and in-game dialogue fixed ([details](docs/WIDESCREEN.md#polish-pass-2026-10-26)). At level edges the clamped camera now reaches the tile camera the game builds VRAM from, so margins and both world layers line up; margin tiles follow smooth motion's half-step scroll (no more streaks along tile edges); dialogue keeps the wide view. Verified by replaying a recorded play session frame by frame and a full edge-walk replay with the new `ROTK_PC_TRACE_MARGINS` check silent outside level-load fades.
+
 2026-10-26 active-fight follow-up: added a repeatable movement/attack stress trace and a smaller per-instruction yield path. Behavior snapshots match apart from inactive RTC wall time, and focused/multiplayer tests pass. Active 400-enemy fights still miss frame budgets; concurrent host load prevents a reliable speedup percentage. See [measurements](docs/PERFORMANCE.md#active-crowd-profiling-and-yield-fast-path-2026-10-26).
 
 # Measured status — 2026-10-25
 
 2026-10-26 performance follow-up: [frame pacing and compiler report](docs/PERFORMANCE.md). The normal and movement/action 1,800-frame widescreen checks hold 59.73 Hz after warm-up with zero work-budget overruns, long gaps or skipped guest frames. A 400-enemy sample reaches about 59.5 Hz with no long gaps but still has budget overruns. Runtime compilation now passes ARM/Thumb execution, interior resume, cache reuse, and compile/load checks for the three reported failing guest functions. Broad zero-drop qualification remains unfinished.
 
-2026-10-26: [PC bugfix pass](docs/BUGFIX_PASS.md) corrects widescreen camera writes corrupting BG3 tile staging, reduces HD-stream starvation clicks, and adds isolated paced tests. Both editions rebuilt. The 600-frame widescreen gameplay test completes at about 57.6 FPS; uneven pacing remains unresolved.
+2026-10-26: [PC bugfix pass](docs/BUGFIX_PASS.md) removed a widescreen camera write it took for BG3 tile staging (it was the tile camera; restored in the widescreen polish above), reduces HD-stream starvation clicks, and adds isolated paced tests. Both editions rebuilt. The 600-frame widescreen gameplay test completes at about 57.6 FPS; uneven pacing remains unresolved.
 
 This is an isolated stock-ROM experiment. The Expanded ROM, main decompilation checkout, previous recomp build, and their saves are unchanged.
 
