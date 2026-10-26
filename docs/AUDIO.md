@@ -27,21 +27,73 @@ cmake --build build/host --target RotkAudioRateCheck audio_playback_tests audio_
 
 Normal-device listening, song/effect accuracy against mGBA, extended gameplay, and save/load audio transitions remain unqualified. Other timer, FIFO, CPU-timing or sound-driver translation bugs could remain. Use `Play.cmd` to assess the correction with normal audio.
 
-# Plan: native HD audio mixer (not started)
+# HD audio mixer (launcher feature "HD audio", src/hd_audio.cpp)
 
-ROTK mixes in software: ARM code in IWRAM (copied from the IwramStaticsImage at ROM 0x08FF9F98) resamples
-8-bit samples with linear interpolation (16.16 position), applies volume, accumulates the voices and
-feeds DirectSound at 32,768 Hz. It patches its own shift operands (0x03000B70..0x03000BCC), so it runs
-in the interpreter, and it cost about 29% of the CPU in a 16-enemy fight on the GBA edition. Mixer
-entries: 0x03000604, 684, 6A4, 728, 7C0, 8A4, 8C8, 9B0, B38.
+Off by default. On, the host replaces the game's software mixer, advances the same voice state and
+renders it in float at 65,536 Hz (4x the game's rate) with cubic, linear or original interpolation,
+then hands it to GBARecomp's mod PCM pull stream (framework docs/MOD_AUDIO.md). The guest output ring
+is zero-filled, so the FIFOs play silence. Off, the original mixer runs untouched.
 
-Goal: a launcher feature "HD audio" (original mixer as fallback) that mixes the same voices on the
-host at 48 kHz in float, with better interpolation and no 8-bit DirectSound quantization, through
-GBARecomp's trusted mod PCM pull stream (docs/MOD_AUDIO.md in the framework), muting the guest FIFO
-output while it is on. Voice and channel caps can be lifted as with the other limits.
+## How ROTK mixes (stock ROM; same addresses in Expanded)
 
-1. Reverse-engineer the voice state the mixer reads (sample pointer, step, volume, pan, loop) and how
-   the music/sfx driver sets it up.
-2. Host mixer fed from that state, replacing the mixer entries with hooks.
-3. Check: identical voice state through both mixers, compare the output numerically (audio is not
-   covered by the frame hashes), then listen against mGBA.
+The sound library (Thumb 0x0804AA80..0x0804DC44 plus ARM code in IWRAM, copied from 0x08FF9F98) has no
+known engine signature.
+
+- Hardware (0x0804AAA0): TM0 reload 0xFC00 = **16,384 Hz** mix rate (SOUNDBIAS's 32,768 Hz is only the
+  DAC rate). TM1 cascades and IRQs once per 1,104-sample ring (IWRAM 0x03000004 restarts DMA1/2).
+  SOUNDCNT_H 0x9A0C: FIFO A left, FIFO B right, both 100%. The PSG is unused.
+- Rings: s8 L at 0x02000000, R at 0x02000450, 4 chunks of 276 samples.
+- `sfx_libVBlank` -> 0x03001080 asks 0x0804AB80 for the next chunk (276) and calls
+  **`sfx_mixFrame(outL, outR, count)` = 0x03000C48**, splitting the chunk at the music tick
+  (callback at 0x02001638, countdown 0x0200163E, reload 0x0200163C). Counts are always multiples of 4.
+- Voices: 32 x 44 bytes at 0x020008B4. +0 vol, +1 pan (-64..64), +2 state (1 playing), +3 loop mode
+  (0 one-shot, 1 loop, 2 ping-pong), +4 start, +8 ptr, +12 end, +16 loop length, +20 step (16.16,
+  negative while a ping-pong voice runs backwards), +24 handle (index | serial << 8), +28 frac,
+  +30/+31 L/R volume, +32 interpolation (0 or 8), +33 selector, +34 sample flags, +36 category (release:
+  ramp samples left), +40 loop start (release: u16 level 12.4), +42 (release: step).
+  Per-voice setters in IWRAM: 0x03000094 play, 0x03000320 stop/release, 0x030003E8 pitch,
+  0x03000434 volume, 0x030004B4 pan, 0x03000578 position, 0x030005C8 is-playing.
+  Category volumes at 0x03000090, stereo flag 0x03000000, interpolation mode 0x03000092.
+- Routine table 0x08280D10 (index selector + interpolation): 0/2 stereo 0x03000728, 1 left 0x03000604,
+  3 right 0x03000684, 4 centre (left volume) 0x030006A4, 7 release ramp 0x0804AF78 (ARM in ROM, 16
+  samples from the last level to the centre). +8: the linear-interpolated versions 0x030009B0, 7C0, 8A4,
+  8C8. Samples are unsigned 8-bit.
+- mixFrame clears the accumulator (0x03000AFC: 0x0300115C, words L01 L23 R01 R23 per 4 samples), mixes
+  each playing voice in spans that end where it loops, bounces or stops (span length via BIOS Div,
+  rounded up to 4), advances silent voices without mixing (0x03000F14), fills stopped voices with
+  centre bias (0x03000AB4), then converts (0x03000B38): subtract the bias, shift (patched by
+  0x03000BF0, 4 in the stock game), clip table at 0x02001238 (gain 0x80, 0x0804ACF0).
+  Net result: `out_s8 = clip(sum((sample - 128) * vol / 128))`.
+- The GBA mod's Mute writes 0xEA000091 at 0x03000CC8; the host port honours it. Voice Cap only limits
+  allocation, Fast Mixer only skips the guest blend.
+
+## Checks (2026-10-26)
+
+- `ROTK_PC_HD_AUDIO=verify` lets the guest mixer run and compares the host port's predicted voice
+  state at the next call. Stock first-map 7,500 frames: 422,121 voice comparisons, 0 mismatches
+  (70 driver stops between calls are classified separately). Expanded 8,800 frames: 458,993, 0.
+- Same frame hash with the GBA mixer, verify and replace: stock `824b55b9...`, Expanded `61a4a6b4...`
+  (both with the launcher state of that day, CPU x4). Interpreted instructions on the route: stock
+  162.6M -> 1.5M, Expanded 156.0M -> 0.23M. The mixer was nearly all of the remaining interpreted work.
+- Output: `ROTK_PC_HD_AUDIO_INTERP=guest` + `ROTK_PC_HD_AUDIO_WAV` / `ROTK_PC_HD_AUDIO_GUEST_WAV` dump
+  both mixes. Every 4th HD frame vs the guest ring: 98.7% within 1 s8 LSB, worst 3.2 (the guest
+  truncates per voice and its interpolation adds 1 after a falling step). Cubic: same loudness (rms
+  18.2 vs 17.8 s8).
+- Package path: feature enabled in a copied mods/state.toml, windowed run on SDL's dummy audio
+  driver, 2,400 frames: stream pulled everything, 0 dropped frames, 1 underflow.
+- Not checked yet: listening on a real device, savestate load, fast-forward, pause.
+
+## Env
+
+`ROTK_PC_HD_AUDIO` = 0 | 1 | verify (overrides the package), `ROTK_PC_HD_AUDIO_INTERP` = cubic | linear
+| guest, `ROTK_PC_HD_AUDIO_WAV` (HD dump, 65,536 Hz stereo; also lets env mode 1 replace without the
+package stream), `ROTK_PC_HD_AUDIO_GUEST_WAV` (verify only, 16,384 Hz), `ROTK_PC_HD_AUDIO_DEBUG`.
+
+## Next
+
+1. Stereo. The game mixes true stereo, but the recomp plays mono end to end (`mix_one_sample` averages
+   L/R, the SDL device opens 1 channel, the mod stream is mono). Needs a framework patch: stereo
+   ring/bridge/device plus a stereo stream API. Also helps the GBA mixer path.
+2. Lift voice limits: the 32-voice table is fixed in EWRAM; more voices need a host table and the
+   setters above hooked.
+3. Optional: smooth volume changes across calls (the driver steps volumes per tick).

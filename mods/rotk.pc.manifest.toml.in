@@ -143,6 +143,32 @@ description = "Moves the health and spirit bars to the edges of the wide screen.
 type = "boolean"
 default = false
 
+[[feature]]
+id = "hd-audio"
+name = "HD audio"
+description = "Mixes the music and sound effects on the PC at 65 kHz instead of the GBA's 16 kHz 8-bit mix: clearer highs, no hiss. Work in progress: mono for now."
+group = "Audio"
+default_enabled = false
+
+[[option]]
+feature = "hd-audio"
+id = "interpolation"
+label = "Sample smoothing"
+type = "choice"
+default = "cubic"
+
+[[option.choice]]
+value = "cubic"
+label = "Smooth (cubic)"
+
+[[option.choice]]
+value = "linear"
+label = "Linear"
+
+[[option.choice]]
+value = "guest"
+label = "Original (as on GBA)"
+
 [[plugin]]
 feature = "large-memory"
 id = "rotk.pc.large-memory"
@@ -162,3 +188,7 @@ id = "rotk.pc.cpu-boost"
 [[plugin]]
 feature = "widescreen"
 id = "rotk.pc.widescreen"
+
+[[plugin]]
+feature = "hd-audio"
+id = "rotk.pc.hd-audio"

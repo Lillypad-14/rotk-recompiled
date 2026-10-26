@@ -37,7 +37,7 @@ tests and scripts. Headless runs (`--frames`, `--no-window`, `--tcp`) skip the l
   the level, enemies in the margins active. Optional HUD at the screen edges. Menus and cutscenes keep
   their width with black bars. See [docs/WIDESCREEN.md](docs/WIDESCREEN.md).
 - With these at their stock values the game renders exactly like the original (same frame hashes).
-- Planned: a native HD audio mixer ([docs/AUDIO.md](docs/AUDIO.md)).
+- HD audio: the game's mixer runs on the PC at 65 kHz in float, off by default ([docs/AUDIO.md](docs/AUDIO.md)). Mono for now.
 - Details and measurements: [docs/ENGINE_LIMITS.md](docs/ENGINE_LIMITS.md), [STATUS.md](STATUS.md).
   Next steps: [docs/ROADMAP.md](docs/ROADMAP.md).
 

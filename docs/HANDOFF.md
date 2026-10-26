@@ -93,7 +93,8 @@ docs/ENGINE_LIMITS.md first.
 2. Widescreen: the framework already has expanded-view margins and per-game OBJ/BG providers
    (`gba_ppu.h`, docs/WIDESCREEN_STEPC_PLAN.md in the framework).
 3. A cleaner stress scenario (bonus map), frame-cost measurement, co-op link audit for u8 actor indices.
-4. Host saves, audio (IWRAM mixer is the remaining interpreted code), 60 fps.
+4. Host saves, 60 fps. HD audio mixer done 2026-10-26 (uncommitted; launcher feature "HD audio",
+   src/hd_audio.cpp, state and checks in docs/AUDIO.md); next for audio is stereo output.
 5. Repo: public github.com/Lillypad-14/rotk-recompiled, MIT for own code, patches/ PolyForm NC;
    the `game` submodule tracks the mod repo's `pc-edition` branch (the GBA edition stays on `expanded`).
 

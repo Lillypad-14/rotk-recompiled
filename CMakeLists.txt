@@ -37,7 +37,7 @@ add_library(RotkCart OBJECT ${CART_SOURCES})
 target_include_directories(RotkCart PRIVATE ${ROTK_HOST_INCLUDES})
 target_link_gbarecomp_runtime_stack(RotkCart)
 
-add_executable(${ROTK_EXECUTABLE} src/main.cpp src/widescreen.cpp $<TARGET_OBJECTS:RotkCart>)
+add_executable(${ROTK_EXECUTABLE} src/main.cpp src/widescreen.cpp src/hd_audio.cpp $<TARGET_OBJECTS:RotkCart>)
 target_include_directories(${ROTK_EXECUTABLE} PRIVATE ${ROTK_HOST_INCLUDES})
 target_link_gbarecomp_runtime_stack(${ROTK_EXECUTABLE})
 gbarecomp_target_link_host_stack(${ROTK_EXECUTABLE} PRIVATE)

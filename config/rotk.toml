@@ -52,6 +52,12 @@ mode = "arm"
 note = "Earlier runtime report observed entry into the startup IWRAM copy."
 
 [[extra_func]]
+addr = 0x03000C48
+mode = "arm"
+name = "sfx_mixFrame"
+note = "Sound library frame mixer (outL, outR, count), called from 0x03001080; walks the 32 voices at 0x020008B4."
+
+[[extra_func]]
 addr = 0x03001080
 mode = "arm"
 note = "Earlier runtime report observed entry into the startup IWRAM copy."
@@ -117,3 +123,8 @@ note = "actor_tickAllInList: observed only, widescreen tags the HUD pieces compo
 addr = 0x08038728
 mode = "thumb"
 note = "fx_buildRenderQueues: observed only, ends the HUD pieces of actor_tickAllInList (src/widescreen.cpp)."
+
+[[mod_function_hook]]
+addr = 0x03000C48
+mode = "arm"
+note = "sfx_mixFrame: HD audio advances the voices on the host and renders them in float (src/hd_audio.cpp)."

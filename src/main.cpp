@@ -9,6 +9,7 @@
 #include "gba_bus.h"
 #include "gba_memory.h"
 #include "gba_ppu.h"
+#include "hd_audio.h"
 #include "mod_function_hooks.h"
 #include "mod_runtime.h"
 #include "runtime_arm.h"
@@ -514,6 +515,7 @@ void applyPcSettings()
     gba::g_rom_read32_override = layout().actors ? pcQueueLiterals : nullptr;
     g_dma_observer = pcObserveDma;
     gba::g_extra_obj_provider = extra ? pcExtraObjects : nullptr;
+    rotk::hdAudioApply();
 }
 
 // Every package feature names a trusted plugin. The settings themselves are read in
@@ -533,6 +535,7 @@ int main(int argc, char** argv)
     for (const char* plugin : {"rotk.pc.large-memory", "rotk.pc.actor-limits", "rotk.pc.sprite-limits",
                                "rotk.pc.cpu-boost"})
         gba_mod_register_activation_plugin(plugin, featureActivated);
+    rotk::hdAudioRegister();
     gba_mod_register_reset_callback(applyPcSettings);
 
     gbarecomp::RunOptions options;
