@@ -105,6 +105,36 @@ label = "x8"
 value = "16"
 label = "x16"
 
+[[feature]]
+id = "widescreen"
+name = "Widescreen"
+description = "Shows more of the level to the left and right during gameplay. Menus keep their original width with black bars. Work in progress: enemies near the edges may appear late and the HUD stays centred."
+group = "Display"
+default_enabled = false
+
+[[option]]
+feature = "widescreen"
+id = "width"
+label = "Aspect ratio"
+type = "choice"
+default = "284"
+
+[[option.choice]]
+value = "256"
+label = "16:10"
+
+[[option.choice]]
+value = "284"
+label = "16:9"
+
+[[option.choice]]
+value = "320"
+label = "2:1"
+
+[[option.choice]]
+value = "374"
+label = "21:9"
+
 [[plugin]]
 feature = "large-memory"
 id = "rotk.pc.large-memory"
@@ -120,3 +150,7 @@ id = "rotk.pc.sprite-limits"
 [[plugin]]
 feature = "cpu-boost"
 id = "rotk.pc.cpu-boost"
+
+[[plugin]]
+feature = "widescreen"
+id = "rotk.pc.widescreen"

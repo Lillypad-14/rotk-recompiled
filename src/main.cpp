@@ -12,6 +12,7 @@
 #include "mod_function_hooks.h"
 #include "mod_runtime.h"
 #include "runtime_arm.h"
+#include "widescreen.h"
 
 #if defined(ROTK_LAUNCHER)
 #include <string>
@@ -454,6 +455,7 @@ int pcEndFrame(std::uint32_t, int, ArmCpuState*)
 void pcObserveDma(int, std::uint32_t source, std::uint32_t destination, std::uint32_t bytes)
 {
     ExtraObjects& extra = extraObjects();
+    rotk::widescreenObserveDma(source, destination);
     if (destination != kOamAddress) return;
     extra.displayedBuffer = -1;
     if (bytes != kOamHalfBytes) return;
@@ -507,7 +509,7 @@ void applyPcSettings()
     gba_mod_set_function_hook_enabled(kHideOamHookId, extra);
     gba_mod_set_function_hook_enabled(kEndFrameHookId, extra);
     gba::g_rom_read32_override = layout().actors ? pcQueueLiterals : nullptr;
-    g_dma_observer = extra ? pcObserveDma : nullptr;
+    g_dma_observer = pcObserveDma;
     gba::g_extra_obj_provider = extra ? pcExtraObjects : nullptr;
 }
 
@@ -535,6 +537,7 @@ int main(int argc, char** argv)
     options.builtin_rom_sha1 = ROTK_ROM_SHA1;
     options.builtin_rom_crc32 = ROTK_ROM_CRC32;
     options.mod_game_id = ROTK_MOD_GAME_ID;
+    rotk::widescreenRegister(options);
 #if defined(ROTK_LAUNCHER)
     std::vector<std::string> args(argv, argv + argc);
     if (rotk_launcher_preboot(args, options)) return 0;  // the player quit the launcher

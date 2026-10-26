@@ -1,0 +1,23 @@
+diff --git a/src/runtime/mod_runtime.cpp b/src/runtime/mod_runtime.cpp
+index 511429d..1403113 100644
+--- a/src/runtime/mod_runtime.cpp
++++ b/src/runtime/mod_runtime.cpp
+@@ -1012,10 +1012,15 @@ bool save_state(Runtime& runtime, std::string* error) {
+     }
+     for (const auto& [package_id, selection] : runtime.selections) {
+         for (const auto& [feature_id, feature] : selection.features) {
++            // Looking a feature up creates an unset entry. Persist only what
++            // the player chose, so an untouched feature keeps following its
++            // manifest default_enabled instead of being saved as disabled.
++            if (!feature.has_enabled && feature.values.empty()) continue;
+             file << "\n[[feature]]\npackage_id = " << quote_toml(package_id)
+-                 << "\nid = " << quote_toml(feature_id)
+-                 << "\nenabled = " << (feature.enabled ? "true" : "false")
+-                 << "\n";
++                 << "\nid = " << quote_toml(feature_id) << "\n";
++            if (feature.has_enabled)
++                file << "enabled = " << (feature.enabled ? "true" : "false")
++                     << "\n";
+             if (!feature.values.empty()) {
+                 file << "\n[feature.values]\n";
+                 for (const auto& [key, value] : feature.values)

@@ -97,3 +97,13 @@ note = "sprite_hideOamEntry: hides the extra piece that the preceding push store
 addr = 0x080366A4
 mode = "thumb"
 note = "sprite_endFrame: observed only, clears extra pieces of a frame that pushed none (src/main.cpp)."
+
+[[mod_function_hook]]
+addr = 0x0804E0B8
+mode = "thumb"
+note = "_call_via_sl: from gfx_updatePlayerCameraScroll, widescreen re-clamps the camera to the wide view first (src/widescreen.cpp)."
+
+[[mod_function_hook]]
+addr = 0x08000C38
+mode = "thumb"
+note = "actor_updateVisibility: widescreen widens the on-screen box by the view margins (src/widescreen.cpp)."

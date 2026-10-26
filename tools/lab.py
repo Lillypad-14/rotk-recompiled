@@ -22,6 +22,7 @@ FRAMEWORK_PATCHES = [
     ROOT / "patches/engine-limits.patch",
     ROOT / "patches/hook-return.patch",
     ROOT / "patches/extra-objects.patch",
+    ROOT / "patches/mod-state-defaults.patch",
 ]
 
 STOCK_ROM_SIZE = 0x1000000
