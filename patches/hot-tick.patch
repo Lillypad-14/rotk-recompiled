@@ -1,0 +1,52 @@
+--- a/src/runtime/runtime_bus_bridge.cpp
++++ b/src/runtime/runtime_bus_bridge.cpp
+@@ -823,7 +823,7 @@
+     // A timed/FIFO DMA may have fired inside that flush; charge its stolen bus
+     // cycles (advancing the clock + devices) before the IRQ-eligibility check,
+     // so a DMA-end IRQ or a timer that overflowed during the steal is seen now.
+-    drain_dma_steal(bus, ppu);
++    if (bus->io().dma_steal_pending()) drain_dma_steal(bus, ppu);
+ 
+     if (bus->io().irq_pending() && (g_cpu.cpsr & CPSR_I_BIT) == 0) {
+         g_runtime_irq_from_halt = bus->io().halted() ? 1u : 0u;
+--- a/src/gba/gba_io.h
++++ b/src/gba/gba_io.h
+@@ -150,7 +150,12 @@
+ 
+     // True if (IE & IF) != 0 AND IME is set. The CPU's CPSR.I check
+     // happens at the call site.
+-    bool irq_pending() const;
++    bool irq_pending() const {
++        // Live IE/IF/IME bytes: CPU interrupt masking can change at any
++        // instruction, so this predicate must not be cached between events.
++        return (((io_[IoReg::IE] & io_[IoReg::IF]) | (io_[IoReg::IE + 1] & io_[IoReg::IF + 1])) != 0) &&
++               (io_[IoReg::IME] & 1u) != 0;
++    }
+ 
+     // Raw register reads for the runtime's CPU IRQ entry path.
+     uint16_t ie()      const;
+@@ -234,6 +239,7 @@
+     // DMA loops accumulate their GBATEK transfer cost here; the runtime drains
+     // it (charging the master clock + advancing devices) at a safe point. Read
+     // and reset in one call. (GBATEK § "GBA DMA Transfers" timing.)
++    bool dma_steal_pending() const { return dma_steal_cycles_ != 0; }
+     uint32_t take_dma_steal_cycles() {
+         uint32_t c = dma_steal_cycles_;
+         dma_steal_cycles_ = 0;
+--- a/src/gba/gba_io.cpp
++++ b/src/gba/gba_io.cpp
+@@ -604,14 +604,6 @@
+     store_u16(&io_[IoReg::KEYINPUT], composed_keyinput());
+ }
+ 
+-bool GbaIo::irq_pending() const {
+-    uint16_t ie_v = load_u16(&io_[IoReg::IE]);
+-    uint16_t if_v = load_u16(&io_[IoReg::IF]);
+-    if ((ie_v & if_v) == 0) return false;
+-    // IME is a 16-bit register; only bit 0 is meaningful.
+-    return (load_u16(&io_[IoReg::IME]) & 0x0001u) != 0;
+-}
+-
+ uint16_t GbaIo::ie()      const { return load_u16(&io_[IoReg::IE]); }
+ uint16_t GbaIo::if_reg()  const { return load_u16(&io_[IoReg::IF]); }
+ bool     GbaIo::ime()     const { return (load_u16(&io_[IoReg::IME]) & 1u) != 0; }

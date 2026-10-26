@@ -32,6 +32,7 @@ def main() -> None:
     parser.add_argument("--dummy-window", action="store_true", help="Exercise paced desktop video/audio using silent SDL dummy devices")
     parser.add_argument("--mods-state", type=Path, help="Copy the executable/packages into this run and use an isolated feature-state fixture")
     parser.add_argument("--load-state", type=Path, help="Start a dummy-window check from a copied checkpoint")
+    parser.add_argument("--executable", type=Path, help="Use an experimental build of the selected target")
     parser.add_argument("--no-state", action="store_true", help="Skip canonical state export when isolating shutdown problems")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--strict", action="store_true")
@@ -48,6 +49,8 @@ def main() -> None:
     exe = ROOT / (exe_path + ".exe")
     if not exe.exists():
         exe = ROOT / exe_path
+    if args.executable:
+        exe = args.executable.resolve()
     if args.mods_state:
         source = exe.parent
         isolated = run / "bin"

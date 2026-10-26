@@ -40,6 +40,7 @@ tests and scripts. Headless runs (`--frames`, `--no-window`, `--tcp`) skip the l
 - HD audio: the game's mixer runs on the PC at 65 kHz in float, off by default ([docs/AUDIO.md](docs/AUDIO.md)). Sound is now stereo, as on the GBA.
 - Smooth motion: halfway frames between the game's 30 Hz ticks, off by default ([docs/SMOOTH_MOTION.md](docs/SMOOTH_MOTION.md)).
 - Details and measurements: [docs/ENGINE_LIMITS.md](docs/ENGINE_LIMITS.md), [STATUS.md](STATUS.md).
+  Current frame-time measurements, compiler repairs and remaining workload limits: [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
   Next steps: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Building

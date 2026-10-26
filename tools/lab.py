@@ -26,6 +26,11 @@ FRAMEWORK_PATCHES = [
     ROOT / "patches/stereo-audio.patch",
     ROOT / "patches/smooth-present.patch",
     ROOT / "patches/runtime-compiler.patch",
+    ROOT / "patches/wide-text-span.patch",
+    ROOT / "patches/frame-pacing.patch",
+    ROOT / "patches/live-ram-view.patch",
+    ROOT / "patches/hot-tick.patch",
+    ROOT / "patches/yield-fast-path.patch",
 ]
 
 # recomp-ui (launcher) patches, applied the same way to external/recomp-ui.
@@ -80,16 +85,17 @@ def apply_framework_patch(framework: Path) -> None:
 def apply_patch_stack(checkout: Path, patches: list[Path]) -> None:
     command = ["git", "-C", str(checkout), "apply"]
     # The patches form an ordered stack and later ones can change an earlier one's context, so
-    # check the top first: when it is applied, the whole stack is.
-    top = subprocess.run(command + ["--reverse", "--check", str(patches[-1])],
-                         capture_output=True)
-    if top.returncode == 0:
-        return
-    for patch in patches:
-        applied = subprocess.run(command + ["--reverse", "--check", str(patch)],
+    # Find the latest applied member of this ordered stack. When new patches
+    # are added, older members need not reverse-apply independently: their
+    # contexts may already have been changed by the former top of the stack.
+    prefix = 0
+    for index in range(len(patches) - 1, -1, -1):
+        applied = subprocess.run(command + ["--reverse", "--check", str(patches[index])],
                                  capture_output=True)
         if applied.returncode == 0:
-            continue
+            prefix = index + 1
+            break
+    for patch in patches[prefix:]:
         checked(command + ["--check", str(patch)])
         checked(command + [str(patch)])
 

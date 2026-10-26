@@ -1,0 +1,198 @@
+--- a/src/runtime/runtime.cpp
++++ b/src/runtime/runtime.cpp
+@@ -2814,12 +2814,14 @@
+         uint32_t pump_us = 0;
+         uint32_t pacer_us = 0;
+         uint32_t compile_us = 0;  // overlay game-thread compile this frame
++        uint32_t interval_us = 0; // wall time between completed present calls
+     };
+     struct FramePhaseRing {
+         enum : int { kSize = 16384 };  // local class: no static data members
+         std::vector<FramePhaseSample> ring;
+         uint64_t total = 0;
+         uint64_t prev_exit_ns = 0;
++        uint64_t prev_present_ns = 0;
+         unsigned long long prev_compile_ns = 0;
+         std::string dump_path;
+         FramePhaseRing() {
+@@ -2839,16 +2841,20 @@
+             return b > a ? static_cast<uint32_t>((b - a) / 1000ull) : 0u;
+         }
+         void record(uint64_t frame, uint64_t t0, uint64_t t1, uint64_t t2,
+-                    uint64_t t3, uint64_t t4, uint64_t t5) {
++                    uint64_t t3, uint64_t t4, uint64_t t5, uint64_t present_wait_ns = 0) {
+             if (!active()) return;
+             FramePhaseSample s;
+             s.frame = frame;
+             s.guest_us = prev_exit_ns ? us(prev_exit_ns, t0) : 0;
+             s.render_us = us(t0, t1);
+             s.present_us = us(t1, t2);
++            const auto wait_us = static_cast<uint32_t>(present_wait_ns / 1000ull);
++            s.present_us = s.present_us > wait_us ? s.present_us - wait_us : 0;
++            s.interval_us = prev_present_ns ? us(prev_present_ns, t2) : 0;
++            prev_present_ns = t2;
+             s.audio_us = us(t2, t3);
+             s.pump_us = us(t3, t4);
+-            s.pacer_us = us(t4, t5);
++            s.pacer_us = us(t4, t5) + wait_us;
+             const unsigned long long cc = overlay_game_thread_compile_ns();
+             s.compile_us = static_cast<uint32_t>(
+                 (cc - prev_compile_ns) / 1000ull);
+@@ -2862,14 +2868,14 @@
+             std::FILE* f = std::fopen(dump_path.c_str(), "w");
+             if (!f) return;
+             std::fprintf(f, "frame,guest_us,render_us,present_us,audio_us,"
+-                            "pump_us,pacer_us,compile_us\n");
++                            "pump_us,pacer_us,compile_us,interval_us\n");
+             const uint64_t n = std::min<uint64_t>(total, kSize);
+             for (uint64_t i = 0; i < n; ++i) {
+                 const FramePhaseSample& s = ring[(total - n + i) % kSize];
+-                std::fprintf(f, "%llu,%u,%u,%u,%u,%u,%u,%u\n",
++                std::fprintf(f, "%llu,%u,%u,%u,%u,%u,%u,%u,%u\n",
+                     static_cast<unsigned long long>(s.frame), s.guest_us,
+                     s.render_us, s.present_us, s.audio_us, s.pump_us,
+-                    s.pacer_us, s.compile_us);
++                    s.pacer_us, s.compile_us, s.interval_us);
+             }
+             std::fclose(f);
+             std::fprintf(stderr, "[frame-phase] dumped %llu frames -> %s\n",
+@@ -4242,6 +4248,7 @@
+                 uint64_t fp_t2 = 0;
+                 uint64_t fp_t3 = 0;
+                 uint64_t fp_t4 = 0;
++                uint64_t fp_wait_ns = 0;
+                 if (phase_active) fp_t0 = FramePhaseRing::now_ns();
+                 const bool present_frame = !fast_forward_active ||
+                     (frame % static_cast<uint64_t>(
+@@ -4258,7 +4265,17 @@
+                     }
+                 }
+                 if (phase_active) fp_t1 = FramePhaseRing::now_ns();
+-                if (present_frame) present_live_frame();
++                if (present_frame) {
++                    // Pace completed frames, not the start of the next guest
++                    // tick. Variable guest work must not become alternating
++                    // short/long visible frames while there is budget to spare.
++                    if (pacer) {
++                        const auto wait_start = phase_active ? FramePhaseRing::now_ns() : 0;
++                        pacer->wait_for_next_frame();
++                        if (phase_active) fp_wait_ns = FramePhaseRing::now_ns() - wait_start;
++                    }
++                    present_live_frame();
++                }
+                 if (phase_active) fp_t2 = FramePhaseRing::now_ns();
+                 drain_host_audio();
+                 // Windowed present-in-place stays inside one step_once() for
+@@ -4285,11 +4302,11 @@
+                     ++frames_presented;
+                     if (args.frames >= 0 && frames_presented >= args.frames)
+                         host_quit = true;
+-                    if (pacer) pacer->wait_for_next_frame();
++
+                 }
+                 if (phase_active) {
+                     frame_phase.record(frame, fp_t0, fp_t1, fp_t2, fp_t3,
+-                                       fp_t4, FramePhaseRing::now_ns());
++                                       fp_t4, FramePhaseRing::now_ns(), fp_wait_ns);
+                 }
+             }
+             return host_quit;
+@@ -4676,6 +4693,7 @@
+                 uint64_t fp_t2 = 0;
+                 uint64_t fp_t3 = 0;
+                 uint64_t fp_t4 = 0;
++                uint64_t fp_wait_ns = 0;
+                 if (phase_active) fp_t0 = FramePhaseRing::now_ns();
+                 const bool present_frame = !fast_forward_active ||
+                     (frame % static_cast<uint64_t>(
+@@ -4692,7 +4710,17 @@
+                     }
+                 }
+                 if (phase_active) fp_t1 = FramePhaseRing::now_ns();
+-                if (present_frame) present_live_frame();
++                if (present_frame) {
++                    // Pace completed frames, not the start of the next guest
++                    // tick. Variable guest work must not become alternating
++                    // short/long visible frames while there is budget to spare.
++                    if (pacer) {
++                        const auto wait_start = phase_active ? FramePhaseRing::now_ns() : 0;
++                        pacer->wait_for_next_frame();
++                        if (phase_active) fp_wait_ns = FramePhaseRing::now_ns() - wait_start;
++                    }
++                    present_live_frame();
++                }
+                 // Framedump (capture runs only) is attributed to present_us.
+                 if (framedump_dir && frame >= framedump_start &&
+                     framedump_written < framedump_max) {
+@@ -4725,11 +4753,11 @@
+                     // Normal play presents/paces every frame. Fast-forward
+                     // runs N guest frames per one paced host presentation,
+                     // making its selected multiplier independent of monitor Hz.
+-                    if (pacer) pacer->wait_for_next_frame();
++
+                 }
+                 if (phase_active) {
+                     frame_phase.record(frame, fp_t0, fp_t1, fp_t2, fp_t3,
+-                                       fp_t4, FramePhaseRing::now_ns());
++                                       fp_t4, FramePhaseRing::now_ns(), fp_wait_ns);
+                 }
+             }
+         }
+--- a/src/runtime/host_window.cpp
++++ b/src/runtime/host_window.cpp
+@@ -1807,6 +1807,14 @@
+         delete b;
+         return false;
+     }
++    // A software fallback (or SDL driver hint) can enable its own refresh
++    // limiter even when PRESENTVSYNC was not requested. Enforce the chosen
++    // policy so it cannot beat against the guest's 59.7275 Hz frame pacer.
++#if SDL_VERSION_ATLEAST(2, 0, 18)
++    if (SDL_RenderSetVSync(b->renderer, want_vsync ? 1 : 0) != 0 && !want_vsync) {
++        std::fprintf(stderr, "host_window: cannot disable renderer VSync: %s\n", SDL_GetError());
++    }
++#endif
+     {
+         SDL_RendererInfo info{};
+         if (SDL_GetRendererInfo(b->renderer, &info) == 0) {
+--- a/src/runtime/host_platform.cpp
++++ b/src/runtime/host_platform.cpp
+@@ -7,6 +7,7 @@
+ #  define WIN32_LEAN_AND_MEAN
+ #  include <windows.h>
+ #  include <timeapi.h>  // timeBeginPeriod/timeEndPeriod (excluded by LEAN_AND_MEAN)
++#  include <avrt.h>
+ #  if defined(_MSC_VER)
+ #    pragma comment(lib, "winmm.lib")  // MinGW links winmm via CMake
+ #  endif
+@@ -19,6 +20,12 @@
+     period_ = std::chrono::nanoseconds(
+         static_cast<long long>(1e9 / target_hz + 0.5));
+ #if defined(_WIN32)
++    // Register only the windowed emulation/presentation thread with Windows'
++    // multimedia scheduler. Background compiler workers keep normal priority.
++    // This is not a real-time process priority or a CPU-affinity restriction.
++    DWORD task_index = 0;
++    mmcss_task_ = AvSetMmThreadCharacteristicsW(L"Games", &task_index);
++    if (mmcss_task_) AvSetMmThreadPriority(static_cast<HANDLE>(mmcss_task_), AVRT_PRIORITY_NORMAL);
+     // Raise the scheduler timer resolution to 1 ms so sleep_until is
+     // accurate enough for ~16.74 ms frame pacing.
+     if (timeBeginPeriod(1) == TIMERR_NOERROR) raised_timer_res_ = true;
+@@ -41,6 +48,7 @@
+ 
+ FramePacer::~FramePacer() {
+ #if defined(_WIN32)
++    if (mmcss_task_) AvRevertMmThreadCharacteristics(static_cast<HANDLE>(mmcss_task_));
+     if (wait_timer_) CloseHandle(static_cast<HANDLE>(wait_timer_));
+     if (raised_timer_res_) timeEndPeriod(1);
+ #endif
+--- a/src/runtime/host_platform.h
++++ b/src/runtime/host_platform.h
+@@ -66,6 +66,7 @@
+     // timer waits on the exact deadline instead; null = pre-1803 fallback
+     // to the old hybrid sleep.
+     void* wait_timer_ = nullptr;
++    void* mmcss_task_ = nullptr;
+ };
+ 
+ }  // namespace gbarecomp

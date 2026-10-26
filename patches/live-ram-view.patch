@@ -1,0 +1,41 @@
+--- a/src/runtime/runtime_bus_bridge.cpp
++++ b/src/runtime/runtime_bus_bridge.cpp
+@@ -267,7 +267,19 @@
+ void set_active_bus(gba::GbaBus* bus) {
+     g_active_bus = bus;
+     g_runtime_ram_code_view = [](uint32_t address, uint32_t size) -> const uint8_t* {
+-        return g_active_bus ? g_active_bus->native_code_view(address,size) : nullptr;
++        if (!g_active_bus) return nullptr;
++        // Native RAM guards fetch every instruction. Common contiguous RAM
++        // reads need neither the cartridge mapper nor the wrap scratch path.
++        // These are live byte views, not cached opcode values: self-modifying
++        // writes remain visible on the very next instruction.
++        const uint32_t region = address >> 24;
++        if (size && (region == 2u || region == 3u)) {
++            const uint32_t mask = region == 2u ? 0x3ffffu : 0x7fffu;
++            const uint32_t offset = address & mask;
++            if (size <= mask + 1u - offset)
++                return (region == 2u ? g_active_bus->ewram_ptr() : g_active_bus->iwram_ptr()) + offset;
++        }
++        return g_active_bus->native_code_view(address, size);
+     };
+     if (bus) {
+         bus->bind_wait_table(&g_runtime_waits);
+diff --git a/src/armv4t/runtime_arm.cpp b/src/armv4t/runtime_arm.cpp
+index 24980dc..14e71d7 100644
+--- a/src/armv4t/runtime_arm.cpp
++++ b/src/armv4t/runtime_arm.cpp
+@@ -1084,8 +1084,11 @@ extern "C" int runtime_native_ram_instruction_matches_masked(uint32_t pc,
+     if (!g_runtime_ram_code_view || (size != 2u && size != 4u)) return 0;
+     const auto* bytes = g_runtime_ram_code_view(pc, size);
+     if (!bytes) return 0;
+-    uint32_t actual = 0;
+-    for (uint32_t b = 0; b < size; ++b) actual |= uint32_t(bytes[b]) << (8u*b);
++    // Only two instruction widths are legal. Spell out the little-endian
++    // loads so this per-instruction guard does not retain a variable shift
++    // loop after the indirect code-view call.
++    uint32_t actual = uint32_t(bytes[0]) | (uint32_t(bytes[1]) << 8u);
++    if (size == 4u) actual |= (uint32_t(bytes[2]) << 16u) | (uint32_t(bytes[3]) << 24u);
+     return ((actual ^ opcode) & mask) == 0;
+ }
+ 

@@ -3,6 +3,8 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include "overlay_compile.h"
 #include "overlay_abi.h"
 
@@ -23,7 +25,7 @@ void branch(std::uint32_t pc) { cpu.R[15] = pc & ~1u; }
 }
 
 int main(int argc, char** argv) {
-    if (argc != 2) return 2;
+    if (argc != 2 && argc != 3) return 2;
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto dir = std::filesystem::absolute(argv[1]) / std::to_string(stamp);
     // mov r0,#42; bx lr
@@ -48,7 +50,12 @@ int main(int argc, char** argv) {
     cb.runtime_call_should_return = returning;
     cb.runtime_dispatch_with_exchange = branch;
     cb.runtime_dispatch = branch;
-    for (bool compile : {true, false}) {
+    const std::uint8_t thumb_code[] = {0x08, 0x46, 0x70, 0x47}; // mov r0,r1; bx lr
+    for (bool thumb : {false, true}) {
+      work.thumb = thumb;
+      work.bytes = thumb ? thumb_code : code;
+      work.size = thumb ? sizeof(thumb_code) : sizeof(code);
+      for (bool compile : {true, false}) {
         gbarecomp::OverlayCompiled result;
         std::string error;
         if (!gbarecomp::overlay_compile_one(work, dir.string(), &cb, compile,
@@ -57,17 +64,39 @@ int main(int argc, char** argv) {
             return 1;
         }
         cpu.R[0] = 0;
+        cpu.R[1] = 42;
         cpu.R[14] = 0x08001000;
         cpu.R[15] = work.pc;
-        cpu.cpsr = 0x1f;
+        cpu.cpsr = thumb ? 0x3f : 0x1f;
         result.fn();
         if (cpu.R[0] != 42 || !cycles) return 1;
         // Resume at bx lr: the mov must not run a second time, and the
         // resume marker must be consumed through the shared host pointer.
         cpu.R[0] = 99;
-        resumePc = work.pc + 4;
+        resumePc = work.pc + (thumb ? 2 : 4);
         result.fn();
         if (cpu.R[0] != 99 || resumePc) return 1;
+    }
+    }
+    if (argc == 3) {
+        std::ifstream file(argv[2], std::ios::binary);
+        std::vector<std::uint8_t> image((std::istreambuf_iterator<char>(file)), {});
+        if (image.empty()) return 2;
+        work.bytes = image.data();
+        work.size = image.size();
+        work.thumb = true;
+        for (auto pc : {0x08020004u, 0x0801CD24u, 0x08022C84u}) {
+            work.pc = pc;
+            gbarecomp::OverlayCompiled result;
+            std::string error;
+            if (!gbarecomp::overlay_compile_one(work, dir.string(), &cb, true,
+                    gbarecomp::HealBackend::Gcc, &result, &error)) {
+                std::fprintf(stderr, "FAIL: %s\n", error.c_str());
+                return 1;
+            }
+            // Guest calls require live game state: compile/load only here.
+            std::printf("reported guest function %08X: compiled and loaded\n", pc);
+        }
     }
     std::puts("runtime compiler: fresh DLL execution and warm-cache execution passed");
     return 0;

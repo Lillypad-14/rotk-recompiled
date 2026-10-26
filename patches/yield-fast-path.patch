@@ -1,0 +1,61 @@
+--- a/src/runtime/runtime_bus_bridge.cpp
++++ b/src/runtime/runtime_bus_bridge.cpp
+@@ -1087,7 +1087,20 @@
+     g_vblank_input_hook = std::move(h);
+ }
+ 
+-extern "C" bool runtime_should_yield(void) {
++static bool yield_watchdog_enabled() {
++    static const bool enabled = [] {
++        const char* e = std::getenv("GBARECOMP_HANG_WATCHDOG");
++        return e && e[0] != '\0' && e[0] != '0';
++    }();
++    return enabled;
++}
++
++#if defined(_MSC_VER)
++__declspec(noinline)
++#elif defined(__GNUC__) || defined(__clang__)
++__attribute__((noinline))
++#endif
++static bool runtime_should_yield_slow() {
+     if (g_session_execution) {
+         if (gbarecomp::runtime_dispatch_suspended()) return true;
+         auto* bus = gbarecomp::g_active_bus;
+@@ -1217,10 +1230,7 @@
+     // wall-clock with no HALT, snapshot the live M4A state ONCE and keep
+     // running (observation, not a fix). Enable with
+     // GBARECOMP_HANG_WATCHDOG=1; tune seconds with GBARECOMP_HANG_SECONDS.
+-    static const bool wd_on = [] {
+-        const char* e = std::getenv("GBARECOMP_HANG_WATCHDOG");
+-        return e && e[0] != '\0' && e[0] != '0';
+-    }();
++    const bool wd_on = yield_watchdog_enabled();
+     if (wd_on) {
+         static const long long wd_secs = [] {
+             const char* e = std::getenv("GBARECOMP_HANG_SECONDS");
+@@ -1257,6 +1267,24 @@
+     return halted;
+ }
+ 
++
++// The common instruction has no yield side effects. Keep its predicate small
++// rather than saving the registers needed by presentation/session diagnostics
++// on every instruction. Any potentially observable operation uses the original
++// path, including BIOS prefetch, mutable-code hooks and pending VBlank work.
++extern "C" bool runtime_should_yield(void) {
++    auto* bus = gbarecomp::g_active_bus;
++    if (g_session_execution ||
++        (bus && g_cpu.R[15] < 0x00004000u) ||
++        g_runtime_force_interp_hook || g_frame_present_quit ||
++        (g_irq_nest_depth == 0u &&
++         g_runtime_vblank_starts != g_runtime_yielded_vblank_start) ||
++        yield_watchdog_enabled() ||
++        (g_runtime_break_pc != 0u && g_cpu.R[15] == g_runtime_break_pc))
++        return runtime_should_yield_slow();
++    return bus && bus->io().halted();
++}
++
+ namespace gbarecomp {
+ void runtime_capture_timing_context(RuntimeTimingContext& out) {
+     out.cycles = g_runtime_cycles;

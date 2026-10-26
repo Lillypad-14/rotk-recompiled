@@ -1,4 +1,8 @@
+2026-10-26 active-fight follow-up: added a repeatable movement/attack stress trace and a smaller per-instruction yield path. Behavior snapshots match apart from inactive RTC wall time, and focused/multiplayer tests pass. Active 400-enemy fights still miss frame budgets; concurrent host load prevents a reliable speedup percentage. See [measurements](docs/PERFORMANCE.md#active-crowd-profiling-and-yield-fast-path-2026-10-26).
+
 # Measured status — 2026-10-25
+
+2026-10-26 performance follow-up: [frame pacing and compiler report](docs/PERFORMANCE.md). The normal and movement/action 1,800-frame widescreen checks hold 59.73 Hz after warm-up with zero work-budget overruns, long gaps or skipped guest frames. A 400-enemy sample reaches about 59.5 Hz with no long gaps but still has budget overruns. Runtime compilation now passes ARM/Thumb execution, interior resume, cache reuse, and compile/load checks for the three reported failing guest functions. Broad zero-drop qualification remains unfinished.
 
 2026-10-26: [PC bugfix pass](docs/BUGFIX_PASS.md) corrects widescreen camera writes corrupting BG3 tile staging, reduces HD-stream starvation clicks, and adds isolated paced tests. Both editions rebuilt. The 600-frame widescreen gameplay test completes at about 57.6 FPS; uneven pacing remains unresolved.
 
@@ -74,7 +78,7 @@ recompiles `rotk/build/rotk_hack.gba` (32 MiB) with the stock roots plus the 918
 | `ROTK_PC_OAM_LIMIT=8` on both routes and a 400-enemy stress frame | Identical frame hashes, up to 128 pieces in the extra path |
 | `ROTK_PC_STRESS_SPAWN=400`, 10,000 frames | No errors, 260+ actors queued for drawing |
 
-Not measured yet: frame cost in a big fight.
+Busy-fight frame cost has now been sampled: the latest 400-enemy checkpoint ran at 59.609 Hz after warm-up with zero long gaps/missing frames, but eight frame-work budget overruns. Normal movement replay held 59.730 Hz with zero overruns. See [performance measurements and limitations](docs/PERFORMANCE.md).
 
 ## Next milestone
 
