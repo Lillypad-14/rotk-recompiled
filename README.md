@@ -33,7 +33,11 @@ tests and scripts. Headless runs (`--frames`, `--no-window`, `--tcp`) skip the l
   more than 256 actors on screen.
 - Up to 1,024 sprite pieces per frame instead of the GBA's 128 OAM entries (`ROTK_PC_EXTRA_OBJECTS`).
 - The engine's draw-order sort works past 256 queued actors (the original counted them in a byte).
+- Optional widescreen (16:10, 16:9, 2:1, 21:9): more of the level at the sides, camera kept inside
+  the level, enemies in the margins active. Optional HUD at the screen edges. Menus and cutscenes keep
+  their width with black bars. See [docs/WIDESCREEN.md](docs/WIDESCREEN.md).
 - With these at their stock values the game renders exactly like the original (same frame hashes).
+- Planned: a native HD audio mixer ([docs/AUDIO.md](docs/AUDIO.md)).
 - Details and measurements: [docs/ENGINE_LIMITS.md](docs/ENGINE_LIMITS.md), [STATUS.md](STATUS.md).
   Next steps: [docs/ROADMAP.md](docs/ROADMAP.md).
 

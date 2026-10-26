@@ -94,6 +94,7 @@ entry the same way the skipped return would.
 | Bigger actor limits | Actors 256 to 2,048, overlay 40 to 320 | on, 1,024 / 160 | `ROTK_PC_ACTORS`, `ROTK_PC_OVERLAY_ACTORS`, `ROTK_PC_RENDER_SORT=0` |
 | More sprites on screen | Sprite pieces 256 to 2,048 | on, 1,024 | `ROTK_PC_MAX_SPRITES`, `ROTK_PC_EXTRA_OBJECTS` |
 | CPU boost | x2, x4, x8, x16 | on, x4 | `GBARECOMP_CPU_OVERCLOCK` (1 = stock) |
+| Widescreen | Aspect ratio, HUD at screen edges | off (16:9, HUD centred) | none |
 
 The package is `mods/rotk.pc.manifest.toml.in`, configured per target with that ROM's SHA-1 and placed
 next to the executable. `src/main.cpp` resolves every setting in a mod reset callback, after the
