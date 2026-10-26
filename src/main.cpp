@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
+#include <stdexcept>
 
 #include "gba_bus.h"
 #include "gba_memory.h"
@@ -131,15 +132,22 @@ std::uint32_t alignUp(std::uint32_t value, std::uint32_t alignment)
     return (value + alignment - 1u) & ~(alignment - 1u);
 }
 
-PcLayout makeLayout()
+PcLayout makeLayout(bool coop = false)
 {
     PcLayout layout;
     const unsigned long hostBytes =
         envNumber("GBARECOMP_HOST_RAM_MB", gba::kHostRamDefaultSize / (1024u * 1024u)) * 1024u * 1024u;
-    const unsigned long heapBytes = pcSetting("ROTK_PC_HEAP_MB", "large-memory", "heap-mb", 0) * 1024u * 1024u;
+    unsigned long heapBytes = pcSetting("ROTK_PC_HEAP_MB", "large-memory", "heap-mb", 0) * 1024u * 1024u;
     unsigned long mainActors = pcSetting("ROTK_PC_ACTORS", "actor-limits", "main-actors", kStockMainActors);
     unsigned long overlayActors =
         pcSetting("ROTK_PC_OVERLAY_ACTORS", "actor-limits", "overlay-actors", kStockOverlayActors);
+    if (coop) {
+        // Expanded link play needs the same pool/queue/heap contract on both
+        // consoles, including when the solo engine enhancements are disabled.
+        if (heapBytes < 4u * 1024u * 1024u) heapBytes = 4u * 1024u * 1024u;
+        if (mainActors < 1024u) mainActors = 1024u;
+        if (overlayActors < 160u) overlayActors = 160u;
+    }
     if (mainActors < kStockMainActors) mainActors = kStockMainActors;
     if (overlayActors < kStockOverlayActors) overlayActors = kStockOverlayActors;
     layout.actors = mainActors != kStockMainActors || overlayActors != kStockOverlayActors;
@@ -178,6 +186,11 @@ PcLayout makeLayout()
 }
 
 PcLayout g_layout;
+PcLayout g_soloLayout;
+bool g_coopEngineLayout = false;
+constexpr const char* kCoopEngineHooks[] = {kHeapHookId, kPoolHookId, kSortHookId};
+bool g_soloEngineHooks[3] = {};
+int (*g_soloQueueOverride)(std::uint32_t, std::uint32_t, std::uint32_t*) = nullptr;
 
 const PcLayout& layout()
 {
@@ -577,9 +590,24 @@ void featureActivated() {}
 namespace rotk {
 
 // Split-screen co-op (src/local_coop.cpp): the presentation features keep one state per console.
-// The engine limits (heap, actor pools, render sort) stay off, since they change the game's memory.
+// Each co-op console uses an independent engine layout in its own host RAM.
+// The frozen solo machine's layout is restored before it resumes.
 void pcFeaturesStartCoop()
 {
+    if (!g_coopEngineLayout) {
+        const PcLayout coop = makeLayout(true);
+        if (!coop.heap || !coop.actors)
+            throw std::runtime_error("Split-screen co-op needs more host RAM for its engine buffers");
+        g_soloLayout = g_layout;
+        g_layout = coop;
+        g_soloQueueOverride = gba::g_rom_read32_override;
+        for (int i = 0; i < 3; ++i) {
+            g_soloEngineHooks[i] = gba_mod_function_hook_enabled(kCoopEngineHooks[i]) != 0;
+            gba_mod_set_function_hook_enabled(kCoopEngineHooks[i], 1);
+        }
+        g_coopEngineLayout = true;
+    }
+    gba::g_rom_read32_override = pcQueueLiterals;
     for (ExtraObjects& extra : g_coopExtra) {
         freePages(extra);
         extra = ExtraObjects{};
@@ -589,7 +617,7 @@ void pcFeaturesStartCoop()
             for (auto& buffer : extra.pages)
                 for (auto& half : buffer) half = new std::uint8_t[extra.capacity * 8u]();
     }
-    for (const char* id : {kPushOamHookId, kHideOamHookId, kEndFrameHookId})
+    for (const char* id : {kPushOamHookId, kHideOamHookId, kEndFrameHookId, kHeapHookId, kPoolHookId, kSortHookId})
         gba_mod_set_function_hook_runs_suspended(id, 1);
     widescreenStartCoop();
     smoothStartCoop();
@@ -598,11 +626,18 @@ void pcFeaturesStartCoop()
 
 void pcFeaturesEndCoop()
 {
-    for (const char* id : {kPushOamHookId, kHideOamHookId, kEndFrameHookId})
+    for (const char* id : {kPushOamHookId, kHideOamHookId, kEndFrameHookId, kHeapHookId, kPoolHookId, kSortHookId})
         gba_mod_set_function_hook_runs_suspended(id, 0);
     widescreenEndCoop();
     smoothEndCoop();
     pcFeaturesSelectConsole(-1);
+    if (g_coopEngineLayout) {
+        g_layout = g_soloLayout;
+        gba::g_rom_read32_override = g_soloQueueOverride;
+        for (int i = 0; i < 3; ++i)
+            gba_mod_set_function_hook_enabled(kCoopEngineHooks[i], g_soloEngineHooks[i]);
+        g_coopEngineLayout = false;
+    }
 }
 
 void pcFeaturesSelectConsole(int console)

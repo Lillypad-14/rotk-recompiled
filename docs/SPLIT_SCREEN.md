@@ -38,8 +38,17 @@ in-between frame there (about 65 of 4,500 frames per console in the scripted fig
 next tick composed by the repeated vblank, which mostly happens with the CPU boost, and link
 sessions keep native timing.
 
-Off during co-op: the engine limits (larger heap, actor pools, render sort and the ROM-read
-override change the game's memory), HD icons, HD audio and the CPU boost.
+The engine limits (larger heap, actor pools, render sort, the queue literals and the PC info block)
+run on the co-op consoles too: their hooks write through the active bus into that console's own host
+RAM. The Expanded mod reads the PC info block and depends on them. Without them, a recorded player
+session (17:49, 2026-10-26) had console 1 send a packet whose checksum did not match (console 2's
+link code at 0x03007570 sets g_MpMessageMask bit 0x100 and stops, and the game reports a lost
+connection 300 frames later) at linked frame 3,686, on the local and the strict lockstep scheduler
+alike and with every presentation feature off. With them, that session holds through 6,000 frames, the earlier 17:24 session through 12,000,
+and the 15-minute random fight script through 54,000 (at most 56 frames between messages).
+`GBARECOMP_LOCAL_LINK_CHUNK=<cycles>` sets the chunk length for tests (0 = strict lockstep).
+
+Off during co-op: HD icons, HD audio and the CPU boost.
 
 ## Player 2's save
 
@@ -157,7 +166,7 @@ budget); local chunks on menus 3.8 ms mean on a quiet machine.
 ## Open
 
 1. More PC features inside co-op: HD icons (needs the high-resolution renderer per console), the
-   larger engine limits (the host heap and actor pools are one per process).
+   CPU boost.
 2. The audio mixer interpreted on both consoles remains a large cost (interpreter step, state
    copies); native RAM templates for it (roadmap section 2) would help single-player too.
 3. The framework pieces live only in the `external/gbarecomp` working tree, not in `patches/`.

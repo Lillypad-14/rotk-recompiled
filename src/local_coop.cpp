@@ -60,8 +60,9 @@ std::uint16_t steerToMultiplayer(const MenuState& menu, std::uint64_t frame)
 }
 
 // The PC features' hooks are process-wide, so they would act on the session's consoles too. The
-// presentation features keep per-console state and serve the co-op consoles (pcFeaturesStartCoop);
-// every other hook is off while the session runs, and so is the ROM-read override.
+// presentation features keep per-console state and the engine limits write into each console's own
+// host RAM, so both serve the co-op consoles (pcFeaturesStartCoop); every other hook is off while the
+// session runs.
 struct FeatureHooks {
     void (*present)(std::uint32_t, std::uint8_t*, std::uint8_t*) = nullptr;
     const std::uint8_t* (*extraObjects)(std::uint32_t*) = nullptr;
@@ -78,7 +79,6 @@ int g_cancelFrames = 0;
 void suspendFeatureHooks()
 {
     g_saved = {gba::g_present_scanline_hook, gba::g_extra_obj_provider, gba::g_rom_read32_override, g_dma_observer};
-    gba::g_rom_read32_override = nullptr;
     gba_mod_set_function_hooks_suspended(1);
     pcFeaturesStartCoop();
 }
