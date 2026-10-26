@@ -29,6 +29,13 @@ size = 0x00000350
 name = "pucrunch_iwram"
 note = "decompress_loadIwramFunctions copies 0xd4 words to g_DecompressPucrunchCode."
 
+[[code_copy]]
+runtime_start = 0x03002C30
+source_start = 0x0800E208
+size = 0x000000F8
+name = "actor_render_sort"
+note = "g_ActorRenderSortCode: CpuSet of 0x3e words at boot (literals at 0x080006F0..0x080006F8)."
+
 [[extra_func]]
 addr = 0x08000000
 mode = "arm"
@@ -59,3 +66,34 @@ addr = 0x08032E74
 mode = "thumb"
 note = "memory_addHeap: the host registers the g_HeapArena heap over host RAM (src/main.cpp)."
 
+[[extra_func]]
+addr = 0x080304E0
+mode = "thumb"
+name = "pool_buildFreeList"
+note = "pool_buildFreeList(pool, count, size): zeroes count slots and links them into a free list."
+
+[[mod_function_hook]]
+addr = 0x080304E0
+mode = "thumb"
+note = "pool_buildFreeList: the host builds larger actor pools in host RAM (src/main.cpp)."
+
+[[mod_function_hook]]
+addr = 0x03002C30
+mode = "arm"
+note = "g_ActorRenderSortCode (copied from 0x0800E208): the host sorts the render queue with a 32-bit count; the original reads it as a byte (src/main.cpp)."
+
+
+[[mod_function_hook]]
+addr = 0x08036540
+mode = "thumb"
+note = "sprite_pushOam: pieces past the 128 OAM entries go to host extra pages (src/main.cpp)."
+
+[[mod_function_hook]]
+addr = 0x08036590
+mode = "thumb"
+note = "sprite_hideOamEntry: hides the extra piece that the preceding push stored (src/main.cpp)."
+
+[[mod_function_hook]]
+addr = 0x080366A4
+mode = "thumb"
+note = "sprite_endFrame: observed only, clears extra pieces of a frame that pushed none (src/main.cpp)."

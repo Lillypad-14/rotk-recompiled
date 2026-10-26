@@ -1,0 +1,250 @@
+diff --git a/src/gba/gba_io.cpp b/src/gba/gba_io.cpp
+index c868812..262989b 100644
+--- a/src/gba/gba_io.cpp
++++ b/src/gba/gba_io.cpp
+@@ -20,6 +20,10 @@
+ extern "C" unsigned long long g_runtime_cycles;
+ extern "C" uint32_t runtime_current_pc(void);
+ 
++// Optional observer called after every completed DMA transfer with the starting
++// source and destination and the transferred byte count. nullptr = none.
++extern "C" void (*g_dma_observer)(int channel, uint32_t src, uint32_t dst, uint32_t bytes) = nullptr;
++
+ namespace gba {
+ const char* dma_ram_implementation() {
+ #if defined(GBARECOMP_DMA_RAM_HLE)
+@@ -344,6 +348,7 @@ void GbaIo::run_immediate_dma(int channel) {
+ 
+     // DMA stole this many bus cycles from the CPU.
+     dma_steal_cycles_ += dma_transfer_cost(sad, dad, transfer_32, word_count);
++    if (g_dma_observer) g_dma_observer(channel, sad, dad, word_count * step);
+ 
+     // Clear enable bit unless repeat is set (we don't model repeat
+     // yet — for immediate mode it should be 0 in real ROMs anyway).
+@@ -413,6 +418,9 @@ void GbaIo::run_timed_dma(int start_mode) {
+         }
+         ++dma_runs_[channel];
+         dma_words_[channel] += word_count;
++        if (g_dma_observer)
++            g_dma_observer(channel, dma_next_source_[channel] & align_mask,
++                           dma_next_dest_[channel] & align_mask, word_count * step);
+         dma_next_source_[channel] = s;
+ 
+         const bool repeat = (cnt_h & 0x0200u) != 0;
+diff --git a/src/gba/gba_ppu.cpp b/src/gba/gba_ppu.cpp
+index c0bed33..684afc0 100644
+--- a/src/gba/gba_ppu.cpp
++++ b/src/gba/gba_ppu.cpp
+@@ -52,6 +52,7 @@ extern "C" int (*g_ws_obj_attr_x_provider)(int, std::uint16_t,
+ // still run first, so a game can re-place known-safe HUD sprites and clip the
+ // rest.
+ extern "C" int g_ws_obj_native_clip = 0;
++extern "C" const uint8_t* (*g_extra_obj_provider)(uint32_t* count) = nullptr;
+ extern "C" int (*g_ws_obj_attr_y_provider)(int, std::uint16_t,
+                                             std::uint16_t, std::uint16_t,
+                                             int*) = nullptr;
+@@ -65,6 +66,21 @@ const std::uint16_t* g_foreign_background = nullptr;
+ const GbaForeignObjFocusTransform* g_foreign_obj_focus = nullptr;
+ const GbaForeignScreenOverlay* g_foreign_screen_overlay = nullptr;
+ 
++// Priority key layout shared by BG and OBJ candidates: objects of priority p use
++// p*kObjKeyStride + OAM index, backgrounds p*kObjKeyStride + kBgKeyBase + layer.
++constexpr unsigned kObjKeyStride = 4096u;
++constexpr unsigned kBgKeyBase = 4092u;
++constexpr uint32_t kMaxExtraObjects = kBgKeyBase - 128u;
++
++const uint8_t* extra_objects(uint32_t* count) {
++    *count = 0;
++    if (!g_extra_obj_provider) return nullptr;
++    const uint8_t* entries = g_extra_obj_provider(count);
++    if (!entries) *count = 0;
++    if (*count > kMaxExtraObjects) *count = kMaxExtraObjects;
++    return entries;
++}
++
+ }  // namespace
+ 
+ namespace foreign_presentation_internal {
+@@ -579,8 +595,10 @@ void mark_obj_window_scanline(bool* mask,
+     constexpr uint32_t obj_tile_base = 0x10000u;
+     bool obj_1d_mapping = (dispcnt & 0x0040u) != 0;
+ 
+-    for (int idx = 127; idx >= 0; --idx) {
+-        const uint8_t* entry = oam + idx * 8;
++    uint32_t extra_count = 0;
++    const uint8_t* extra = extra_objects(&extra_count);
++    for (int idx = 127 + static_cast<int>(extra_count); idx >= 0; --idx) {
++        const uint8_t* entry = idx < 128 ? oam + idx * 8 : extra + (idx - 128) * 8;
+         uint16_t attr0 = load_u16_le(&entry[0]);
+         uint16_t attr1 = load_u16_le(&entry[2]);
+         uint16_t attr2 = load_u16_le(&entry[4]);
+@@ -858,7 +876,7 @@ void render_scanline_internal(uint8_t* rgb,
+         const uint32_t tile_y = tex_y >> 3;
+         const uint32_t map_row = screen_base + (tile_y >> 5) * block_cols * 0x800u +
+                                  (tile_y & 31u) * 64u;
+-        const int key = static_cast<int>(bg_priority * 256u + 128u + layer);
++        const int key = static_cast<int>(bg_priority * kObjKeyStride + kBgKeyBase + layer);
+         const bool target1 = (first_targets & (1u << layer)) != 0;
+         const bool target2 = (second_targets & (1u << layer)) != 0;
+         for (uint32_t x = 0; x < kScreenWidth;) {
+@@ -943,7 +961,7 @@ void render_scanline_internal(uint8_t* rgb,
+ #if !defined(GBARECOMP_SCANLINE_HLE)
+                 to_rgb888(color, hud.rgb);
+ #endif
+-                hud.key = static_cast<int>(bg_priority * 256u + 128u + layer);
++                hud.key = static_cast<int>(bg_priority * kObjKeyStride + kBgKeyBase + layer);
+                 hud.layer = static_cast<uint8_t>(layer);
+                 hud.target1 = blend_enabled(x) &&
+                     ((first_targets & (1u << layer)) != 0);
+@@ -951,7 +969,7 @@ void render_scanline_internal(uint8_t* rgb,
+                 hud.valid = true;
+             }
+             submit(x, color,
+-                   static_cast<int>(bg_priority * 256u + 128u + layer),
++                   static_cast<int>(bg_priority * kObjKeyStride + kBgKeyBase + layer),
+                    static_cast<uint8_t>(layer),
+                    blend_enabled(x) && ((first_targets & (1u << layer)) != 0),
+                    (second_targets & (1u << layer)) != 0);
+@@ -1005,7 +1023,7 @@ void render_scanline_internal(uint8_t* rgb,
+             if (pal_idx == 0) continue;
+             const uint16_t color = load_u16_le(&pal[pal_idx * 2]);
+             submit(x, color,
+-                   static_cast<int>(bg_priority * 256 + 128 + layer),
++                   static_cast<int>(bg_priority * kObjKeyStride + kBgKeyBase + layer),
+                    static_cast<uint8_t>(layer),
+                    blend_enabled(x) && ((first_targets & (1u << layer)) != 0),
+                    (second_targets & (1u << layer)) != 0);
+@@ -1071,7 +1089,7 @@ void render_scanline_internal(uint8_t* rgb,
+                 color = load_u16_le(&pal[pal_idx * 2]);
+             }
+             submit(x, color,
+-                   static_cast<int>(bg_priority * 256 + 128 + layer),
++                   static_cast<int>(bg_priority * kObjKeyStride + kBgKeyBase + layer),
+                    static_cast<uint8_t>(layer),
+                    blend_enabled(x) && ((first_targets & (1u << layer)) != 0),
+                    (second_targets & (1u << layer)) != 0);
+@@ -1184,8 +1202,10 @@ void render_scanline_internal(uint8_t* rgb,
+         constexpr uint32_t obj_tile_base = 0x10000u;
+         bool obj_1d_mapping = (dispcnt & 0x0040u) != 0;
+         const uint8_t* obj_pal = pal + 0x200;
+-        for (int idx = 127; idx >= 0; --idx) {
+-            const uint8_t* entry = oam + idx * 8;
++        uint32_t extra_count = 0;
++        const uint8_t* extra = extra_objects(&extra_count);
++        for (int idx = 127 + static_cast<int>(extra_count); idx >= 0; --idx) {
++            const uint8_t* entry = idx < 128 ? oam + idx * 8 : extra + (idx - 128) * 8;
+             uint16_t attr0 = load_u16_le(&entry[0]);
+             uint16_t attr1 = load_u16_le(&entry[2]);
+             uint16_t attr2 = load_u16_le(&entry[4]);
+@@ -1210,15 +1230,16 @@ void render_scanline_internal(uint8_t* rgb,
+             int tiles_w = sw / 8;
+             int tiles_h = sh / 8;
+             int priority = static_cast<int>((attr2 >> 10) & 0x3u);
+-            // Composite key (lower = front). Per-priority stride 256 with OBJ in
+-            // [p*256, p*256+127] (tie-break by OAM idx) and BG in [p*256+128,
+-            // p*256+131] (tie-break by layer) yields the exact GBA order
++            // Composite key (lower = front). Per-priority stride kObjKeyStride with
++            // OBJ in [p*stride, p*stride+kBgKeyBase) (tie-break by OAM idx, extra
++            // objects included) and BG in [p*stride+kBgKeyBase, +3] (tie-break by
++            // layer) yields the exact GBA order
+             // OBJ0<BG0<OBJ1<BG1<OBJ2<BG2<OBJ3<BG3: an OBJ is in front of a same-
+             // priority BG, but a BG of priority p sits in front of any OBJ of
+             // priority p+1 (this is what lets the player walk BEHIND roof/tree
+-            // tops). The stride MUST exceed 128 so OBJ idx (0..127) can't bleed
+-            // into the next priority's BG band.
+-            int key = priority * 256 + idx;
++            // tops). kBgKeyBase MUST exceed every OBJ idx so objects can't bleed
++            // into the same priority's BG band.
++            int key = static_cast<int>(priority * kObjKeyStride) + idx;
+             bool obj_target2 = (second_targets & (1u << 4)) != 0;
+             auto emit_obj = [&](int tex_x, int tex_y, int screen_x) {
+                 if (screen_x < 0 || screen_x >= static_cast<int>(kScreenWidth)) return;
+@@ -1644,7 +1665,7 @@ void render_scanline_wide(uint8_t* rgb, int y, uint16_t dispcnt,
+                 ? (window_control_at_xy(sample_hx, sample_y) & 0x20) != 0
+                 : blend_enabled(x);
+             submit(x, color,
+-                   static_cast<int>(bg_priority * 256u + 128u + layer),
++                   static_cast<int>(bg_priority * kObjKeyStride + kBgKeyBase + layer),
+                    static_cast<uint8_t>(layer),
+                    sample_blend && ((first_targets & (1u << layer)) != 0),
+                    (second_targets & (1u << layer)) != 0);
+@@ -1745,7 +1766,7 @@ void render_scanline_wide(uint8_t* rgb, int y, uint16_t dispcnt,
+                 }
+             }
+             submit(x, color,
+-                   static_cast<int>(bg_priority * 256 + 128 + layer),
++                   static_cast<int>(bg_priority * kObjKeyStride + kBgKeyBase + layer),
+                    static_cast<uint8_t>(layer),
+                    blend_enabled(x) && ((first_targets & (1u << layer)) != 0),
+                    (second_targets & (1u << layer)) != 0);
+@@ -1802,7 +1823,7 @@ void render_scanline_wide(uint8_t* rgb, int y, uint16_t dispcnt,
+                 color = load_u16_le(&pal[pal_idx * 2]);
+             }
+             submit(x, color,
+-                   static_cast<int>(bg_priority * 256 + 128 + layer),
++                   static_cast<int>(bg_priority * kObjKeyStride + kBgKeyBase + layer),
+                    static_cast<uint8_t>(layer),
+                    blend_enabled(x) && ((first_targets & (1u << layer)) != 0),
+                    (second_targets & (1u << layer)) != 0);
+@@ -1874,8 +1895,10 @@ void render_scanline_wide(uint8_t* rgb, int y, uint16_t dispcnt,
+         constexpr uint32_t obj_tile_base = 0x10000u;
+         bool obj_1d_mapping = (dispcnt & 0x0040u) != 0;
+         const uint8_t* obj_pal = pal + 0x200;
+-        for (int idx = 127; idx >= 0; --idx) {
+-            const uint8_t* entry = oam + idx * 8;
++        uint32_t extra_count = 0;
++        const uint8_t* extra = extra_objects(&extra_count);
++        for (int idx = 127 + static_cast<int>(extra_count); idx >= 0; --idx) {
++            const uint8_t* entry = idx < 128 ? oam + idx * 8 : extra + (idx - 128) * 8;
+             uint16_t attr0 = load_u16_le(&entry[0]);
+             uint16_t attr1 = load_u16_le(&entry[2]);
+             uint16_t attr2 = load_u16_le(&entry[4]);
+@@ -1922,15 +1945,16 @@ void render_scanline_wide(uint8_t* rgb, int y, uint16_t dispcnt,
+             int tiles_w = sw / 8;
+             int tiles_h = sh / 8;
+             int priority = static_cast<int>((attr2 >> 10) & 0x3u);
+-            // Composite key (lower = front). Per-priority stride 256 with OBJ in
+-            // [p*256, p*256+127] (tie-break by OAM idx) and BG in [p*256+128,
+-            // p*256+131] (tie-break by layer) yields the exact GBA order
++            // Composite key (lower = front). Per-priority stride kObjKeyStride with
++            // OBJ in [p*stride, p*stride+kBgKeyBase) (tie-break by OAM idx, extra
++            // objects included) and BG in [p*stride+kBgKeyBase, +3] (tie-break by
++            // layer) yields the exact GBA order
+             // OBJ0<BG0<OBJ1<BG1<OBJ2<BG2<OBJ3<BG3: an OBJ is in front of a same-
+             // priority BG, but a BG of priority p sits in front of any OBJ of
+             // priority p+1 (this is what lets the player walk BEHIND roof/tree
+-            // tops). The stride MUST exceed 128 so OBJ idx (0..127) can't bleed
+-            // into the next priority's BG band.
+-            int key = priority * 256 + idx;
++            // tops). kBgKeyBase MUST exceed every OBJ idx so objects can't bleed
++            // into the same priority's BG band.
++            int key = static_cast<int>(priority * kObjKeyStride) + idx;
+             bool obj_target2 = (second_targets & (1u << 4)) != 0;
+             auto emit_obj = [&](int tex_x, int tex_y, int screen_x) {
+                 if (screen_x < 0 || screen_x >= static_cast<int>(out_w)) return;
+@@ -2062,7 +2086,7 @@ void render_scanline_wide(uint8_t* rgb, int y, uint16_t dispcnt,
+                 // game's WINOUT often disables OBJ beyond the stock screen.
+                 if ((pixel.color & 0x8000) || pixel.priority > 3 ||
+                     (!layer_enabled(x, 4) && !g_ws_authored_margin_layers)) continue;
+-                submit(x, pixel.color, pixel.priority * 256 + (pixel.order & 127), 4,
++                submit(x, pixel.color, static_cast<int>(pixel.priority * kObjKeyStride) + (pixel.order & 127), 4,
+                        pixel.semi_transparent && blend_enabled(x),
+                        (second_targets & (1u << 4)) != 0);
+             }
+diff --git a/src/gba/gba_ppu.h b/src/gba/gba_ppu.h
+index 6bba097..dcdd540 100644
+--- a/src/gba/gba_ppu.h
++++ b/src/gba/gba_ppu.h
+@@ -313,6 +313,12 @@ extern "C" int (*g_ws_obj_attr_y_provider)(int oam_index,
+ // keeps the established expanded-viewport OBJ test.
+ extern "C" int g_ws_obj_native_clip;
+ 
++// Host-supplied objects beyond the 128 hardware OAM entries, in OAM entry
++// format (attr0, attr1, attr2, unused halfword). They draw as OAM indices 128 and
++// up in every renderer and use the hardware OAM affine matrices. The pointer must
++// stay valid until the next call. nullptr (default) draws hardware OAM only.
++extern "C" const uint8_t* (*g_extra_obj_provider)(uint32_t* count);
++
+ // Read-only, game-authored OBJ coverage for expanded margins. RGB555 bit 15
+ // marks a transparent pixel. Priority uses the hardware 0..3 BG/OBJ order.
+ // The PPU never consumes this layer inside the native 240x160 viewport.

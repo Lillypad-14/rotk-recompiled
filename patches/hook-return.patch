@@ -1,0 +1,36 @@
+diff --git a/src/recompile/emit_function.cpp b/src/recompile/emit_function.cpp
+index 6d7bbd2..3967442 100644
+--- a/src/recompile/emit_function.cpp
++++ b/src/recompile/emit_function.cpp
+@@ -226,7 +226,8 @@ std::string emit_function_body_str(
+                 "    switch (_native_entry) {\n",fn.addr);
+             for (uint32_t site : reviewed) appendf(out,"    case 0x%08Xu:\n",site);
+             appendf(out,"        if (gba_mod_function_entry(_native_entry, %du, &g_cpu)) {\n"
+-                "            g_runtime_resume_pc = 0u; return;\n"
++                "            g_runtime_resume_pc = 0u;\n"
++                "            runtime_call_should_return(g_cpu.R[15]); return;\n"
+                 "        }\n        break;\n    default: break;\n    }\n",
+                 ctx.current_function_thumb ? 1 : 0);
+         }
+@@ -546,14 +547,19 @@ std::string emit_function_body_str(
+ 
+     // Reviewed mod replacement hook. Resume aliases deliberately skip it: an
+     // IRQ/SWI resume is not a fresh guest call. A handled callback owns the
+-    // complete guest call and leaves g_cpu in its return-to-caller state.
++    // complete guest call and leaves g_cpu in its return-to-caller state. The
++    // skipped body's return idiom would have consumed the caller's pushed
++    // call-return entry; match it the same way so hooked calls do not leak one
++    // entry each (the interpreter bridge restores its own entry stack).
+     const uint64_t mod_hook_key =
+         (static_cast<uint64_t>(fn.addr) << 1u) |
+         (fn.mode == CpuMode::Thumb ? 1u : 0u);
+     if (!runtime_ram_placement && mod_function_hook_keys &&
+         mod_function_hook_keys->count(mod_hook_key) != 0) {
+         appendf(out,
+-            "    if (gba_mod_function_entry(0x%08Xu, %du, &g_cpu)) return;\n",
++            "    if (gba_mod_function_entry(0x%08Xu, %du, &g_cpu)) {\n"
++            "        runtime_call_should_return(g_cpu.R[15]); return;\n"
++            "    }\n",
+             fn.addr, fn.mode == CpuMode::Thumb ? 1 : 0);
+     }
+ 

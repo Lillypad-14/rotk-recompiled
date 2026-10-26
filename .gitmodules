@@ -4,3 +4,4 @@
 [submodule "game"]
 	path = game
 	url = https://github.com/Lillypad-14/ROTK-Expanded-experimental.git
+	branch = pc-edition

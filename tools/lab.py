@@ -20,6 +20,8 @@ LOCK = json.loads((ROOT / "framework.lock.json").read_text())
 FRAMEWORK_PATCHES = [
     ROOT / "patches/desktop-audio-rate.patch",
     ROOT / "patches/engine-limits.patch",
+    ROOT / "patches/hook-return.patch",
+    ROOT / "patches/extra-objects.patch",
 ]
 
 STOCK_ROM_SIZE = 0x1000000
