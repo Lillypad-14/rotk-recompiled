@@ -1,0 +1,6 @@
+[submodule "external/gbarecomp"]
+	path = external/gbarecomp
+	url = https://github.com/mstan/gbarecomp.git
+[submodule "game"]
+	path = game
+	url = https://github.com/Lillypad-14/ROTK-Expanded-experimental.git

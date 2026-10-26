@@ -1,0 +1,17 @@
+# Owned inputs and everything derived from them never enter version control.
+*.gba
+*.bin
+*.sav
+*.sram
+*.eeprom
+*.state*
+*.gbas
+
+# Builds, generated code, private inputs and run evidence.
+/build/
+/recomp_cache/
+/recomp_master_misses_*.toml.frag
+/.private/
+
+__pycache__/
+*.pyc

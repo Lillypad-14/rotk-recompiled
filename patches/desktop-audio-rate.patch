@@ -1,0 +1,149 @@
+diff --git a/src/runtime/host_window.cpp b/src/runtime/host_window.cpp
+index 45b0502..f362728 100644
+--- a/src/runtime/host_window.cpp
++++ b/src/runtime/host_window.cpp
+@@ -21,6 +21,7 @@
+ #include "host_overlay.h"
+ #include "presentation_layout.h"
+ #include "touch_input.h"
++#include "../gba/mod_audio.h"
+ #if defined(GBARECOMP_RUNTIME_UI)
+ #include "recomp_runtime_ui.h"
+ #endif
+@@ -407,6 +408,9 @@ struct Backend {
+     rab_bridge    bridge{};
+     bool          bridge_ready = false;
+     SDL_mutex*    audio_mtx = nullptr;
++    SDL_AudioStream* audio_rate_stream = nullptr;
++    uint32_t audio_source_rate = 0;
++    std::vector<int16_t> audio_mix_buf;
+     // Diagnostic/direct path: let SDL own format conversion and queue the
+     // engine's verified 65536 Hz mono stream without passing it through RAB.
+     bool          audio_direct = false;
+@@ -1948,11 +1952,56 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
+ // (We are already inside namespace gbarecomp, so declare it unqualified.)
+ uint64_t overlay_game_thread_compile_ns();
+ 
++void HostWindow::push_audio_block(const int16_t* samples, std::size_t count,
++                                 uint32_t rate) {
++    if (!open_ || !impl_ || !samples || !count) return;
++    if (rate != 32768 && rate != 65536 && rate != 131072 && rate != 262144) return;
++    auto* b = static_cast<Backend*>(impl_);
++    auto drain = [&]() {
++        int16_t converted[4096];
++        int bytes = 0;
++        while ((bytes = SDL_AudioStreamGet(b->audio_rate_stream, converted,
++                                          sizeof(converted))) > 0) {
++            push_audio_samples(converted, static_cast<std::size_t>(bytes) / sizeof(int16_t));
++        }
++    };
++    if (rate != b->audio_source_rate) {
++        if (b->audio_rate_stream) {
++            SDL_AudioStreamFlush(b->audio_rate_stream);
++            drain();
++            SDL_FreeAudioStream(b->audio_rate_stream);
++            b->audio_rate_stream = nullptr;
++        }
++        b->audio_source_rate = rate;
++        if (rate != 65536) {
++            b->audio_rate_stream = SDL_NewAudioStream(AUDIO_S16SYS, 1, rate,
++                                                      AUDIO_S16SYS, 1, 65536);
++            if (!b->audio_rate_stream) {
++                throw std::runtime_error(std::string("audio rate conversion: ") + SDL_GetError());
++            }
++        }
++    }
++    if (rate == 65536) {
++        push_audio_samples(samples, count);
++    } else {
++        if (SDL_AudioStreamPut(b->audio_rate_stream, samples,
++                              static_cast<int>(count * sizeof(int16_t))) < 0) {
++            throw std::runtime_error(std::string("audio rate conversion: ") + SDL_GetError());
++        }
++        drain();
++    }
++}
++
+ void HostWindow::push_audio_samples(const int16_t* samples, std::size_t count) {
+     if (!open_ || !impl_ || !samples || count == 0) return;
+     auto* b = static_cast<Backend*>(impl_);
+     if (b->audio_dev == 0) return;
+ 
++    // Mod clips are registered at 65536 Hz: mix after guest-rate conversion.
++    b->audio_mix_buf.assign(samples, samples + count);
++    gba_mod_audio_mix(b->audio_mix_buf.data(), count);
++    samples = b->audio_mix_buf.data();
++
+     // Volume (launcher setting + VolumeUp/Down hotkeys): scale into scratch
+     // before the bridge. 100 = passthrough, byte-identical to before.
+     if (b->volume != 100) {
+@@ -2108,6 +2157,7 @@ void HostWindow::close() {
+     auto* b = static_cast<Backend*>(impl_);
+     b->cadence.dump();  // MC-WS-002: flush the cadence ring (verbose only)
+     if (b->audio_dev) SDL_CloseAudioDevice(b->audio_dev);  // stops the callback first
++    if (b->audio_rate_stream) SDL_FreeAudioStream(b->audio_rate_stream);
+     if (b->bridge_ready) rab_free(&b->bridge);
+     if (b->audio_mtx) SDL_DestroyMutex(b->audio_mtx);
+     close_game_controller(b);
+@@ -3205,6 +3255,7 @@ int HostWindow::fast_forward_multiplier() const { return 4; }
+ 
+ void HostWindow::push_audio_samples(const int16_t* /*samples*/,
+                                     std::size_t /*count*/) {}
++void HostWindow::push_audio_block(const int16_t*, std::size_t, uint32_t) {}
+ 
+ void HostWindow::service_events() {}
+ 
+diff --git a/src/runtime/host_window.h b/src/runtime/host_window.h
+index ddd3794..10deb6c 100644
+--- a/src/runtime/host_window.h
++++ b/src/runtime/host_window.h
+@@ -158,16 +158,16 @@ public:
+     // Push `count` int16_t mono samples into the audio output queue. The SDL
+     // backend configures its resampler for a 65.536 kHz source; the real
+     // mixer rate follows SOUNDBIAS (GbaAudio::sample_rate(), 32.768 to
+-    // 262.144 kHz), so rate-aware callers use push_audio_block on the web.
++    // 262.144 kHz), so rate-aware callers use push_audio_block.
+     // Backend converts to the host device's format.
+     // No-op if audio init failed or this build has no SDL2.
+     void push_audio_samples(const int16_t* samples, std::size_t count);
+ 
+-#if defined(GBARECOMP_WEB_HOST)
+     // Rate-tagged mono PCM (one SOUNDBIAS rate per block, from
+     // GbaAudio::drain_sample_block). Never blocks the guest: a full ring is
+     // counted as overflow and requests a playback reset.
+     void push_audio_block(const int16_t* samples, std::size_t count, uint32_t rate);
++#if defined(GBARECOMP_WEB_HOST)
+     // Starts a new playback epoch (pause, state load, overflow). Samples are
+     // not accepted until the AudioWorklet acknowledges the reset.
+     void reset_audio();
+diff --git a/src/runtime/runtime.cpp b/src/runtime/runtime.cpp
+index 3dce81e..669e9ca 100644
+--- a/src/runtime/runtime.cpp
++++ b/src/runtime/runtime.cpp
+@@ -3940,23 +3940,19 @@ int run_game(int argc, char** argv, const RunOptions& opts) {
+             win.reset_audio();
+             host_audio_state_epoch = g_runtime_state_epoch;
+         }
++#endif
+         // Bounded work, including 262144 Hz source frames and rate transitions.
+         for (int budget = 0; budget < 16; ++budget) {
+             uint32_t rate = 0;
+             const auto n = bus.audio().drain_sample_block(audio_buf, 2048, rate);
+             if (!n) break;
+             if (!fast_forward_active) {
++#if defined(GBARECOMP_WEB_HOST)
+                 gba_mod_audio_mix(audio_buf, n);
++#endif
+                 win.push_audio_block(audio_buf, n, rate);
+             }
+         }
+-#else
+-        const auto n = bus.audio().drain_samples(audio_buf, 2048);
+-        if (n && !fast_forward_active) {
+-            gba_mod_audio_mix(audio_buf, n);
+-            win.push_audio_samples(audio_buf, n);
+-        }
+-#endif
+     };
+     auto service_host_pause = [&]() {
+         bool waited = false;

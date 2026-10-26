@@ -1,0 +1,113 @@
+# Reviewed runtime entry points of the Expanded build (recomp_master_misses proposals from the
+# expanded-first-map route, 2026-10-25). ROM roots only: IWRAM code at 0x03xxxxxx rewrites itself
+# and stays on the interpreter by design.
+
+[[extra_func]]
+addr = 0x08018F88
+mode = "thumb"
+note = "observed entry, bridged x2 on the first-map route"
+
+[[extra_func]]
+addr = 0x08019104
+mode = "thumb"
+note = "observed entry, bridged x3850 on the first-map route"
+
+[[extra_func]]
+addr = 0x0802EC80
+mode = "thumb"
+note = "observed entry, bridged x7 on the first-map route"
+
+[[extra_func]]
+addr = 0x0802ED20
+mode = "thumb"
+note = "observed entry, bridged x13475 on the first-map route"
+
+[[extra_func]]
+addr = 0x080367F0
+mode = "thumb"
+note = "observed entry, bridged x1 on the first-map route"
+
+[[extra_func]]
+addr = 0x08045FD0
+mode = "thumb"
+note = "observed entry, bridged x9 on the first-map route"
+
+[[extra_func]]
+addr = 0x08049108
+mode = "thumb"
+note = "observed entry, bridged x2 on the first-map route"
+
+[[extra_func]]
+addr = 0x0804C150
+mode = "thumb"
+note = "observed entry, bridged x22019 on the first-map route"
+
+[[extra_func]]
+addr = 0x0804C1EC
+mode = "thumb"
+note = "observed entry, bridged x2394 on the first-map route"
+
+[[extra_func]]
+addr = 0x0804C22A
+mode = "thumb"
+note = "observed entry, bridged x2691 on the first-map route"
+
+[[extra_func]]
+addr = 0x0804C272
+mode = "thumb"
+note = "observed entry, bridged x2213 on the first-map route"
+
+[[extra_func]]
+addr = 0x0804C2B2
+mode = "thumb"
+note = "observed entry, bridged x302 on the first-map route"
+
+[[extra_func]]
+addr = 0x0804CBA4
+mode = "thumb"
+note = "observed entry, bridged x18 on the first-map route"
+
+[[extra_func]]
+addr = 0x0804D1E4
+mode = "thumb"
+note = "observed entry, bridged x3 on the first-map route"
+
+[[extra_func]]
+addr = 0x0804D1FC
+mode = "thumb"
+note = "observed entry, bridged x1 on the first-map route"
+
+[[extra_func]]
+addr = 0x0804D214
+mode = "thumb"
+note = "observed entry, bridged x1 on the first-map route"
+
+[[extra_func]]
+addr = 0x0804D35C
+mode = "thumb"
+note = "observed entry, bridged x8 on the first-map route"
+
+[[extra_func]]
+addr = 0x0804D394
+mode = "thumb"
+note = "observed entry, bridged x8 on the first-map route"
+
+[[extra_func]]
+addr = 0x0804D7CC
+mode = "thumb"
+note = "observed entry, bridged x62 on the first-map route"
+
+[[extra_func]]
+addr = 0x0804D808
+mode = "thumb"
+note = "observed entry, bridged x34 on the first-map route"
+
+[[extra_func]]
+addr = 0x0804D818
+mode = "thumb"
+note = "observed entry, bridged x1 on the first-map route"
+
+[[extra_func]]
+addr = 0x0804D824
+mode = "thumb"
+note = "observed entry, bridged x19 on the first-map route"

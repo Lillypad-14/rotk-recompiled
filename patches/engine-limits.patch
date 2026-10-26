@@ -1,0 +1,450 @@
+diff --git a/src/armv4t/runtime_arm.h b/src/armv4t/runtime_arm.h
+index db6dc3c..804ba58 100644
+--- a/src/armv4t/runtime_arm.h
++++ b/src/armv4t/runtime_arm.h
+@@ -432,6 +432,8 @@ uint32_t runtime_swi_log_save_file(const char* path);
+ uint32_t runtime_trace_copy_recent(RuntimeTraceEntry* out,
+                                    uint32_t max_entries);
+ void runtime_tick(uint32_t cycles);
++// Elapsed device time (halt/idle pumping), never scaled by the CPU overclock.
++void runtime_tick_device_time(uint32_t cycles);
+ bool runtime_should_yield(void);
+ 
+ // ── Stage 2 idle-loop elision ──────────────────────────────────────
+diff --git a/src/gba/gba_bus.cpp b/src/gba/gba_bus.cpp
+index 6571d92..c72b87b 100644
+--- a/src/gba/gba_bus.cpp
++++ b/src/gba/gba_bus.cpp
+@@ -9,9 +9,11 @@
+ #include "gba_bus.h"
+ #include <utility>
+ 
++#include <algorithm>
+ #include <cstdlib>
+ #include <cstdio>
+ #include <cstring>
++#include <stdexcept>
+ 
+ #include "snapshot.h"
+ 
+@@ -29,7 +31,20 @@ namespace {
+ GbaBus* g_wait_table_owner = nullptr;
+ }  // namespace
+ 
+-GbaBus::GbaBus() {
++namespace {
++std::size_t host_ram_bytes() {
++    if (const char* mb = std::getenv("GBARECOMP_HOST_RAM_MB")) {
++        const unsigned long v = std::strtoul(mb, nullptr, 10);
++        if (v >= 1 && v <= kHostRamWindow / (1024u * 1024u))
++            return static_cast<std::size_t>(v) * 1024u * 1024u;
++        std::fprintf(stderr, "[gba:bus] GBARECOMP_HOST_RAM_MB=%s out of range, using %zu MiB\n",
++                     mb, kHostRamDefaultSize / (1024u * 1024u));
++    }
++    return kHostRamDefaultSize;
++}
++}  // namespace
++
++GbaBus::GbaBus() : host_ram_(host_ram_bytes(), 0) {
+     io_dispatch_.set_audio(&audio_);
+     waits_reset(*waits_);
+ }
+@@ -53,6 +68,8 @@ void GbaBus::serialize(gbarecomp::debug::SnapshotWriter& w) const {
+     w.u32(memctl_);
+     w.u32(waits_->n16[0x2]);
+     w.u32(waits_->last_prefetched_pc);
++    w.u64(host_ram_used_);
++    w.bytes(host_ram_.data(), host_ram_used_);
+ }
+ 
+ void GbaBus::deserialize(gbarecomp::debug::SnapshotReader& r) {
+@@ -82,6 +99,20 @@ void GbaBus::deserialize(gbarecomp::debug::SnapshotReader& r) {
+             waits_->n16[0x2] = static_cast<uint8_t>(ewram_wait);
+         waits_->last_prefetched_pc = r.u32();
+     }
++    std::fill(host_ram_.begin(), host_ram_.begin() + host_ram_used_, uint8_t{0});
++    host_ram_used_ = 0;
++    if (r.remaining() != 0) {
++        const uint64_t used = r.u64();
++        if (used > host_ram_.size()) {
++            std::fprintf(stderr, "[gba:bus] snapshot needs %llu bytes of host RAM, have %zu; "
++                         "raise GBARECOMP_HOST_RAM_MB\n",
++                         static_cast<unsigned long long>(used), host_ram_.size());
++            r.skip(static_cast<std::size_t>(used));
++        } else {
++            host_ram_used_ = static_cast<std::size_t>(used);
++            r.bytes(host_ram_.data(), host_ram_used_);
++        }
++    }
+     refresh_waitstates();
+ }
+ 
+@@ -223,6 +254,10 @@ uint8_t GbaBus::read8(uint32_t addr) {
+         case Region::Pal:   return pal_[off];
+         case Region::Vram:  if (off < vram_.size()) return vram_[off]; break;
+         case Region::Oam:   return oam_[off];
++        case Region::HostRam:
++            if (host_ram_fits(off, 1)) return host_ram_[off];
++            log_unmapped(addr, 0, false, 1);
++            return 0;
+         case Region::Rom: {
+             // Cartridge GPIO (RTC) at 0x080000C4..0xC9 when readable; else
+             // the bus returns ordinary ROM (write-only GPIO mode).
+@@ -281,6 +316,10 @@ uint16_t GbaBus::read16(uint32_t addr) {
+             if (off + 1 < vram_.size()) return load_u16(&vram_[off]);
+             break;
+         case Region::Oam:   return load_u16(&oam_[off]);
++        case Region::HostRam:
++            if (host_ram_fits(off, 2)) return load_u16(&host_ram_[off]);
++            log_unmapped(addr, 0, false, 2);
++            return 0;
+         case Region::Rom: {
+             if (gpio_.active() && gpio_.read_enabled() && off >= 0xC4u && off <= 0xC8u) {
+                 uint32_t o = static_cast<uint32_t>(off);
+@@ -347,6 +386,10 @@ uint32_t GbaBus::read32(uint32_t addr) {
+             if (off + 3 < vram_.size()) return load_u32(&vram_[off]);
+             break;
+         case Region::Oam:   return load_u32(&oam_[off]);
++        case Region::HostRam:
++            if (host_ram_fits(off, 4)) return load_u32(&host_ram_[off]);
++            log_unmapped(addr, 0, false, 4);
++            return 0;
+         case Region::Rom: {
+             if (gpio_.active() && gpio_.read_enabled() && off >= 0xC4u && off <= 0xC6u) {
+                 uint32_t o = static_cast<uint32_t>(off);
+@@ -436,6 +479,11 @@ void GbaBus::write8(uint32_t addr, uint8_t v) {
+             if (off < vram_.size()) vram_[off] = v;
+             return;
+         case Region::Oam:   oam_[off] = v; return;
++        case Region::HostRam:
++            if (!host_ram_fits(off, 1)) { log_unmapped(addr, v, true, 1); return; }
++            host_ram_[off] = v;
++            note_host_ram_write(off, 1);
++            return;
+         case Region::Bios:
+             // BIOS is read-only; hardware ignores writes to this window.
+             return;
+@@ -497,6 +545,11 @@ void GbaBus::write16(uint32_t addr, uint16_t v) {
+             if (off + 1 < vram_.size()) store_u16(&vram_[off], v);
+             return;
+         case Region::Oam:   store_u16(&oam_[off], v); return;
++        case Region::HostRam:
++            if (!host_ram_fits(off, 2)) { log_unmapped(addr, v, true, 2); return; }
++            store_u16(&host_ram_[off], v);
++            note_host_ram_write(off, 2);
++            return;
+         case Region::Bios:
+             // BIOS is read-only; hardware ignores writes to this window.
+             return;
+@@ -553,6 +606,10 @@ bool GbaBus::dma_copy_ram(uint32_t src, uint32_t dst, uint32_t bytes) {
+         } else if ((addr >> 24) == 3u) {
+             const uint32_t off = addr & 0x7FFFu;
+             if (bytes <= iwram_.size() - off) return {iwram_.data() + off, bytes};
++        } else if (addr - kHostRamBase < kHostRamWindow) {
++            const std::size_t off = addr - kHostRamBase;
++            if (off < host_ram_.size() && bytes <= host_ram_.size() - off)
++                return {const_cast<uint8_t*>(host_ram_.data()) + off, bytes};
+         }
+         return {nullptr, 0};
+     };
+@@ -562,6 +619,8 @@ bool GbaBus::dma_copy_ram(uint32_t src, uint32_t dst, uint32_t bytes) {
+     const uintptr_t d = reinterpret_cast<uintptr_t>(destination.first);
+     if (s < d + bytes && d < s + bytes) return false;
+     std::memcpy(destination.first, source.first, bytes);
++    if (dst - kHostRamBase < kHostRamWindow)
++        host_ram_used_ = std::max(host_ram_used_, std::size_t(dst - kHostRamBase) + bytes);
+     return true;
+ }
+ 
+@@ -577,6 +636,11 @@ void GbaBus::write32(uint32_t addr, uint32_t v) {
+             if (off + 3 < vram_.size()) store_u32(&vram_[off], v);
+             return;
+         case Region::Oam:   store_u32(&oam_[off], v); return;
++        case Region::HostRam:
++            if (!host_ram_fits(off, 4)) { log_unmapped(addr, v, true, 4); return; }
++            store_u32(&host_ram_[off], v);
++            note_host_ram_write(off, 4);
++            return;
+         case Region::Bios:
+             // BIOS is read-only; hardware ignores writes to this window.
+             return;
+@@ -639,6 +703,11 @@ const uint8_t* GbaBus::native_code_view(uint32_t address,uint32_t size) const {
+     const uint32_t region=address>>24;
+     if (uint64_t(address)+size>(uint64_t(region+1u)<<24)) return nullptr;
+     static thread_local uint8_t scratch[64];
++    if (address-kHostRamBase<kHostRamWindow) {
++        const std::size_t offset=address-kHostRamBase;
++        if (offset<host_ram_.size() && size<=host_ram_.size()-offset) return host_ram_.data()+offset;
++        return nullptr;
++    }
+     if (region==2u || region==3u) {
+         const uint32_t mask=region==2u ? 0x3FFFFu : 0x7FFFu;
+         const uint8_t* ram=region==2u ? ewram_.data() : iwram_.data();
+diff --git a/src/gba/gba_bus.h b/src/gba/gba_bus.h
+index 4ebe7cf..ae58e39 100644
+--- a/src/gba/gba_bus.h
++++ b/src/gba/gba_bus.h
+@@ -15,6 +15,7 @@
+ #include <array>
+ #include <cstddef>
+ #include <cstdint>
++#include <vector>
+ 
+ #include "gba_audio.h"
+ #include "gba_bios.h"
+@@ -201,6 +202,14 @@ public:
+     const uint8_t* vram_ptr()  const { return vram_.data();  }
+     const uint8_t* oam_ptr()   const { return oam_.data();   }
+ 
++    // PC-only host RAM at kHostRamBase. host_ram_used() is one past the
++    // highest byte ever written; saved states and state hashes cover only
++    // that prefix, so an untouched region costs nothing.
++    uint8_t*       host_ram_ptr()        { return host_ram_.data(); }
++    const uint8_t* host_ram_ptr()  const { return host_ram_.data(); }
++    std::size_t    host_ram_size() const { return host_ram_.size(); }
++    std::size_t    host_ram_used() const { return host_ram_used_; }
++
+     uint8_t  read8 (uint32_t addr) override;
+     uint16_t read16(uint32_t addr) override;
+     uint32_t read32(uint32_t addr) override;
+@@ -312,6 +321,15 @@ private:
+     std::array<uint8_t,        1024> pal_{};
+     std::array<uint8_t,  96 * 1024> vram_{};
+     std::array<uint8_t,        1024> oam_{};
++    std::vector<uint8_t> host_ram_;
++    std::size_t          host_ram_used_ = 0;
++    // Bounds-check a host RAM access and extend the written prefix.
++    bool host_ram_fits(std::size_t off, uint8_t width) const {
++        return off + width <= host_ram_.size();
++    }
++    void note_host_ram_write(std::size_t off, uint8_t width) {
++        if (off + width > host_ram_used_) host_ram_used_ = off + width;
++    }
+ 
+     GbaIo       io_dispatch_;
+     GbaAudio    audio_;
+diff --git a/src/gba/gba_io.cpp b/src/gba/gba_io.cpp
+index 51d235e..c868812 100644
+--- a/src/gba/gba_io.cpp
++++ b/src/gba/gba_io.cpp
+@@ -264,8 +264,8 @@ static void observe_eeprom_request(armv4t::Bus* bus, int channel, uint32_t dad,
+ void GbaIo::run_immediate_dma(int channel) {
+     if (!bus_) return;
+     uint32_t base = 0xB0u + static_cast<uint32_t>(channel) * 12u;
+-    uint32_t sad = load_u32(&io_[base + 0]) & 0x0FFFFFFFu;
+-    uint32_t dad = load_u32(&io_[base + 4]) & 0x0FFFFFFFu;
++    uint32_t sad = dma_address(load_u32(&io_[base + 0]));
++    uint32_t dad = dma_address(load_u32(&io_[base + 4]));
+     uint32_t cnt_l = load_u16(&io_[base + 8]);
+     uint16_t cnt_h = load_u16(&io_[base + 10]);
+ 
+@@ -420,7 +420,7 @@ void GbaIo::run_timed_dma(int start_mode) {
+             // Re-arm for the next trigger. dest_ctrl==3 (inc+reload) reloads DAD
+             // from the register each repeat; otherwise the running DAD carries on.
+             dma_next_dest_[channel] = (dest_ctrl == 3)
+-                ? (load_u32(&io_[base + 4]) & 0x0FFFFFFFu) : d;
++                ? dma_address(load_u32(&io_[base + 4])) : d;
+         } else {
+             dma_next_dest_[channel] = d;
+             store_u16(&io_[base + 10], static_cast<uint16_t>(cnt_h & ~0x8000u));
+@@ -440,7 +440,7 @@ void GbaIo::run_sound_fifo_dma(int channel) {
+     if ((cnt_h & 0x0400u) == 0) return;
+ 
+     uint32_t sad = dma_next_source_[channel] ?
+-        dma_next_source_[channel] : (load_u32(&io_[base + 0]) & 0x0FFFFFFFu);
++        dma_next_source_[channel] : dma_address(load_u32(&io_[base + 0]));
+     uint32_t dad = dma_next_dest_[channel] ?
+         dma_next_dest_[channel] : load_u32(&io_[base + 4]);
+     sad &= ~3u;
+@@ -863,8 +863,7 @@ void GbaIo::write16(uint32_t off, uint16_t v) {
+             bool now_enabled = (v & 0x8000u) != 0;
+             uint32_t start_mode = (v >> 12) & 0x3u;
+             if (!was_enabled && now_enabled) {
+-                dma_next_source_[ch] = load_u32(&io_[0xB0u + ch * 12u]) &
+-                    0x0FFFFFFFu;
++                dma_next_source_[ch] = dma_address(load_u32(&io_[0xB0u + ch * 12u]));
+                 dma_next_dest_[ch] = load_u32(&io_[0xB0u + ch * 12u + 4u]);
+             }
+             if (!was_enabled && now_enabled && start_mode == 0) {
+diff --git a/src/gba/gba_memory.cpp b/src/gba/gba_memory.cpp
+index a15be73..6fdabdf 100644
+--- a/src/gba/gba_memory.cpp
++++ b/src/gba/gba_memory.cpp
+@@ -21,6 +21,7 @@ const char* region_name(Region r) noexcept {
+         case Region::Oam:     return "OAM";
+         case Region::Rom:     return "ROM";
+         case Region::Save:    return "SAVE";
++        case Region::HostRam: return "HOSTRAM";
+         case Region::OpenBus: return "OPENBUS";
+         case Region::Unknown: return "UNKNOWN";
+     }
+@@ -47,6 +48,7 @@ Region classify(uint32_t addr) noexcept {
+         case 0x0E: case 0x0F:
+             return Region::Save;
+         default:
++            if (addr - kHostRamBase < kHostRamWindow) return Region::HostRam;
+             return Region::OpenBus;
+     }
+ }
+@@ -87,6 +89,8 @@ std::size_t resolve_offset(uint32_t addr, Region region) noexcept {
+             // mapping depends on the detected save chip; the save
+             // controller in gba_save.cpp owns that.
+             return static_cast<std::size_t>(addr - kSaveBase);
++        case Region::HostRam:
++            return static_cast<std::size_t>(addr - kHostRamBase);
+         case Region::OpenBus:
+         case Region::Unknown:
+             return 0;
+diff --git a/src/gba/gba_memory.h b/src/gba/gba_memory.h
+index 6dfb874..4effff7 100644
+--- a/src/gba/gba_memory.h
++++ b/src/gba/gba_memory.h
+@@ -41,6 +41,11 @@ inline constexpr uint32_t kRomBase0     = 0x08000000;  // waitstate 0
+ inline constexpr uint32_t kRomBase1     = 0x0A000000;  // waitstate 1
+ inline constexpr uint32_t kRomBase2     = 0x0C000000;  // waitstate 2
+ inline constexpr uint32_t kSaveBase     = 0x0E000000;
++// Host RAM: a flat, unmirrored PC-only work area in address space the GBA
++// leaves unmapped. Stock code never touches it; code written for the PC port
++// uses it for memory beyond EWRAM/IWRAM. The base keeps bits 25..27 set, so
++// the BIOS copy/decompress source check (addr & 0x0E000000) accepts it.
++inline constexpr uint32_t kHostRamBase  = 0x12000000;
+ 
+ // Region sizes
+ inline constexpr std::size_t kBiosSize  = 16 * 1024;
+@@ -52,6 +57,10 @@ inline constexpr std::size_t kVramSize  = 96 * 1024;
+ inline constexpr std::size_t kOamSize   = 1024;
+ inline constexpr std::size_t kRomMaxSize  = 32 * 1024 * 1024;
+ inline constexpr std::size_t kSaveMaxSize = 128 * 1024;  // largest supported (Flash 1M)
++// Host RAM spans 0x12000000..0x1FFFFFFF; GBARECOMP_HOST_RAM_MB sizes the
++// backed part (default 64 MiB). Accesses past it are unmapped.
++inline constexpr std::size_t kHostRamWindow      = 0x0E000000;
++inline constexpr std::size_t kHostRamDefaultSize = 64u * 1024u * 1024u;
+ 
+ enum class Region : uint8_t {
+     Bios,
+@@ -63,6 +72,7 @@ enum class Region : uint8_t {
+     Oam,
+     Rom,
+     Save,
++    HostRam,   // PC-only flat work RAM at kHostRamBase
+     OpenBus,   // unmapped — read returns last-fetched instruction word
+     Unknown,
+ };
+@@ -72,6 +82,12 @@ const char* region_name(Region r) noexcept;
+ // Classify an address into a region (without mirroring resolution).
+ Region classify(uint32_t addr) noexcept;
+ 
++// A DMA source/destination register value as the transfer uses it: the GBA
++// keeps 28 address bits, except that host RAM addresses stay whole.
++inline uint32_t dma_address(uint32_t raw) noexcept {
++    return raw - kHostRamBase < kHostRamWindow ? raw : (raw & 0x0FFFFFFFu);
++}
++
+ // Resolve mirroring within a region. Returns the offset into the
+ // region's backing storage. For OpenBus / Unknown, returns 0 and the
+ // caller is expected to handle the unmapped path.
+diff --git a/src/gba/gba_simulation_state.cpp b/src/gba/gba_simulation_state.cpp
+index 5ef36f4..c1c13bb 100644
+--- a/src/gba/gba_simulation_state.cpp
++++ b/src/gba/gba_simulation_state.cpp
+@@ -74,6 +74,22 @@ public:
+         if (p.view_expanded()) throw std::invalid_argument("expanded view is not qualified for multiplayer");
+         a.blob(b.ewram_,b.ewram_.size()); a.blob(b.iwram_,b.iwram_.size());
+         a.blob(b.pal_,b.pal_.size()); a.blob(b.vram_,b.vram_.size()); a.blob(b.oam_,b.oam_.size());
++        // Host RAM: only the written prefix. A shorter incoming prefix clears the rest.
++        {
++            std::uint64_t used = b.host_ram_used_;
++            a(used);
++            if (used > b.host_ram_.size()) throw std::invalid_argument("invalid host RAM state");
++            if constexpr (std::is_const_v<B>) {
++                a.blob(b.host_ram_, b.host_ram_used_);
++            } else {
++                const std::size_t before = b.host_ram_used_;
++                b.host_ram_used_ = static_cast<std::size_t>(used);
++                a.blob(b.host_ram_, b.host_ram_used_);
++                if (b.host_ram_used_ < before)
++                    std::fill(b.host_ram_.begin() + b.host_ram_used_,
++                              b.host_ram_.begin() + before, std::uint8_t{0});
++            }
++        }
+         a(b.last_fetched_,b.bios_access_enabled_,b.bios_prefetch_,b.open_bus_pc_,b.open_bus_thumb_);
+         // Wait states: WAITCNT is in the IO page below; memory control, the
+         // accepted EWRAM wait and the prefetch-buffer position are bus state.
+diff --git a/src/runtime/runtime.cpp b/src/runtime/runtime.cpp
+index 669e9ca..cb22b9c 100644
+--- a/src/runtime/runtime.cpp
++++ b/src/runtime/runtime.cpp
+@@ -2187,7 +2187,7 @@ int run_game(int argc, char** argv, const RunOptions& opts) {
+         if (until_sample < chunk) chunk = until_sample;
+         if (chunk == 0 || chunk == 0xFFFFFFFFu) chunk = 1;
+         if (chunk > max_cycles) chunk = max_cycles;
+-        runtime_tick(chunk);
++        runtime_tick_device_time(chunk);
+         cycles_elapsed += chunk;
+         last_step_cycles += chunk;
+         return chunk;
+@@ -4095,6 +4095,7 @@ int run_game(int argc, char** argv, const RunOptions& opts) {
+         out.clear();
+         out.push_back({"EWRAM", bus.ewram_ptr(), 256u * 1024u});
+         out.push_back({"IWRAM", bus.iwram_ptr(), 32u * 1024u});
++        out.push_back({"HostRAM", bus.host_ram_ptr(), bus.host_ram_used()});
+         out.push_back({"CPU", &g_cpu, sizeof(g_cpu)});
+         out.push_back({"IO", bus.io().raw(), gba::GbaIo::kIoSize});
+         out.push_back({"call-stack", runtime_call_stack_data(),
+diff --git a/src/runtime/runtime_bus_bridge.cpp b/src/runtime/runtime_bus_bridge.cpp
+index ea8d57f..6a1de58 100644
+--- a/src/runtime/runtime_bus_bridge.cpp
++++ b/src/runtime/runtime_bus_bridge.cpp
+@@ -730,7 +730,36 @@ extern "C" void runtime_resync_horizon(void) {
+     recompute_event_budget(bus, ppu);
+ }
+ 
+-extern "C" void runtime_tick(uint32_t cycles) {
++// CPU overclock (PC enhancement, off by default). GBARECOMP_CPU_OVERCLOCK=N
++// (1, 2, 4, 8 or 16) charges guest instructions 1/N of their GBA cost, so
++// the game gets N times the instructions per frame while the PPU, timers,
++// audio and DMA keep real-time GBA timing. Settled once, before frame 0.
++// Halt/idle time goes through runtime_tick_device_time and is not scaled.
++// Linked multiplayer sessions keep native timing.
++static uint32_t cpu_overclock_shift() {
++    static const uint32_t shift = [] {
++        const char* e = std::getenv("GBARECOMP_CPU_OVERCLOCK");
++        if (!e) return 0u;
++        const unsigned long n = std::strtoul(e, nullptr, 10);
++        for (uint32_t s = 0; s <= 4; ++s)
++            if (n == (1ul << s)) {
++                if (s) std::fprintf(stderr, "[runtime] CPU overclock x%lu\n", n);
++                return s;
++            }
++        std::fprintf(stderr, "[runtime] GBARECOMP_CPU_OVERCLOCK=%s ignored (use 1/2/4/8/16)\n", e);
++        return 0u;
++    }();
++    return shift;
++}
++static uint32_t g_overclock_remainder = 0;
++
++static void runtime_tick_impl(uint32_t cycles, bool cpu_work);
++
++extern "C" void runtime_tick(uint32_t cycles) { runtime_tick_impl(cycles, true); }
++
++extern "C" void runtime_tick_device_time(uint32_t cycles) { runtime_tick_impl(cycles, false); }
++
++static void runtime_tick_impl(uint32_t cycles, bool cpu_work) {
+     if (g_session_execution) { g_runtime_cycles += cycles; return; }
+     // P6 shadow-tick: a healed shard's validation re-run only accumulates its
+     // cycle cost (for the cycle diff); the interpreter pass already pumped the
+@@ -741,6 +770,14 @@ extern "C" void runtime_tick(uint32_t cycles) {
+     auto* ppu = gbarecomp::g_active_ppu;
+     if (!bus || !ppu || cycles == 0) return;
+ 
++    if (cpu_work) {
++        if (const uint32_t shift = cpu_overclock_shift()) {
++            const uint32_t total = g_overclock_remainder + cycles;
++            g_overclock_remainder = total & ((1u << shift) - 1u);
++            cycles = total >> shift;
++        }
++    }
++
+     // Some software renderers execute millions of guest instructions before
+     // reaching a GBA frame boundary. Downsample the wall-clock check so native
+     // window messages keep flowing without putting a clock read on every guest

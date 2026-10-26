@@ -1,0 +1,61 @@
+[program]
+name = "The Lord of the Rings: The Return of the King (USA, Europe)"
+id = "rotk_usa_eu"
+load_address = 0x08000000
+size = 0x01000000
+entry_pc = 0x08000000
+
+[identity]
+sha1 = "ec3d126d37ea6e2ad7030d8a99cf87c6e46c03fd"
+
+[[data_range]]
+start = 0x08000004
+end = 0x080000C0
+note = "Cartridge header and logo; the first ARM branch remains executable."
+
+# Existing RotkGame metadata describes the startup IWRAM image and the
+# separately copied decompressor. Keep this provenance visible during validation.
+[[code_copy]]
+runtime_start = 0x03000000
+source_start = 0x08FF9F98
+size = 0x000015B0
+name = "iwram_image"
+note = "Startup copy recorded by the earlier local ROTK recomp experiment."
+
+[[code_copy]]
+runtime_start = 0x030035E0
+source_start = 0x080002DC
+size = 0x00000350
+name = "pucrunch_iwram"
+note = "decompress_loadIwramFunctions copies 0xd4 words to g_DecompressPucrunchCode."
+
+[[extra_func]]
+addr = 0x08000000
+mode = "arm"
+name = "rom_header_start_vector"
+
+[[extra_func]]
+addr = 0x03000004
+mode = "arm"
+note = "Earlier runtime report observed entry into the startup IWRAM copy."
+
+[[extra_func]]
+addr = 0x03000BF0
+mode = "arm"
+note = "Earlier runtime report observed entry into the startup IWRAM copy."
+
+[[extra_func]]
+addr = 0x03001080
+mode = "arm"
+note = "Earlier runtime report observed entry into the startup IWRAM copy."
+
+[[extra_func]]
+addr = 0x030035E0
+mode = "arm"
+name = "decompress_pucrunch_iwram"
+
+[[mod_function_hook]]
+addr = 0x08032E74
+mode = "thumb"
+note = "memory_addHeap: the host registers the g_HeapArena heap over host RAM (src/main.cpp)."
+
