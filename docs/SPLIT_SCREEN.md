@@ -120,7 +120,10 @@ budget); local chunks on menus 3.8 ms mean on a quiet machine.
   `ROTK_PC_COOP_TEST_TRACE=<file>` writes per frame each console's scene, frames since a link
   message arrived (the game gives up past 300), `g_MpMessageMask`, IE and SIOCNT. A 15-minute random
   fight with the player's own settings (2026-10-26) held the link with at most 57 frames between
-  messages.
+  messages. The player's own disconnect came from a build that ran no PC features in co-op; the
+  same script on the previous cable code with every feature off also held, with no cleared unread
+  data, so that disconnect is not reproduced. The cable hazards the fix removes are its likely
+  cause.
 - In game, `ROTK_PC_COOP_TEST_INPUTS=<file>` plays both players from `frame p1 p2` lines counted
   from the link. Widescreen check (2026-10-26): saves from `.private/split-screen/`, the solo
   console scripted into Multiplayer, both players through the menus into the first level and 30 s
