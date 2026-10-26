@@ -13,7 +13,7 @@ docs/ENGINE_LIMITS.md first.
   `memory_init` and the mod's `modRam_init`. Vanilla frame hashes unchanged.
 - Expanded target (`lab.py --target expanded --decomp ..\rotk`): boots through save format, mod title,
   cutscene, gameplay. All ROM code native (`config/rotk-expanded.extra.toml`).
-- Repo: private github.com/Lillypad-14/rotk-recompiled. Submodules: `external/gbarecomp`, `game` (`pc-edition`).
+- Repo: public github.com/Lillypad-14/rotk-recompiled (MIT; patches/ PolyForm NC). Submodules: `external/gbarecomp`, `game` (`pc-edition`).
 
 ## In progress: actor caps (uncommitted in this repo and in ../rotk)
 
@@ -94,7 +94,7 @@ docs/ENGINE_LIMITS.md first.
    (`gba_ppu.h`, docs/WIDESCREEN_STEPC_PLAN.md in the framework).
 3. A cleaner stress scenario (bonus map), frame-cost measurement, co-op link audit for u8 actor indices.
 4. Host saves, audio (IWRAM mixer is the remaining interpreted code), 60 fps.
-5. Licence for this repository's own code (still open). Repo: private github.com/Lillypad-14/rotk-recompiled;
+5. Repo: public github.com/Lillypad-14/rotk-recompiled, MIT for own code, patches/ PolyForm NC;
    the `game` submodule tracks the mod repo's `pc-edition` branch (the GBA edition stays on `expanded`).
 
 Rule of thumb: every engine change goes in this repo (host code or framework patch) and is checked on

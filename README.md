@@ -31,7 +31,7 @@ and a GBA BIOS dump (SHA-1 `300c20df6731a33952ded8c436f7f186d25d3492`). The Expa
 the mod's build tools (see `game/docs/setup.md`).
 
 ```powershell
-git clone --recursive https://github.com/<owner>/rotk-recompiled.git
+git clone --recursive https://github.com/Lillypad-14/rotk-recompiled.git
 cd rotk-recompiled
 
 # Vanilla
@@ -63,5 +63,10 @@ muted, headless checkpoint and keeps a screenshot, state dump, coverage and log 
 
 ## Credits and licences
 
-See [CREDITS.md](CREDITS.md). GBARecomp is licensed under the PolyForm Noncommercial License 1.0.0, so
-this project and its builds are noncommercial. The licence for this repository's own code is not chosen yet.
+See [CREDITS.md](CREDITS.md).
+
+- This repository's own code (host, tools, configuration, docs): [MIT](LICENSE).
+- `patches/` modifies GBARecomp and stays under its PolyForm Noncommercial License 1.0.0
+  ([patches/LICENSE.md](patches/LICENSE.md)). Executables built from this project include GBARecomp, so
+  they can only be shared noncommercially.
+- No game code, data or art is included. Bring your own `rotk.gba`.
