@@ -223,7 +223,7 @@ label = "6x"
 [[feature]]
 id = "local-coop"
 name = "Split-screen co-op (experimental)"
-description = "Choosing Multiplayer on the title menu starts two-player co-op on this PC: a second screen opens for player 2 (a second controller, or WASD, J/K and Space). Player 2's sound effects play too, without a second copy of the music. PC enhancements are off during co-op. Your save is backed up first."
+description = "Choosing Multiplayer starts two-player co-op on this PC. Player 2 uses a second controller or WASD, J/K and Space. Both consoles use private engine buffers, even with solo engine limits off. Widescreen, smooth motion and transparency work per console; CPU boost and HD audio stay off during co-op. Your save is backed up first."
 group = "Gameplay"
 default_enabled = true
 

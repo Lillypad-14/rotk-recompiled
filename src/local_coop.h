@@ -11,8 +11,8 @@ namespace rotk {
 void localCoopRegister(gbarecomp::RunOptions& options);
 
 // Provided by the PC feature set (src/main.cpp): per-console state for the presentation features
-// while the co-op consoles run, and the console whose state is in use (0 or 1, or -1 for the solo
-// game).
+// and engine layout while the co-op consoles run. End restores the solo layout. The current
+// console is 0 or 1, or -1 for the solo game.
 void pcFeaturesStartCoop();
 void pcFeaturesEndCoop();
 void pcFeaturesSelectConsole(int console);

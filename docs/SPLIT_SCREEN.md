@@ -40,7 +40,7 @@ sessions keep native timing.
 
 The engine limits (larger heap, actor pools, render sort, the queue literals and the PC info block)
 run on the co-op consoles too: their hooks write through the active bus into that console's own host
-RAM. The Expanded mod reads the PC info block and depends on them. Without them, a recorded player
+RAM. Each console publishes its own PC info block. Suspending these hooks caused a recorded player
 session (17:49, 2026-10-26) had console 1 send a packet whose checksum did not match (console 2's
 link code at 0x03007570 sets g_MpMessageMask bit 0x100 and stops, and the game reports a lost
 connection 300 frames later) at linked frame 3,686, on the local and the strict lockstep scheduler
@@ -169,4 +169,47 @@ budget); local chunks on menus 3.8 ms mean on a quiet machine.
    CPU boost.
 2. The audio mixer interpreted on both consoles remains a large cost (interpreter step, state
    copies); native RAM templates for it (roadmap section 2) would help single-player too.
-3. The framework pieces live only in the `external/gbarecomp` working tree, not in `patches/`.
+3. Level-edge widescreen margins inside co-op.
+
+## Recorded disconnect regression (2026-10-26)
+
+The normal executable used by the 18:13 recording was still the 17:46 build. Replaying that recording on the archived executable reproduces a checksum-error flag at linked frame 3,286 and link abort at 3,586. The current engine-hook configuration passes both the 17:49 and 18:13 recordings through 6,000 linked frames with no checksum-error flags or aborts.
+
+Stock solo limits are a separate configuration regression: with all optional PC enhancements explicitly disabled, the 17:49 recording still fails on the selected-layout-only implementation. Co-op now constructs a private layout with at least a 4 MiB heap, 1,024 main actors, 160 overlay actors and matching queues/sorter. The engine hooks are enabled as well as allowed during suspension. Each peer writes into its own Host RAM. The prior solo layout, ROM-read callback and hook enable flags are restored on exit. Larger selected sizes are retained. This session layout does not change the solo feature selections.
+
+`RotkCoopEngineCheck` exercises the real registered callbacks while hooks are globally suspended, verifies independent peer info/pools/heap bytes and queue redirects, and checks stock solo restoration. Framework link and multiplayer session tests also pass. The stock-solo-options recording passes 6,000 linked frames after the private-layout change. These checks do not guarantee every campaign, save or future encounter, and execution still uses interpreter recovery (`NOT_STATIC`).
+
+Replay without touching original saves:
+
+```powershell
+cmake --build build/host-expanded --target RotkCoopEngineCheck --parallel 2
+./build/host-expanded/RotkCoopEngineCheck.exe
+python tools/check_coop.py .private/expanded/play/rotk.sram.coop-YYYYMMDD-HHMMSS --exe build/host-expanded/RotkPcLabExpanded.exe --frames 6000 --name regression
+```
+
+The prefix requires `.inputs.txt`, `-1.sram` and `-2.sram` sidecars. The runner copies them and the selected executable/packages into `.private/coop-checks`, mutes dummy audio/video, saves a per-frame trace and retains CPU coverage. A pass requires reaching the requested linked frame, an explicit planned test exit, no checksum-error flag, no aborted peer and a coverage report. `--mods-state` selects an isolated options fixture; `--chunk-cycles 0` selects the strict scheduler. Input snapshots and replays remain private.
+
+Final launcher-build verification: the rebuilt normal `RotkPcLabExpanded.exe` passed the 18:13 recording through 6,000 linked frames, with no checksum flags or disconnects. Its SHA-256 is `95ec5799857f3b073457a614e7c49964e12890e6c60150b51cc9e5bf2ed868a1`; the executable installed under `build/host-expanded` matches the tested copy exactly.
+
+## Collision order desync (18:47 recording, 2026-10-26)
+
+The 18:47 recording dropped the link at linked frame 5,866 with the engine limits on. Player 2 drew
+one extra gameplay random number after a fight: at frame 5,522 two overlapping enemies (0x2E3,0xF3
+and 0x2E5,0xF5) were stunned the other way round on the two consoles.
+
+`actor_checkCollisions` (ROM 0x0800CD5C, run by the Expanded mod from IWRAM 0x03002D30) first moves
+the collisionPassive actors (flag bit 17 at +0xE8) of `g_CollisionCheckQueue` to its end by
+swapping, which does not keep the queue's order, then tests pairs in order; of two overlapping
+enemies the earlier one pushes and the later one is stunned (state 0x0E). Each console also queues
+a few objects of its own view, so the swaps left the shared enemies in a different order on each
+console. The stun, then the random stream and the packet checksum, diverged.
+
+Fix: in co-op, the hook `rotk.pc.coop-collision-order` (an entry hook at 0x03002D30, declared with
+its `[[code_copy]]` in `config/rotk-expanded.extra.toml`) partitions the queue stably first (active,
+then passive, each in their original order), so the game's swap pass changes nothing and both
+consoles test the shared actors in the same order. It runs while hooks are suspended and is off
+outside co-op, so single-player is unchanged. Ruled out on the way: the scheduler (the strict one
+fails the same way), widescreen, smooth motion, transparency, extra sprites and the cable.
+
+Any engine pass that orders work by a structure holding console-local objects (effects, the own
+view's sprites) can desync the same way; check for it first when a recording diverges in a fight.

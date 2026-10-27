@@ -111,3 +111,15 @@ note = "observed entry, bridged x1 on the first-map route"
 addr = 0x0804D824
 mode = "thumb"
 note = "observed entry, bridged x19 on the first-map route"
+
+[[code_copy]]
+runtime_start = 0x03002D30
+source_start = 0x0800CD5C
+size = 0x00000478
+name = "actor_check_collisions"
+note = "The Expanded mod runs actor_checkCollisions from IWRAM; the copy matches the ROM apart from the two g_CollisionCheckQueue literals the engine limits redirect."
+
+[[mod_function_hook]]
+addr = 0x03002D30
+mode = "arm"
+note = "actor_checkCollisions (IWRAM copy of 0x0800CD5C, entered here): in split-screen co-op the host orders the collision queue stably first, so both consoles test the shared actors in the same order (src/local_coop.cpp)."

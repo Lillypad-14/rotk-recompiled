@@ -13,6 +13,7 @@
 #include "mod_function_hooks.h"
 #include "mod_runtime.h"
 #include "multiplayer_session.h"
+#include "runtime_arm.h"
 #include "runtime_bus_bridge.h"
 #include "widescreen.h"
 
@@ -73,19 +74,58 @@ struct FeatureHooks {
 FeatureHooks g_saved;
 bool g_enabled = false;  // set by the feature's activation plugin
 bool g_linked = false;
+int g_console = -1;
 std::uint64_t g_linkedAt = 0;  // session frame the consoles linked
 int g_cancelFrames = 0;
+
+// actor_checkCollisions (ROM 0x0800CD5C, run from its IWRAM copy at 0x03002D30) first moves the
+// collisionPassive actors of g_CollisionCheckQueue to its end by swapping, which does not keep their
+// order, then tests pairs in queue order; of two overlapping enemies the earlier one pushes and the
+// later one is stunned. Each console also queues a few objects of its own (its own view's effects),
+// so the swaps ordered the shared enemies differently on the two consoles, one console stunned the
+// other enemy, and the link desynced ("connection lost" after a fight). In co-op the queue is
+// partitioned stably first, so the game's swaps leave it as it is and both consoles test the shared
+// actors in the same order.
+constexpr std::uint32_t kCheckCollisions = 0x03002D30u;
+constexpr std::uint32_t kCollisionQueueLiteral = kCheckCollisions + (0x0800D0D0u - 0x0800CD5Cu);
+constexpr std::uint32_t kCollisionQueueCount = 0x03002428u;  // g_CollisionCheckQueueCount
+constexpr std::uint32_t kActorFlags = 0xE8u;
+constexpr std::uint32_t kFlagCollisionPassive = 1u << 17;
+constexpr const char* kCollisionOrderHookId = "rotk.pc.coop-collision-order";
+
+int stableCollisionOrder(std::uint32_t, int, ArmCpuState*)
+{
+    const std::uint32_t queue = bus_read_u32(kCollisionQueueLiteral);  // the engine limits may move it
+    const std::uint32_t count = bus_read_u32(kCollisionQueueCount);
+    if (count < 2u || count > 4096u) return 0;
+    std::vector<std::uint32_t> active, passive;
+    for (std::uint32_t i = 0; i < count; ++i) {
+        const std::uint32_t actor = bus_read_u32(queue + i * 4u);
+        (bus_read_u32(actor + kActorFlags) & kFlagCollisionPassive ? passive : active).push_back(actor);
+    }
+    std::uint32_t slot = queue;
+    for (const auto* group : {&active, &passive})
+        for (const std::uint32_t actor : *group) {
+            bus_write_u32(slot, actor);
+            slot += 4u;
+        }
+    return 0;  // the game's own pass runs on the ordered queue
+}
 
 void suspendFeatureHooks()
 {
     g_saved = {gba::g_present_scanline_hook, gba::g_extra_obj_provider, gba::g_rom_read32_override, g_dma_observer};
     gba_mod_set_function_hooks_suspended(1);
+    gba_mod_set_function_hook_enabled(kCollisionOrderHookId, 1);
+    gba_mod_set_function_hook_runs_suspended(kCollisionOrderHookId, 1);
     pcFeaturesStartCoop();
 }
 
 void resumeFeatureHooks()
 {
     pcFeaturesEndCoop();
+    gba_mod_set_function_hook_runs_suspended(kCollisionOrderHookId, 0);
+    gba_mod_set_function_hook_enabled(kCollisionOrderHookId, 0);
     gba_mod_set_function_hooks_suspended(0);
     gba::g_present_scanline_hook = g_saved.present;
     gba::g_extra_obj_provider = g_saved.extraObjects;
@@ -215,6 +255,25 @@ bool frame(gbarecomp::LocalLinkFrame* link)
         static const char* showFrom = std::getenv("ROTK_PC_COOP_TEST_SHOW_FROM");
         static const char* showEvery = std::getenv("ROTK_PC_COOP_TEST_SHOW_EVERY");
         const std::uint64_t linked = link->frame - g_linkedAt;
+        // Explicit offline snapshots for recorded-link investigations. Keep these
+        // private: IWRAM contains copied game code as well as session data.
+        static const char* dumpFrom = std::getenv("ROTK_PC_COOP_TEST_DUMP_FROM");
+        static const char* dumpUntil = std::getenv("ROTK_PC_COOP_TEST_DUMP_UNTIL");
+        static std::FILE* snapshots = [] {
+            const char* path = std::getenv("ROTK_PC_COOP_TEST_DUMP");
+            return path ? std::fopen(path, "wb") : nullptr;
+        }();
+        if (snapshots && dumpFrom && dumpUntil &&
+            linked >= std::strtoull(dumpFrom, nullptr, 10) &&
+            linked <= std::strtoull(dumpUntil, nullptr, 10)) {
+            for (int i = 0; i < 2; ++i) {
+                const std::uint32_t header[] = {static_cast<std::uint32_t>(linked),
+                                               static_cast<std::uint32_t>(i)};
+                std::fwrite(header, sizeof(header), 1, snapshots);
+                std::fwrite(link->machines[i]->bus.iwram_ptr(), 32768, 1, snapshots);
+            }
+            std::fflush(snapshots);
+        }
         link->fast = fast && !(showFrom && linked >= std::strtoull(showFrom, nullptr, 10)) &&
                      !(showEvery && linked % std::strtoull(showEvery, nullptr, 10) == 0);
         static std::uint32_t scenes[2] = {~0u, ~0u};
@@ -232,9 +291,20 @@ bool frame(gbarecomp::LocalLinkFrame* link)
             for (int i = 0; i < 2; ++i) {
                 gba::GbaBus& bus = link->machines[i]->bus;
                 const std::uint32_t now = bus.read32(bus.read32(0x030040B0u) + 0x1Cu);
-                std::fprintf(trace, " %u %d %08x ie=%04x sio=%04x", consoles[i].scene,
+                // g_RngGameplayCursor and g_RngGameplayRemaining: the consoles' gameplay random streams.
+                std::fprintf(trace, " %u %d %08x ie=%04x sio=%04x rng=%08x/%d", consoles[i].scene,
                              static_cast<int>(now - bus.read32(0x03006C0Cu)), bus.read32(0x03006C08u),
-                             bus.read16(0x04000200u), bus.read16(0x04000128u));
+                             bus.read16(0x04000200u), bus.read16(0x04000128u), bus.read32(0x030020CCu),
+                             static_cast<int>(bus.read32(0x030020D0u)));
+                // Both players' cameras (g_CameraPositions[2]).
+                std::fprintf(trace, " cam=%d,%d/%d,%d", static_cast<int>(bus.read32(0x030020F8u)),
+                             static_cast<int>(bus.read32(0x030020FCu)), static_cast<int>(bus.read32(0x03002100u)),
+                             static_cast<int>(bus.read32(0x03002104u)));
+                // Both players' actor positions (g_PlayerGlobals.players[p] actor, coords at +0xAC).
+                for (std::uint32_t p = 0; p < 2; ++p) {
+                    const std::uint32_t actor = bus.read32(0x03003C00u + p * 0x1ACu);
+                    if (actor) std::fprintf(trace, " p%u=%08x,%08x", p, bus.read32(actor + 0xACu), bus.read32(actor + 0xB0u));
+                }
             }
             std::fputc('\n', trace);
         }
@@ -292,6 +362,7 @@ bool shareView()
 
 void bindConsole(int console)
 {
+    g_console = console;
     pcFeaturesSelectConsole(console);
 }
 
@@ -311,6 +382,7 @@ void localCoopReset()
 
 void localCoopRegister(gbarecomp::RunOptions& options)
 {
+    gba_mod_register_function_entry_plugin(kCollisionOrderHookId, kCheckCollisions, 0, stableCollisionOrder);
     gba_mod_register_activation_plugin("rotk.pc.local-coop", localCoopActivated);
     gba_mod_register_reset_callback(localCoopReset);
     options.local_link = &kLocalLink;

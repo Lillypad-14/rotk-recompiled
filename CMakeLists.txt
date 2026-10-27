@@ -183,3 +183,13 @@ foreach(property SOURCES INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS
         set_property(TARGET ${ROTK_EXECUTABLE}Next PROPERTY ${property} "${value}")
     endif()
 endforeach()
+
+add_executable(RotkCoopEngineCheck EXCLUDE_FROM_ALL tests/coop_engine_test.cpp src/widescreen.cpp
+    src/hd_audio.cpp src/hd_icons.cpp src/local_coop.cpp src/smooth_motion.cpp src/transparency.cpp
+    $<TARGET_OBJECTS:RotkCart>)
+foreach(property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS LINK_LIBRARIES LINK_OPTIONS)
+    get_target_property(value ${ROTK_EXECUTABLE} ${property})
+    if(value)
+        set_property(TARGET RotkCoopEngineCheck PROPERTY ${property} "${value}")
+    endif()
+endforeach()
