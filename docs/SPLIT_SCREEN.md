@@ -170,8 +170,8 @@ budget); local chunks on menus 3.8 ms mean on a quiet machine.
 
 1. More PC features inside co-op: HD icons (needs the high-resolution renderer per console), the
    CPU boost.
-2. The audio mixer interpreted on both consoles remains a large cost (interpreter step, state
-   copies); native RAM templates for it (roadmap section 2) would help single-player too.
+2. Frame cost left in co-op (see "Co-op frame cost"): scanline rendering for two wide screens and
+   the exception unwinding at chunk ends.
 
 ## Recorded disconnect regression (2026-10-26)
 
