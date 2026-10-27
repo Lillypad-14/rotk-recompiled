@@ -36,10 +36,24 @@ consoles (`clampCoopCameras`). With widescreen and HUD at the edges on, every re
 sampled between one console's camera update and its clamp. Game logic hooks must give the same result on both consoles.
 
 Smooth motion, real transparency and the extra sprite pages also work in co-op, each with its own
-state per console (`pcFeaturesSelectConsole` in src/main.cpp). Smooth motion rarely has an
-in-between frame there (about 65 of 4,500 frames per console in the scripted fight): it needs the
-next tick composed by the repeated vblank, which mostly happens with the CPU boost, and link
-sessions keep native timing.
+state per console (`pcFeaturesSelectConsole` in src/main.cpp). The CPU boost applies in co-op too
+(local chunks only; netplay keeps native timing), with each console's leftover cycles in its own
+timing context. Smooth motion needs the next tick composed by the repeated vblank. On the 18:47
+recording (3,000 linked frames, 1,471 repeated vblanks per console) it interpolated:
+
+| Boost | Console 1 (link master) | Console 2 |
+|---|---|---|
+| none | 14 | 154 |
+| x4 | 108 | 1,027 |
+| x8 | 1,225 | 1,467 |
+
+Console 1 starts its tick only after its partner's message arrives, so at x4 its compose usually
+ends just after the repeated vblank, too late. Its wait for that message (the loop at 0x08046838)
+polls like the VBlank wait and halts the same way (`waitMessageSpins` in src/local_coop.cpp), so
+the boost does not spend its extra instructions there. The boost costs no frame time on average
+(5.7-5.9 ms at x4 and x8 against 5.9-6.0 without, paced), but a burst of game work about 5 s into
+the level, which the unboosted consoles spread over more frames, lands in fewer: 6 frames of about
+25 ms at x4, 3 of about 45 ms at x8. The session report lists the first late frames.
 
 The engine limits (larger heap, actor pools, render sort, the queue literals and the PC info block)
 run on the co-op consoles too: their hooks write through the active bus into that console's own host
@@ -168,8 +182,7 @@ budget); local chunks on menus 3.8 ms mean on a quiet machine.
 
 ## Open
 
-1. More PC features inside co-op: HD icons (needs the high-resolution renderer per console), the
-   CPU boost.
+1. More PC features inside co-op: HD icons (needs the high-resolution renderer per console).
 2. Frame cost left in co-op (see "Co-op frame cost"): scanline rendering for two wide screens and
    the exception unwinding at chunk ends.
 

@@ -115,7 +115,7 @@ int stableCollisionOrder(std::uint32_t, int, ArmCpuState*)
 // system_waitVBlank (0x0802A398) clears bit 0 of g_VBlankFlags, then polls it in the loop at 0x0802A3A8
 // (ldrh r1,[r2]; r0 = r3 & r1; beq) until the VBlank handler sets it, instead of halting. Each console
 // spent most of its frame there, executing the poll for the rest of the frame. In co-op the session
-// halts a console at the loop head while the flag is clear (runtime_set_session_idle_loop): it then
+// halts a console at the loop head while the flag is clear (runtime_add_session_idle_loop): it then
 // skips to its next interrupt, and the loop sees the same flag the poll would have.
 constexpr std::uint32_t kWaitVBlankLoop = 0x0802A3A8u;
 constexpr std::uint32_t kVBlankFlags = 0x03001F10u;
@@ -126,20 +126,44 @@ bool waitVBlankSpins()
            (bus_read_u16(kVBlankFlags) & 1u) == 0;
 }
 
+// The link master waits for its partner's message in the loop at 0x08046838 (called from
+// multiplayer_tick): with transfer bit 0x20 of g_MpMessageMask set, a pass only reads the mask, the
+// vblank counter and the last-received time until the serial IRQ sets bit 0x10 or 300 vblanks pass.
+// Halting there leaves the CPU boost's extra instructions to the game instead of the spin.
+constexpr std::uint32_t kWaitMessageLoop = 0x08046838u;
+constexpr std::uint32_t kMpMessageMask = 0x03006C08u;
+constexpr std::uint32_t kMpLastReceived = 0x03006C0Cu;
+constexpr std::uint32_t kEngineState = 0x030040B0u;  // EngineState *; vblankCounter at +0x1C
+constexpr std::uint32_t kMpTransferPending = 0x20u;
+constexpr std::uint32_t kMpMessageReceived = 0x10u;
+
+bool waitMessageSpins()
+{
+    if ((g_cpu.cpsr & 0x20u) == 0 || g_cpu.R[3] != kMpMessageMask || g_cpu.R[7] != kMpMessageMask ||
+        g_cpu.R[12] != kMpLastReceived)
+        return false;
+    const std::uint32_t mask = bus_read_u32(kMpMessageMask);
+    if (!(mask & kMpTransferPending) || (mask & kMpMessageReceived)) return false;
+    const auto waited = static_cast<std::int32_t>(bus_read_u32(bus_read_u32(kEngineState) + 0x1Cu) -
+                                                  bus_read_u32(kMpLastReceived));
+    return waited <= 300;
+}
+
 void suspendFeatureHooks()
 {
     g_saved = {gba::g_present_scanline_hook, gba::g_extra_obj_provider, gba::g_rom_read32_override, g_dma_observer};
     gba_mod_set_function_hooks_suspended(1);
     gba_mod_set_function_hook_enabled(kCollisionOrderHookId, 1);
     gba_mod_set_function_hook_runs_suspended(kCollisionOrderHookId, 1);
-    gbarecomp::runtime_set_session_idle_loop(kWaitVBlankLoop, waitVBlankSpins);
+    gbarecomp::runtime_add_session_idle_loop(kWaitVBlankLoop, waitVBlankSpins);
+    gbarecomp::runtime_add_session_idle_loop(kWaitMessageLoop, waitMessageSpins);
     pcFeaturesStartCoop();
 }
 
 void resumeFeatureHooks()
 {
     pcFeaturesEndCoop();
-    gbarecomp::runtime_set_session_idle_loop(0, nullptr);
+    gbarecomp::runtime_clear_session_idle_loops();
     gba_mod_set_function_hook_runs_suspended(kCollisionOrderHookId, 0);
     gba_mod_set_function_hook_enabled(kCollisionOrderHookId, 0);
     gba_mod_set_function_hooks_suspended(0);
