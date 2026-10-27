@@ -78,6 +78,46 @@ Option "Player 2 save" (`player2-save`):
   session on a copy.
 - "A copy of yours each session": console 2 loads player 1's save and its writes are discarded.
 
+Saving works as on two linked GBAs. Each player loads a slot from their own save at the co-op
+load menu. The pause menu's Save is disabled in co-op. A finished co-op mission ends the link
+(script op 46) and opens the save menu (`SAVE_LOAD_MODE_SAVE_VICTORY`) on each console for its own
+player, who picks any slot of their own save. The slot gets the character (level, items, gems,
+skills, page 2 ranks), while the slot's story progress stays as it was
+(`GAME_FLAG_COOP_LEVEL_SELECTED`, `g_SaveParkedProgress`), so co-op missions don't advance either
+campaign. Console 1's save reaches the normal save when the session ends and console 2's
+`rotk.player2.sram`. The session ends once console 1 is back on the main menu, but waits while
+console 2 is still in that save menu, so player 1 leaving first can't drop player 2's save.
+
+## Skill tree page 2 in co-op (2026-10-27)
+
+Page 2 used to be locked in co-op, and each console loaded its partner's page 2 ranks as empty. The
+Expanded mod's skill tree (`game/hacks/patches/skill_expansion/skill_expansion_tree.c`) now swaps
+page 2 into the stock rows only while it handles input and draws, so the actor ticks and the link
+messages always see every row in its own place. Purchases, cycle toggles and quick-select binds go
+out as link message `0x0b` with unswapped rows, and both consoles apply them on the same frame,
+checking a purchase again so a second press sent before the first applies can't overspend. After
+the stock slot exchange, each console sends its page 2 record (24 bytes in 4 messages) before the
+peer's slot loads.
+
+The same record carries the host's gameplay mod options (Loot QoL, Debug cheats, Twists,
+Experimental), which console 2 plays the session with while its save keeps its own: each console
+used to load its own save's, so options set on one save only (Omens rolling fate, the loot filter,
+cheat refills, camera ease) made the consoles simulate different games. Mod options can't be
+changed during co-op. Auto-Collect Gems used to loot only for the console's own player, so the
+partner's console left the stack on the ground and its gem count low, and a later shop purchase,
+which both consoles check against the buyer's gems, went through on one console only. It now loots
+for both players on both consoles.
+
+Checked on the 09:47 recording with the v0.7 sources: the recorded page turns work, scripted page 2
+purchases land on both consoles in the same frame, and saves given page 2 ranks load the partner's
+ranks on both consoles. The link held through 9,300 linked frames with no RNG divergence past the
+seed hand-off. Gems now match (54 and 0 on both consoles at frame 9,300). The old build paid the
+same stacks twice, once per console: 54 gems to player 1 on console 1 and 31 to player 2 on
+console 2. A stack now goes to the nearest player in range. A player 2 save with Loot QoL and Debug cheats off played the session
+with the host's settings. What still differs is presentation only: the unspent-points HUD flag,
+which a console clears when its own player opens the stats page, and the "no skill" row's cycle
+flag, which no cast reads.
+
 ## Framework pieces (gbarecomp, local sessions only; netplay is unchanged)
 
 - Local link play (`RunOptions::local_link`, runtime.cpp `run_local_link`): the windowed runner
@@ -155,10 +195,12 @@ budget); local chunks on menus 3.8 ms mean on a quiet machine.
   Multiplayer.
 - Link checks: with `ROTK_PC_COOP_TEST_INPUTS`, each console's scene and `g_MpLinkState` changes are
   logged (`ff00` once the game dropped the link), `ROTK_PC_COOP_TEST_FAST=1` runs unpaced,
-  `ROTK_PC_COOP_TEST_SHOW_FROM=N` shows (and frame-dumps) from linked frame N, and
-  `ROTK_PC_COOP_TEST_TRACE=<file>` writes per frame each console's scene, frames since a link
-  message arrived (the game gives up past 300), `g_MpMessageMask`, IE and SIOCNT. A 15-minute random
-  fight with the player's own settings (2026-10-26) held the link with at most 57 frames between
+  `ROTK_PC_COOP_TEST_SHOW_FROM=N` shows (and frame-dumps) from linked frame N,
+  `ROTK_PC_COOP_TEST_DUMP=<file>` with `_DUMP_FROM`/`_DUMP_UNTIL` writes both consoles' IWRAM per
+  frame, `ROTK_PC_COOP_TEST_DUMP_EWRAM_TOP=<file>` writes the top 4 KiB of EWRAM (the Expanded
+  mod's globals) for the same frames, and `ROTK_PC_COOP_TEST_TRACE=<file>` writes per frame each
+  console's scene, frames since a link message arrived (the game gives up past 300),
+  `g_MpMessageMask`, IE and SIOCNT. A 15-minute random fight with the player's own settings (2026-10-26) held the link with at most 57 frames between
   messages. The player's own disconnect came from a build that ran no PC features in co-op; the
   same script on the previous cable code with every feature off also held, with no cleared unread
   data, so that disconnect is not reproduced. The cable hazards the fix removes are its likely

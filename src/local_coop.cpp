@@ -23,9 +23,13 @@ namespace rotk {
 namespace {
 
 // g_SceneCurrent (game/include/scene.h): id, then args[5]. The main menu (scene 5) keeps its cursor
-// row in args[1] and its state in args[3] (game/include/scene/mainMenu.h).
+// row in args[1] and its state in args[3] (game/include/scene/mainMenu.h). The save/load menu
+// (scene 9) keeps its mode in args[0] (game/include/scene/saveLoadMenu.h).
 constexpr std::uint32_t kSceneCurrent = 0x030041B0u;
 constexpr std::uint32_t kSceneMainMenu = 5;
+constexpr std::uint32_t kSceneSaveLoadMenu = 9;
+// SAVE_LOAD_MODE_SAVE_VICTORY: the save offered when a co-op mission ends the link.
+constexpr std::uint32_t kSaveModeVictory = 3;
 constexpr std::uint32_t kMenuPressStart = 0, kMenuIdle = 2, kMenuLinkWait = 3;
 constexpr std::uint32_t kEntryMultiplayer = 2;
 constexpr std::uint16_t kA = 1u << 0, kB = 1u << 1, kStart = 1u << 3, kUp = 1u << 6, kDown = 1u << 7;
@@ -35,12 +39,13 @@ constexpr std::uint64_t kBootFrames = 3000;
 constexpr int kCancelFrames = 6;
 
 struct MenuState {
-    std::uint32_t scene = 0, cursor = 0, state = 0;
+    std::uint32_t scene = 0, cursor = 0, state = 0, mode = 0;
 };
 
 MenuState menuState(gba::GbaBus& bus)
 {
-    return {bus.read32(kSceneCurrent), bus.read32(kSceneCurrent + 8), bus.read32(kSceneCurrent + 16)};
+    return {bus.read32(kSceneCurrent), bus.read32(kSceneCurrent + 8), bus.read32(kSceneCurrent + 16),
+            bus.read32(kSceneCurrent + 4)};
 }
 
 bool waitingForPartner(const MenuState& menu)
@@ -303,16 +308,33 @@ bool frame(gbarecomp::LocalLinkFrame* link)
             const char* path = std::getenv("ROTK_PC_COOP_TEST_DUMP");
             return path ? std::fopen(path, "wb") : nullptr;
         }();
-        if (snapshots && dumpFrom && dumpUntil &&
+        // ROTK_PC_COOP_TEST_DUMP_EWRAM_TOP=<file>: the same frames' top 4 KiB of EWRAM, where the
+        // Expanded mod keeps its globals (game/hacks/layout.cfg MODCODE_BSS).
+        static std::FILE* ewramSnapshots = [] {
+            const char* path = std::getenv("ROTK_PC_COOP_TEST_DUMP_EWRAM_TOP");
+            return path ? std::fopen(path, "wb") : nullptr;
+        }();
+        constexpr std::size_t kEwramTop = 4096;
+        if ((snapshots || ewramSnapshots) && dumpFrom && dumpUntil &&
             linked >= std::strtoull(dumpFrom, nullptr, 10) &&
             linked <= std::strtoull(dumpUntil, nullptr, 10)) {
             for (int i = 0; i < 2; ++i) {
                 const std::uint32_t header[] = {static_cast<std::uint32_t>(linked),
                                                static_cast<std::uint32_t>(i)};
-                std::fwrite(header, sizeof(header), 1, snapshots);
-                std::fwrite(link->machines[i]->bus.iwram_ptr(), 32768, 1, snapshots);
+                if (snapshots) {
+                    std::fwrite(header, sizeof(header), 1, snapshots);
+                    std::fwrite(link->machines[i]->bus.iwram_ptr(), 32768, 1, snapshots);
+                }
+                if (ewramSnapshots) {
+                    std::fwrite(header, sizeof(header), 1, ewramSnapshots);
+                    std::fwrite(link->machines[i]->bus.ewram_ptr() + 0x40000 - kEwramTop, kEwramTop,
+                                1, ewramSnapshots);
+                }
             }
-            std::fflush(snapshots);
+            if (snapshots)
+                std::fflush(snapshots);
+            if (ewramSnapshots)
+                std::fflush(ewramSnapshots);
         }
         link->fast = fast && !(showFrom && linked >= std::strtoull(showFrom, nullptr, 10)) &&
                      !(showEvery && linked % std::strtoull(showEvery, nullptr, 10) == 0);
@@ -373,7 +395,10 @@ bool frame(gbarecomp::LocalLinkFrame* link)
                      link->machines[0]->bus.read32(0x02001648u), link->machines[1]->bus.read32(0x02001648u));
         return false;
     }
-    // Back on the main menu (cancelled or co-op finished): the session ends.
+    // Back on the main menu (cancelled or co-op finished): the session ends, but not while player 2
+    // still has the mission's save to make, which would be lost with their console.
+    if (two.scene == kSceneSaveLoadMenu && two.mode == kSaveModeVictory)
+        return true;
     return !(one.scene == kSceneMainMenu && one.state < kMenuLinkWait);
 }
 
