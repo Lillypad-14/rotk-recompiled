@@ -15,6 +15,7 @@
 #include "multiplayer_session.h"
 #include "runtime_arm.h"
 #include "runtime_bus_bridge.h"
+#include "self_heal.h"
 #include "widescreen.h"
 
 extern "C" void (*g_dma_observer)(int channel, std::uint32_t src, std::uint32_t dst, std::uint32_t bytes);
@@ -37,6 +38,14 @@ constexpr std::uint16_t kA = 1u << 0, kB = 1u << 1, kStart = 1u << 3, kUp = 1u <
 constexpr std::uint64_t kBootFrames = 3000;
 // Frames B is held on the solo console to leave its own link wait.
 constexpr int kCancelFrames = 6;
+// Linked frames the controls hint shows, the last kHintFadeFrames fading out.
+constexpr std::uint64_t kHintFrames = 420, kHintFadeFrames = 60;
+constexpr const char* kStartingCaption = "Starting split-screen co-op...";
+constexpr const char* kHintCaption =
+    "Player 2: second controller, or WASD to move\n"
+    "J = A   K = B   Space = Start   G = Select   U / I = L / R\n"
+    "Co-op ends when player 1 is back on the main menu";
+constexpr const char* kWaitSaveCaption = "Waiting for player 2 to save";
 
 struct MenuState {
     std::uint32_t scene = 0, cursor = 0, state = 0, mode = 0;
@@ -264,6 +273,7 @@ bool frame(gbarecomp::LocalLinkFrame* link)
     if (!g_linked) {
         // Both fresh consoles boot unshown and walk into Multiplayer, as the player already chose.
         link->fast = true;
+        link->caption = kStartingCaption;
         link->buttons[0] = steerToMultiplayer(one, link->frame);
         link->buttons[1] = steerToMultiplayer(two, link->frame);
         g_linked = waitingForPartner(one) && waitingForPartner(two);
@@ -275,6 +285,11 @@ bool frame(gbarecomp::LocalLinkFrame* link)
         return link->frame < kBootFrames;
     }
     link->screens = 2;
+    if (const std::uint64_t linked = link->frame - g_linkedAt; linked < kHintFrames) {
+        link->caption = kHintCaption;
+        if (linked + kHintFadeFrames > kHintFrames)
+            link->caption_alpha = static_cast<std::uint8_t>(255 * (kHintFrames - linked) / kHintFadeFrames);
+    }
     link->buttons[0] = link->players[0];
     link->buttons[1] = link->players[1];
     record(link->frame - g_linkedAt, link->buttons[0], link->buttons[1]);
@@ -343,7 +358,8 @@ bool frame(gbarecomp::LocalLinkFrame* link)
         // g_MpLinkState[4..5] (game/include/multiplayer.h): session state and this console's
         // multi-player ID, 0xFF once multiplayer_abortSession has dropped the link.
         // ROTK_PC_COOP_TEST_TRACE=<file>: per frame, each console's scene, frames since a link
-        // message last arrived (the game drops the link past 300) and g_MpMessageMask.
+        // message last arrived (the game drops the link past 300) and g_MpMessageMask, then the
+        // instructions both consoles interpreted.
         static std::FILE* trace = [] {
             const char* path = std::getenv("ROTK_PC_COOP_TEST_TRACE");
             return path ? std::fopen(path, "w") : nullptr;
@@ -368,7 +384,10 @@ bool frame(gbarecomp::LocalLinkFrame* link)
                     if (actor) std::fprintf(trace, " p%u=%08x,%08x", p, bus.read32(actor + 0xACu), bus.read32(actor + 0xB0u));
                 }
             }
-            std::fputc('\n', trace);
+            static std::uint64_t interpreted = 0;
+            const std::uint64_t interpretedNow = gbarecomp::self_heal_interpreted_insns();
+            std::fprintf(trace, " interp=%llu\n", static_cast<unsigned long long>(interpretedNow - interpreted));
+            interpreted = interpretedNow;
         }
         static std::uint32_t linkStates[2] = {~0u, ~0u};
         for (int i = 0; i < 2; ++i) {
@@ -397,8 +416,10 @@ bool frame(gbarecomp::LocalLinkFrame* link)
     }
     // Back on the main menu (cancelled or co-op finished): the session ends, but not while player 2
     // still has the mission's save to make, which would be lost with their console.
-    if (two.scene == kSceneSaveLoadMenu && two.mode == kSaveModeVictory)
+    if (two.scene == kSceneSaveLoadMenu && two.mode == kSaveModeVictory) {
+        if (one.scene == kSceneMainMenu) link->caption = kWaitSaveCaption;
         return true;
+    }
     return !(one.scene == kSceneMainMenu && one.state < kMenuLinkWait);
 }
 

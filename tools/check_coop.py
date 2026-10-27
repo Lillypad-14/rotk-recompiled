@@ -30,6 +30,8 @@ def main() -> None:
     parser.add_argument("--inputs", type=Path, help="Inputs file in place of the recording's")
     parser.add_argument("--dump-from", type=int, default=0)
     parser.add_argument("--dump-until", type=int, default=0)
+    parser.add_argument("--visible", action="store_true", help="Show the window (muted)")
+    parser.add_argument("--paced", action="store_true", help="Run at normal speed, for frame times")
     parser.add_argument("--show-from", type=int, default=0, help="Dump the window's frames from this linked frame")
     args = parser.parse_args()
     if args.frames < 1 or args.chunk_cycles < 0 or not re.fullmatch(r"[A-Za-z0-9_-]+", args.name):
@@ -59,12 +61,17 @@ def main() -> None:
             env.pop(name)
     env.update(SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy", SDL_RENDER_DRIVER="software",
                GBARECOMP_DIAGNOSTICS="0", GBARECOMP_INPUT_REPLAY=str(solo),
-               ROTK_PC_COOP_TEST_FAST="1", ROTK_PC_COOP_TEST_INPUTS=str(run / "inputs.txt"),
+               ROTK_PC_COOP_TEST_INPUTS=str(run / "inputs.txt"),
                ROTK_PC_COOP_TEST_EXIT_AFTER=str(args.frames),
                ROTK_PC_COOP_TEST_TRACE=str(run / "trace.txt"),
                GBARECOMP_COVERAGE_JSON=str(run / "coverage.json"),
                GBARECOMP_LOCAL_LINK_CHUNK=str(args.chunk_cycles),
                GBARECOMP_HEAL_CACHE=str(ROOT / "recomp_cache"))
+    if args.visible:
+        env.pop("SDL_VIDEODRIVER")
+        env.pop("SDL_RENDER_DRIVER")
+    if not args.paced:
+        env.update(ROTK_PC_COOP_TEST_FAST="1")
     if args.show_from:
         (run / "frames").mkdir()
         env.update(ROTK_PC_COOP_TEST_SHOW_FROM=str(args.show_from), GBARECOMP_FRAMEDUMP_DIR=str(run / "frames"),
@@ -83,11 +90,12 @@ def main() -> None:
         try:
             process = subprocess.run(command, cwd=run, env=env, stdout=log, stderr=subprocess.STDOUT,
                                      timeout=args.timeout,
-                                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+                                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" and not args.visible else 0)
             code = process.returncode
         except subprocess.TimeoutExpired:
             timed_out, code = True, None
     log_text = (run / "runtime.log").read_text(encoding="utf-8", errors="replace")
+    session = re.findall(r"local link (session ended after .*|late frames .*)", log_text)
     trace = run / "trace.txt"
     last_frame, checksum_flags = 0, []
     rng_matched, rng_split = 0, None
@@ -120,6 +128,7 @@ def main() -> None:
                   requested_link_frames=args.frames, last_link_frame=last_frame,
                   chunk_cycles=args.chunk_cycles,
                   disconnects=disconnects, checksum_flag_frames=checksum_flags,
+                  session_report=session,
                   rng_last_matched_frame=rng_matched, rng_split_frame=rng_split,
                   executable_sha256=hashlib.sha256(exe.read_bytes()).hexdigest(),
                   coverage=coverage_data)

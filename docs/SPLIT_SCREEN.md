@@ -8,7 +8,9 @@ The game's own two-player link co-op, with both consoles on this PC.
 1. Solo play is the normal game with every PC feature.
 2. Choosing Multiplayer on the title menu freezes the solo console and opens a local link session:
    two fresh consoles boot unshown from the solo console's save (about 5 s of game time, run
-   unpaced), and both are steered into Multiplayer. The window then fades in both screens.
+   unpaced), and both are steered into Multiplayer. Meanwhile the window shows the solo console's
+   last frame dimmed, captioned "Starting split-screen co-op...". The window then fades in both
+   screens, with player 2's controls and how co-op ends captioned for the first 7 s.
 3. Player 1 keeps the normal controls. Player 2 uses a second controller, or WASD, J = A, K = B,
    Space = Start, G = Select, U/I = L/R. The sound is console 1's with console 2's sound effects
    mixed in: console 2 boots with the game's own music option off (cleared in its save image,
@@ -65,7 +67,8 @@ alike and with every presentation feature off. With them, that session holds thr
 and the 15-minute random fight script through 54,000 (at most 56 frames between messages).
 `GBARECOMP_LOCAL_LINK_CHUNK=<cycles>` sets the chunk length for tests (0 = strict lockstep).
 
-Off during co-op: HD icons, HD audio and the CPU boost.
+HD icons work in co-op: each console renders at the normal game's internal resolution, at most 4x
+since each console has half the window, and the window shows both consoles' high-resolution frames.
 
 ## Player 2's save
 
@@ -86,7 +89,8 @@ skills, page 2 ranks), while the slot's story progress stays as it was
 (`GAME_FLAG_COOP_LEVEL_SELECTED`, `g_SaveParkedProgress`), so co-op missions don't advance either
 campaign. Console 1's save reaches the normal save when the session ends and console 2's
 `rotk.player2.sram`. The session ends once console 1 is back on the main menu, but waits while
-console 2 is still in that save menu, so player 1 leaving first can't drop player 2's save.
+console 2 is still in that save menu, so player 1 leaving first can't drop player 2's save. The
+window says "Waiting for player 2 to save" meanwhile.
 
 ## Skill tree page 2 in co-op (2026-10-27)
 
@@ -115,7 +119,7 @@ seed hand-off. Gems now match (54 and 0 on both consoles at frame 9,300). The ol
 same stacks twice, once per console: 54 gems to player 1 on console 1 and 31 to player 2 on
 console 2. A stack now goes to the nearest player in range. A player 2 save with Loot QoL and Debug cheats off played the session
 with the host's settings. What still differs is presentation only: the unspent-points HUD flag,
-which a console clears when its own player opens the stats page, and the "no skill" row's cycle
+which the stock game sets and shows only for the console's own player, and the "no skill" row's cycle
 flag, which no cast reads.
 
 ## Framework pieces (gbarecomp, local sessions only; netplay is unchanged)
@@ -224,8 +228,7 @@ budget); local chunks on menus 3.8 ms mean on a quiet machine.
 
 ## Open
 
-1. More PC features inside co-op: HD icons (needs the high-resolution renderer per console).
-2. Frame cost left in co-op (see "Co-op frame cost"): scanline rendering for two wide screens and
+1. Frame cost left in co-op (see "Co-op frame cost"): scanline rendering for two wide screens and
    the exception unwinding at chunk ends.
 
 ## Recorded disconnect regression (2026-10-26)
@@ -244,7 +247,7 @@ cmake --build build/host-expanded --target RotkCoopEngineCheck --parallel 2
 python tools/check_coop.py .private/expanded/play/rotk.sram.coop-YYYYMMDD-HHMMSS --exe build/host-expanded/RotkPcLabExpanded.exe --frames 6000 --name regression
 ```
 
-The prefix requires `.inputs.txt`, `-1.sram` and `-2.sram` sidecars. The runner copies them and the selected executable/packages into `.private/coop-checks`, mutes dummy audio/video, saves a per-frame trace and retains CPU coverage. A pass requires reaching the requested linked frame, an explicit planned test exit, no checksum-error flag, no aborted peer and a coverage report. A disconnect is a peer whose link state returns to 0xFF after its session started (every console reads 0xFF before the link, on frame 1). `rng_split_frame` is the frame from which the two consoles' gameplay random streams last differed, or null if they match at the end (they differ for a few frames while the seed is handed over); it does not fail a run. `--mods-state` selects an isolated options fixture; `--chunk-cycles 0` selects the strict scheduler. `--config` picks another game.toml, `--inputs` replays edited inputs against the recording's saves, `--show-from` dumps the window's frames from a linked frame, and `--dump-until` adds the EWRAM top dump. Input snapshots and replays remain private.
+The prefix requires `.inputs.txt`, `-1.sram` and `-2.sram` sidecars. The runner copies them and the selected executable/packages into `.private/coop-checks`, mutes dummy audio/video, saves a per-frame trace and retains CPU coverage. A pass requires reaching the requested linked frame, an explicit planned test exit, no checksum-error flag, no aborted peer and a coverage report. A disconnect is a peer whose link state returns to 0xFF after its session started (every console reads 0xFF before the link, on frame 1). `rng_split_frame` is the frame from which the two consoles' gameplay random streams last differed, or null if they match at the end (they differ for a few frames while the seed is handed over); it does not fail a run. `--mods-state` selects an isolated options fixture; `--chunk-cycles 0` selects the strict scheduler. `--config` picks another game.toml, `--inputs` replays edited inputs against the recording's saves, `--show-from` dumps the window's frames from a linked frame, and `--dump-until` adds the EWRAM top dump. `--paced` runs at normal speed for the session report's frame times, and `--visible` shows the window (muted). Input snapshots and replays remain private.
 
 Final launcher-build verification: the rebuilt normal `RotkPcLabExpanded.exe` passed the 18:13 recording through 6,000 linked frames, with no checksum flags or disconnects. Its SHA-256 is `95ec5799857f3b073457a614e7c49964e12890e6c60150b51cc9e5bf2ed868a1`; the executable installed under `build/host-expanded` matches the tested copy exactly.
 
@@ -301,6 +304,13 @@ settings (widescreen, smooth motion, HD audio): mean session frame (both console
 Not changed: chunk length (4,928 cycles would save another 6%, 5.46 -> 5.11 ms, but changes the
 link timing every recording was checked on). What remains: scanline rendering for two wide
 screens (27% of samples), exception unwinding at chunk ends (15%), the per-instruction tick (8%).
+
+The burst about 5 s into the level (2026-10-27, 18:47 recording, x4): linked frames 582-587 took
+22-25 ms, the rest averaged 4.64 ms, with HD icons in co-op on. Both consoles are busy for whole
+frames there (player 2 walking into new map), and native code, not the interpreter, runs it: the
+trace counts 31,000 interpreted instructions over 800 frames. Without the boost the same work
+spreads over more frames, which are slow too (520 presents over 20 ms against 197 at x4, on a
+busier machine), so lowering the boost in co-op doesn't help.
 
 Checks: every recording (17:24, 17:49, 18:13, 18:47) and the 15-minute random fight hold the link
 (at most 49 frames between messages), `RotkCoopEngineCheck` passes, and the single-player
