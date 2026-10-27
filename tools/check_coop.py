@@ -13,19 +13,24 @@ import shutil
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
+CONSOLE_TRACE = re.compile(r" \d+ -?\d+ ([0-9a-f]{8}) ie=\S+ sio=\S+ rng=(\S+)")
+LINK_LOG = re.compile(r"co-op test: frame (\d+) console (\d+) scene (\d+) link ([0-9a-f]{2})[0-9a-f]{2}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("recording", type=Path, help="Recording prefix, without .inputs.txt or -1.sram")
-    parser.add_argument("--exe", type=Path, default=ROOT / "build/host-expanded/RotkPcLabExpandedNext.exe")
+    parser.add_argument("--exe", type=Path, default=ROOT / "build/host-expanded/RotkPcLabExpanded.exe")
     parser.add_argument("--mods-state", type=Path, default=ROOT / "build/host-expanded/mods/state.toml")
     parser.add_argument("--frames", type=int, default=6000, help="Frames after both consoles link")
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--chunk-cycles", type=int, default=1232, help="0 selects the strict scheduler")
     parser.add_argument("--name", default="recording")
+    parser.add_argument("--config", type=Path, default=ROOT / ".private/expanded/game.toml")
+    parser.add_argument("--inputs", type=Path, help="Inputs file in place of the recording's")
     parser.add_argument("--dump-from", type=int, default=0)
     parser.add_argument("--dump-until", type=int, default=0)
+    parser.add_argument("--show-from", type=int, default=0, help="Dump the window's frames from this linked frame")
     args = parser.parse_args()
     if args.frames < 1 or args.chunk_cycles < 0 or not re.fullmatch(r"[A-Za-z0-9_-]+", args.name):
         parser.error("Use positive frames and an alphanumeric name")
@@ -43,7 +48,8 @@ def main() -> None:
     prefix = str(args.recording.resolve())
     for suffix, target in [("-1.sram", "session.sram"), ("-2.sram", "session.player2.sram"),
                            (".inputs.txt", "inputs.txt")]:
-        shutil.copyfile(prefix + suffix, run / target)
+        source_file = args.inputs if args.inputs and target == "inputs.txt" else Path(prefix + suffix)
+        shutil.copyfile(source_file, run / target)
     solo = run / "solo.csv"
     solo.write_text("# gbarecomp-keyinput-v1\n0,0x3ff\n450,0x3f7\n460,0x3ff\n"
                     "600,0x37f\n610,0x3ff\n640,0x37f\n650,0x3ff\n700,0x3fe\n712,0x3ff\n")
@@ -59,13 +65,18 @@ def main() -> None:
                GBARECOMP_COVERAGE_JSON=str(run / "coverage.json"),
                GBARECOMP_LOCAL_LINK_CHUNK=str(args.chunk_cycles),
                GBARECOMP_HEAL_CACHE=str(ROOT / "recomp_cache"))
+    if args.show_from:
+        (run / "frames").mkdir()
+        env.update(ROTK_PC_COOP_TEST_SHOW_FROM=str(args.show_from), GBARECOMP_FRAMEDUMP_DIR=str(run / "frames"),
+                   GBARECOMP_FRAMEDUMP_START="999999999", GBARECOMP_FRAMEDUMP_COUNT="2000")
     if args.dump_until:
         env.update(ROTK_PC_COOP_TEST_DUMP=str(run / "iwram.bin"),
                    ROTK_PC_COOP_TEST_DUMP_FROM=str(args.dump_from),
                    ROTK_PC_COOP_TEST_DUMP_UNTIL=str(args.dump_until),
                    ROTK_PC_COOP_TEST_RNG_TRACE=str(run / "rng-calls.bin"),
-                   GBARECOMP_LINK_CAPTURE=str(run / "link-payloads.txt"))
-    command = [str(exe), "--config", str(ROOT / ".private/expanded/game.toml"), "--window",
+                   GBARECOMP_LINK_CAPTURE=str(run / "link-payloads.txt"),
+                   ROTK_PC_COOP_TEST_DUMP_EWRAM_TOP=str(run / "ewram-top.bin"))
+    command = [str(exe), "--config", str(args.config.resolve()), "--window",
                "--save-path", str(run / "session.sram"), "--frames", "1500", "--volume", "0"]
     timed_out = False
     with (run / "runtime.log").open("w", encoding="utf-8") as log:
@@ -79,15 +90,27 @@ def main() -> None:
     log_text = (run / "runtime.log").read_text(encoding="utf-8", errors="replace")
     trace = run / "trace.txt"
     last_frame, checksum_flags = 0, []
+    rng_matched, rng_split = 0, None
     if trace.exists():
         for line in trace.read_text().splitlines():
-            fields = line.split()
-            if len(fields) != 11:
+            # Per console: scene, frames since a link message, g_MpMessageMask, then rng=cursor/remaining.
+            consoles = CONSOLE_TRACE.findall(line)
+            if not line[:1].isdigit() or len(consoles) != 2:
                 continue
-            last_frame = int(fields[0])
-            if any(int(fields[index], 16) & 0x100 for index in (3, 8)):
+            last_frame = int(line.split(maxsplit=1)[0])
+            if any(int(mask, 16) & 0x100 for mask, _ in consoles):
                 checksum_flags.append(last_frame)
-    disconnects = re.findall(r"co-op test: frame (\d+) console (\d+) scene (\d+) link ff[0-9a-f]{2}", log_text)
+            if consoles[0][1] == consoles[1][1]:
+                rng_matched, rng_split = last_frame, None
+            elif rng_split is None:
+                rng_split = last_frame
+    # The link state's high byte is 0xFF until the session starts and again once a console drops it.
+    disconnects, started = [], set()
+    for frame, console, scene, high in LINK_LOG.findall(log_text):
+        if high != "ff":
+            started.add(console)
+        elif console in started:
+            disconnects.append((frame, console, scene))
     passed = (code == 0 and last_frame >= args.frames and not disconnects and not checksum_flags
               and "split-screen co-op test exit:" in log_text)
     coverage = run / "coverage.json"
@@ -97,6 +120,7 @@ def main() -> None:
                   requested_link_frames=args.frames, last_link_frame=last_frame,
                   chunk_cycles=args.chunk_cycles,
                   disconnects=disconnects, checksum_flag_frames=checksum_flags,
+                  rng_last_matched_frame=rng_matched, rng_split_frame=rng_split,
                   executable_sha256=hashlib.sha256(exe.read_bytes()).hexdigest(),
                   coverage=coverage_data)
     (run / "result.json").write_text(json.dumps(result, indent=2) + "\n")
