@@ -165,6 +165,7 @@ float g_ringL[kRingFrames], g_ringR[kRingFrames];
 std::uint32_t g_ringRead = 0, g_ringFill = 0;
 bool g_ringPrimed = false;
 AudioEnvelope g_envelope;
+bool g_coop = false;  // mixing into each co-op console's guest ring (hdAudioStartCoop)
 
 const std::uint8_t* g_rom = nullptr;
 std::size_t g_romSize = 0;
@@ -210,7 +211,7 @@ void voiceGains(const Voice& v, float& gl, float& gr)
 // Render guest samples [off, off + n) of the call for voice `v` as it stands before the span.
 void renderSpan(const Voice& v, std::uint32_t off, std::uint32_t n)
 {
-    if (g_mode == Mode::Off || n == 0) return;
+    if ((g_mode == Mode::Off && !g_coop) || n == 0) return;
     const std::uint32_t k0 = off * kOversample, k1 = (off + n) * kOversample;
     float gl, gr;
     voiceGains(v, gl, gr);
@@ -232,6 +233,7 @@ void renderSpan(const Voice& v, std::uint32_t off, std::uint32_t n)
     const double frac = v.u16(kFrac) / 65536.0;
     const double step = v.s32(kStep) / 65536.0;
     const bool linearGuest = v.u8(kInterp) != 0;
+    const Interp interp = g_mode == Mode::Off ? Interp::Guest : g_interp;
     for (std::uint32_t k = k0; k < k1; ++k) {
         const double t = static_cast<double>(k - k0) / kOversample;
         const double pos = frac + t * step;
@@ -239,7 +241,7 @@ void renderSpan(const Voice& v, std::uint32_t off, std::uint32_t n)
         const std::int64_t i = base + static_cast<std::int64_t>(whole);
         const float f = static_cast<float>(pos - whole);
         float s;
-        switch (g_interp) {
+        switch (interp) {
         case Interp::Guest:
             s = sampleAt(v, i);
             if (linearGuest) s += (sampleAt(v, i + 1) - s) * f;
@@ -541,7 +543,7 @@ int hdMixFrame(std::uint32_t, int, ArmCpuState* cpu)
     if (count == 0 || count > kMaxCount) return 0;
     // Replacing the mixer needs the host stream, which the activated package feature registers
     // (activation runs after hdAudioApply). Without it, only a WAV dump run may replace it.
-    if (g_mode == Mode::On && g_stream == GBA_MOD_AUDIO_STREAM_INVALID && !g_hdWav.file) return 0;
+    if (!g_coop && g_mode == Mode::On && g_stream == GBA_MOD_AUDIO_STREAM_INVALID && !g_hdWav.file) return 0;
     if (!g_rom) {
         g_rom = gbarecomp::active_bus()->rom_ptr();
         g_romSize = gbarecomp::active_bus()->rom_size();
@@ -552,6 +554,28 @@ int hdMixFrame(std::uint32_t, int, ArmCpuState* cpu)
     std::fill(g_mixR, g_mixR + count * kOversample, 0.0f);
 
     Voice voices[kVoiceCount];
+    if (g_coop) {
+        Voice before[kVoiceCount];
+        readVoices(voices);
+        std::memcpy(before, voices, sizeof(voices));
+        mixAll(voices, count);
+        for (std::uint32_t i = 0; i < kVoiceCount; ++i)
+            for (std::uint32_t o = 0; o < kVoiceSize; ++o)
+                if (voices[i].b[o] != before[i].b[o]) bus_write_u8(kVoices + i * kVoiceSize + o, voices[i].b[o]);
+        // Back to the guest's rate and s8 ring (1.0 = s8 128): HD audio averages the oversampled frames,
+        // otherwise the frame at the guest's own sample position keeps the original sound.
+        auto s8 = [](const float* mix) {
+            const float v = g_mode == Mode::Off ? mix[0] * 128.0f
+                                                : (mix[0] + mix[1] + mix[2] + mix[3]) * (128.0f / kOversample);
+            return static_cast<std::uint8_t>(static_cast<std::int8_t>(std::lround(std::clamp(v, -128.0f, 127.0f))));
+        };
+        for (std::uint32_t i = 0; i < count; ++i) {
+            bus_write_u8(outL + i, s8(g_mixL + i * kOversample));
+            bus_write_u8(outR + i, s8(g_mixR + i * kOversample));
+        }
+        returnToCaller(cpu);
+        return 1;
+    }
     if (g_mode == Mode::Verify) {
         if (g_havePrediction) compareWithGuest();
         dumpGuestOutput();
@@ -613,6 +637,22 @@ void hdAudioActivated()
 }
 
 }  // namespace
+
+void hdAudioStartCoop()
+{
+    if (g_mode == Mode::Verify) return;  // verification compares against the guest mixer
+    g_coop = true;
+    gba_mod_set_function_hook_enabled(kHookId, 1);
+    gba_mod_set_function_hook_runs_suspended(kHookId, 1);
+}
+
+void hdAudioEndCoop()
+{
+    if (!g_coop) return;
+    g_coop = false;
+    gba_mod_set_function_hook_runs_suspended(kHookId, 0);
+    gba_mod_set_function_hook_enabled(kHookId, g_mode != Mode::Off);
+}
 
 void hdAudioRegister()
 {

@@ -622,6 +622,7 @@ void pcFeaturesStartCoop()
     widescreenStartCoop();
     smoothStartCoop();
     transparencyStartCoop();
+    rotk::hdAudioStartCoop();
 }
 
 void pcFeaturesEndCoop()
@@ -630,6 +631,7 @@ void pcFeaturesEndCoop()
         gba_mod_set_function_hook_runs_suspended(id, 0);
     widescreenEndCoop();
     smoothEndCoop();
+    rotk::hdAudioEndCoop();
     pcFeaturesSelectConsole(-1);
     if (g_coopEngineLayout) {
         g_layout = g_soloLayout;

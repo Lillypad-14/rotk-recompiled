@@ -213,3 +213,38 @@ fails the same way), widescreen, smooth motion, transparency, extra sprites and 
 
 Any engine pass that orders work by a structure holding console-local objects (effects, the own
 view's sprites) can desync the same way; check for it first when a recording diverges in a fight.
+
+## Co-op frame cost (2026-10-26)
+
+Measured on the 18:47 recording, paced, dummy video and audio, i9-12900H laptop, normal launcher
+settings (widescreen, smooth motion, HD audio): mean session frame (both consoles) 7.18 ms before,
+5.46 ms after, no frame over budget either way. Unpaced profiles of the same replay found:
+
+- Pacing order. The co-op loop waited for the pace tick and then ran the frame, so each frame was
+  shown late by its own guest work (4-12 ms in fights) and the uneven cost reached the screen as
+  judder. It now runs the frame, waits, then presents, as single-player does. The session report
+  adds presents over 20 ms and the longest interval (2 of 6,499 over 20 ms on the recording).
+- The wait for VBlank. `system_waitVBlank` (0x0802A398) clears bit 0 of 0x03001F10 and polls it in
+  the loop at 0x0802A3A8 instead of halting, so each console ran guest code for the whole frame
+  (2.1 million chunk deadlines against 524 halts in 6,800 frames). In co-op the session halts a
+  console at the loop head while the flag is clear (`runtime_set_session_idle_loop`, only with
+  IME on, CPSR.I clear, an IRQ enabled and none pending), which is what a HALT there would do.
+  Single-player is unchanged.
+- The mixer. Hooks are off in co-op, so both consoles interpreted the self-modifying IWRAM mixer
+  (180 million interpreted instructions on the recording). The HD audio port now mixes for each
+  console into its own guest ring at 16,384 Hz (181 thousand interpreted instructions): averaged
+  from its oversampled render with HD audio on, the guest's own sample positions and interpolation
+  with it off. Against the guest mixer with HD audio off (`GBARECOMP_LINK_AUDIO_WAV` dumps the
+  session's mix): per-second log-band spectra correlate 0.97 (median), level within 8%, share
+  above 4 kHz 32% against 37%, and the first 4 s, before the timing differs, correlate 0.97.
+- Smaller: a fast path in `runtime_should_yield` for a local chunk's common instruction (2%), and
+  `mp2k_detect` keeps its result per ROM instead of rescanning 32 MiB for each console at session
+  start.
+
+Not changed: chunk length (4,928 cycles would save another 6%, 5.46 -> 5.11 ms, but changes the
+link timing every recording was checked on). What remains: scanline rendering for two wide
+screens (27% of samples), exception unwinding at chunk ends (15%), the per-instruction tick (8%).
+
+Checks: every recording (17:24, 17:49, 18:13, 18:47) and the 15-minute random fight hold the link
+(at most 49 frames between messages), `RotkCoopEngineCheck` passes, and the single-player
+crowd-action checkpoint keeps its image (`dba12c45...`) and interpreted count (243,591).

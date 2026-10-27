@@ -11,4 +11,10 @@ void hdAudioRegister();
 // applyPcSettings.
 void hdAudioApply();
 
+// Split-screen co-op: the port mixes for each console into its own guest ring at the game's rate (the
+// session plays the consoles' FIFOs), with the game's interpolation when HD audio is off. Neither
+// console then interprets the self-modifying mixer.
+void hdAudioStartCoop();
+void hdAudioEndCoop();
+
 }  // namespace rotk

@@ -112,18 +112,34 @@ int stableCollisionOrder(std::uint32_t, int, ArmCpuState*)
     return 0;  // the game's own pass runs on the ordered queue
 }
 
+// system_waitVBlank (0x0802A398) clears bit 0 of g_VBlankFlags, then polls it in the loop at 0x0802A3A8
+// (ldrh r1,[r2]; r0 = r3 & r1; beq) until the VBlank handler sets it, instead of halting. Each console
+// spent most of its frame there, executing the poll for the rest of the frame. In co-op the session
+// halts a console at the loop head while the flag is clear (runtime_set_session_idle_loop): it then
+// skips to its next interrupt, and the loop sees the same flag the poll would have.
+constexpr std::uint32_t kWaitVBlankLoop = 0x0802A3A8u;
+constexpr std::uint32_t kVBlankFlags = 0x03001F10u;
+
+bool waitVBlankSpins()
+{
+    return (g_cpu.cpsr & 0x20u) != 0 && g_cpu.R[2] == kVBlankFlags && g_cpu.R[3] == 1u &&
+           (bus_read_u16(kVBlankFlags) & 1u) == 0;
+}
+
 void suspendFeatureHooks()
 {
     g_saved = {gba::g_present_scanline_hook, gba::g_extra_obj_provider, gba::g_rom_read32_override, g_dma_observer};
     gba_mod_set_function_hooks_suspended(1);
     gba_mod_set_function_hook_enabled(kCollisionOrderHookId, 1);
     gba_mod_set_function_hook_runs_suspended(kCollisionOrderHookId, 1);
+    gbarecomp::runtime_set_session_idle_loop(kWaitVBlankLoop, waitVBlankSpins);
     pcFeaturesStartCoop();
 }
 
 void resumeFeatureHooks()
 {
     pcFeaturesEndCoop();
+    gbarecomp::runtime_set_session_idle_loop(0, nullptr);
     gba_mod_set_function_hook_runs_suspended(kCollisionOrderHookId, 0);
     gba_mod_set_function_hook_enabled(kCollisionOrderHookId, 0);
     gba_mod_set_function_hooks_suspended(0);
