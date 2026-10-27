@@ -181,21 +181,33 @@ extern "C" int rotkWorldTile(int bg, int hardwareX, int screenY, std::uint16_t* 
 // right margin], which equals clamping the unclamped camera to the wide view. Levels narrower than
 // the wide view are centred. Every copy the game just stored gets the clamped x: the tile builder
 // and the DMA read kTileCameras, so a stale copy there shows tiles for the unclamped camera.
+int wideCameraX(int camera)
+{
+    const int worldWidth = bus_read_u16(kWorldWidthTiles) * 8;
+    const int low = static_cast<int>(g_ws_extra_left);
+    const int high = worldWidth - 240 - static_cast<int>(g_ws_extra_right);
+    if (high < low) return (low + high) / 2;
+    return camera < low ? low : camera > high ? high : camera;
+}
+
+bool coopConsole()
+{
+    return g_state != &g_states[0];
+}
+
 int clampCameraToView(std::uint32_t, int, ArmCpuState* cpu)
 {
     if (cpu->R[14] != kCameraCommitReturn || !g_ws_active ||
         bus_read_u32(kSceneCurrentId) != kSceneGameplay)
         return 0;
     const std::uint32_t player = cpu->R[0] & 1u;
-    const int worldWidth = bus_read_u16(kWorldWidthTiles) * 8;
-    const int low = static_cast<int>(g_ws_extra_left);
-    const int high = worldWidth - 240 - static_cast<int>(g_ws_extra_right);
     const int camera = static_cast<int>(bus_read_u32(kCameraPositions + player * 8u));
-    int clamped = camera < low ? low : camera > high ? high : camera;
-    if (high < low) clamped = (low + high) / 2;
+    const int clamped = wideCameraX(camera);
     if (clamped == camera) return 0;
     const std::uint32_t value = static_cast<std::uint32_t>(clamped);
-    bus_write_u32(kCameraPositions + player * 8u, value);
+    // In co-op this is only the console's own view: game logic reads both players' g_CameraPositions,
+    // which clampCoopCameras clamps the same way on both consoles.
+    if (!coopConsole()) bus_write_u32(kCameraPositions + player * 8u, value);
     bus_write_u32(kTileCameras + player * 8u, value);
     bus_write_u32(kTileCameraCopies + player * 8u, value);
     bus_write_u16(kBg3FineScrollX, static_cast<std::uint16_t>(clamped & 7));
@@ -301,9 +313,28 @@ extern "C" int rotkHudObjX(int index, std::uint16_t attr0, std::uint16_t attr1, 
     return 1;
 }
 
+// Split-screen co-op: every console computes both players' cameras (game-clamped to the native view),
+// but the commit hook above sees only its own player's. Before the actors tick (and read the cameras
+// for visibility, spawns and AI) both players' cameras are clamped to the wide view here, the same on
+// both consoles, so the views reach the level edges without the consoles disagreeing. The clamp is
+// idempotent, and the camera update starts from the player's position each frame, not the last camera.
+void clampCoopCameras()
+{
+    if (!coopConsole() || !g_ws_active || bus_read_u32(kSceneCurrentId) != kSceneGameplay) return;
+    const std::uint32_t count = bus_read_u8(kActivePlayerCount);
+    for (std::uint32_t player = 0; player < count && player < 2u; ++player)
+        for (const std::uint32_t array : {kCameraPositions, kTileCameras, kTileCameraCopies}) {
+            const std::uint32_t address = array + player * 8u;
+            const int camera = static_cast<int>(bus_read_u32(address));
+            const int clamped = wideCameraX(camera);
+            if (clamped != camera) bus_write_u32(address, static_cast<std::uint32_t>(clamped));
+        }
+}
+
 int noteTickAllInList(std::uint32_t, int, ArmCpuState*)
 {
-    g_state->composingHud = true;
+    clampCoopCameras();
+    if (g_hudEdges) g_state->composingHud = true;
     return 0;
 }
 
@@ -457,10 +488,10 @@ void widescreenStartCoop()
         if (g_hudEdges)
             for (auto& pieces : g_states[console].hudPieces) pieces.assign(kMaxPieces, 0);
     }
-    // Both consoles track both players' cameras, and the camera hook clamps only the console's own
-    // player's. The consoles would then disagree on the cameras near level edges, and so on which
-    // actors are on screen and tick, and the link desyncs. Co-op keeps the game's own clamp.
-    for (const char* id : {kVisibilityHookId, kTickListHookId, kFxQueuesHookId})
+    // The camera hook clamps the console's own view; the tick-list hook then clamps both players'
+    // game cameras the same way on both consoles (clampCoopCameras), with or without HUD at the edges.
+    if (g_enabled) gba_mod_set_function_hook_enabled(kTickListHookId, 1);
+    for (const char* id : {kCameraHookId, kVisibilityHookId, kTickListHookId, kFxQueuesHookId})
         gba_mod_set_function_hook_runs_suspended(id, 1);
 }
 
@@ -468,6 +499,7 @@ void widescreenEndCoop()
 {
     for (const char* id : {kCameraHookId, kVisibilityHookId, kTickListHookId, kFxQueuesHookId})
         gba_mod_set_function_hook_runs_suspended(id, 0);
+    if (!g_hudEdges) gba_mod_set_function_hook_enabled(kTickListHookId, 0);
     widescreenSelectConsole(-1);
 }
 

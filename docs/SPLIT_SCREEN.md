@@ -24,13 +24,16 @@ widescreen state (`widescreenSelectConsole`, switched by the session's bind hook
 keep running while the others are suspended. HUD at the edges works on both screens when its
 option is on.
 
-Co-op keeps the game's own camera clamp. The game links two simulations of the same level, and each
-console tracks both players' cameras; widescreen's clamp only re-clamps the console's own player's
-camera, so near a level edge the consoles disagreed on the cameras, ticked different actors and
-stopped accepting each other's messages: the game reports a lost connection after 300 frames
-without one (2026-10-26, a scripted session dropped at linked frame 6,418 with widescreen alone, and
-held 12,000 frames without the clamp). At a level edge the margins in co-op show the area past the
-edge. Game logic hooks must give the same result on both consoles.
+Cameras in co-op: each console computes both players' cameras, but widescreen's commit hook sees only
+its own player's, so clamping there alone made the consoles disagree near a level edge, tick different
+actors and stop accepting each other's messages (a scripted session dropped at linked frame 6,418,
+2026-10-26). The first fix kept the game's clamp, so the margins showed the unloaded area past a level
+edge. Now the commit hook clamps only the console's own view (tile cameras and fine scroll), and on
+entry to `actor_tickAllInList`, after both cameras are updated and before the actors read them, both
+players' `g_CameraPositions` and tile cameras are clamped to the wide view the same way on both
+consoles (`clampCoopCameras`). With widescreen and HUD at the edges on, every recording and the
+15-minute fight hold the link; the trace sees the consoles' cameras differ only for single frames,
+sampled between one console's camera update and its clamp. Game logic hooks must give the same result on both consoles.
 
 Smooth motion, real transparency and the extra sprite pages also work in co-op, each with its own
 state per console (`pcFeaturesSelectConsole` in src/main.cpp). Smooth motion rarely has an
@@ -169,7 +172,6 @@ budget); local chunks on menus 3.8 ms mean on a quiet machine.
    CPU boost.
 2. The audio mixer interpreted on both consoles remains a large cost (interpreter step, state
    copies); native RAM templates for it (roadmap section 2) would help single-player too.
-3. Level-edge widescreen margins inside co-op.
 
 ## Recorded disconnect regression (2026-10-26)
 
