@@ -12,8 +12,9 @@ version for original hardware.
 2. **Import a Two Towers hero at any point.** ROTK's save screen gets "Import from The Two Towers":
    the PC port reads the Two Towers save and ROTK builds a new slot from it (hero, level, stats,
    gear, legacy skills). The Two Towers save is left untouched; importing again makes a new copy.
+   One way only: nothing goes back to Two Towers.
 3. **Skill page 3: Legacy skills**, to the right of Expanded's page 2. The hero's Two Towers
-   actives and passives, rebuilt with the Expanded skill framework. Skills learned in Two Towers
+   actives and passives ported 1:1 with the Expanded skill framework. Skills learned in Two Towers
    arrive at their level; the rest can be bought with ROTK skill points.
 4. **Optional: ROTK hero sprites in Two Towers** (a toggle), so the hero looks the same in both.
 
@@ -119,14 +120,49 @@ level-up** (the screen's "Experience"), against a per-level table at ROM 0x08050
 3. Skill order for the other heroes (one save each), then the import tables:
    Two Towers base item -> ROTK item type/base, stat -> ROTK stat, skill -> ROTK or page 3 skill.
 
-## Import mapping (draft)
+## Import (Two Towers -> ROTK, one way)
 
-- **Hero:** heroes in both games map directly; a TTT-only hero needs a rule (stand-in or stats only).
-- **Level/XP:** carried over, possibly capped for ROTK's early chapters.
-- **Skills:** TTT skills become page 3 legacy skills at their levels; anything without a legacy
-  equivalent is refunded as ROTK skill points.
-- **Gear:** converted by slot and quality to ROTK items; TTT uniques become ROTK uniques or gold.
-- **Kit:** the imported character can still pick the Vanilla or Expanded kit.
+Import only goes from Two Towers to ROTK. There is no export back.
+
+Everything carries over 1:1; nothing is converted to a ROTK equivalent.
+
+- **Hero:** ROTK's `HeroId` 0..5 are Two Towers' heroes in the same order (Frodo, Legolas,
+  Aragorn, Gandalf, Eowyn, Gimli), so the id copies directly.
+- **Level, XP, attributes, points, gems, kills:** copied. Both games use the same 50-step XP
+  table and save only the XP since the last level-up, but ROTK stores the displayed level minus
+  one, so its next level costs one table step less. The import keeps the displayed level and the
+  same share of the way to the next one (Gandalf 3, 488/1000 -> 292/600).
+- **Items: legacy items.** The Two Towers items arrive as they are, with Two Towers' own names,
+  stats and icons, read from the Two Towers ROM at runtime (the PC build holds both games).
+  ROTK never drops them; they exist only through import. Worn slots map onto ROTK's: armor,
+  necklace->jewelry, cloak, shoes->boots, helm->helmet, weapon->mainhand, second hand->offhand.
+  The backpacks are both 8 slots.
+- **Skills: legacy skills on page 3,** the hero's 11 Two Towers skills ported 1:1 (same costs,
+  scaling and level requirements). Their levels copy from the save.
+
+### Legacy item format
+
+A ROTK item is 4 bytes and all 16 item types are taken; a Two Towers item (2 prefixes, base,
+suffix) needs 29 bits. So the ROTK item is a handle:
+
+- `itemType = UNIQUE`, `baseIndex = 0xFE` (past ROTK's 53 uniques), rune `NONE`, and the
+  prefix/suffix bytes hold a 16-bit index into the legacy item pool.
+- **Legacy item pool:** a new region of the Expanded SRAM save, global rather than per slot, because
+  the ranger hollow stash is shared between characters. Each entry holds the 4 original Two
+  Towers bytes. An import appends its items; entries are never reused, so a handle stays valid
+  wherever the item goes (backpack, hollow, sold items just leave an unused entry).
+- **Legacy skill records:** a per-slot region beside skill_expansion's: hero, 11 skill levels and
+  a tag, 16 bytes per slot.
+- Both regions are reserved in the mod's `save_layout.h` (region 7 at 0x5FAC, region 8 at 0x642C).
+- **Importer:** `tools/ttt_import.py` lays a Two Towers slot over a freshly created ROTK character
+  of the same hero (the in-game import will do the same: create the hero, then apply the Two
+  Towers data), writing a new .sav. `--no-items` keeps the template's gear for builds that cannot
+  show legacy items yet; the current build would read a legacy handle as an out-of-range unique.
+- **Room:** the save has 8276 bytes free after region 6. 72 slots x 16 bytes of skill records
+  plus a 1024-entry pool (4 KB) leaves about 3 KB spare.
+- The mod hooks the item name, icon, stat and equip lookups for the handle. A legacy stat with a
+  ROTK equivalent applies as that stat. A Two Towers skill bonus (+Wisdom, +all passive skills,
+  ...) applies to the page 3 skill and does nothing until page 3 exists.
 
 ## Technical notes
 

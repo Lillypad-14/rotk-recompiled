@@ -32,8 +32,13 @@ HEADER_MAGIC = b"LORGBA03"
 
 HEROES = {0: "Frodo", 1: "Legolas", 2: "Aragorn", 3: "Gandalf", 4: "Eowyn", 5: "Gimli"}  # text 18..23
 
-# XP from each level to the next, indexed by level (ROM 0x08050348, player_awardXp 0x0800D8FC).
-XP_TO_NEXT = (100, 300, 600, 1000, 1500, 2100, 2800, 3600, 4500, 5500, 6600, 7800)
+# XP from each level to the next, indexed by the stored level (ROM 0x08050348, player_awardXp
+# 0x0800D8FC). Two Towers stores the displayed level; ROTK stores it minus one.
+XP_TO_NEXT = (100, 300, 600, 1000, 1500, 2100, 2800, 3600, 4500, 5500, 6600, 7800, 9100, 10050,
+              12000, 13600, 15300, 17100, 19000, 21000, 23100, 25300, 27600, 30000, 32500, 35100,
+              37800, 40600, 43500, 46500, 49600, 52800, 56100, 59500, 63000, 66600, 70300, 74100,
+              78000, 82000, 86100, 90300, 94600, 99000, 103500, 108100, 112800, 117600, 122500,
+              127500)  # identical to ROTK's XpThresholds
 
 # Items are 4 bytes: prefix, second prefix, base, suffix (0xFF = none; all 0xFF = empty slot).
 # Each table holds 16-byte records: u16 name text id, s16 gem value, then up to 5 (stat, s8 value)
