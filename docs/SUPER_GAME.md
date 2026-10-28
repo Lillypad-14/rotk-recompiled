@@ -192,7 +192,19 @@ suffix) needs 29 bits. So the ROTK item is a handle:
   handles. Up to 62 legacy items can be loaded in one session.
 - **Tested (PC test build, 2026-10-28):** an imported Gandalf loads with every legacy item worn or
   in the backpack, with icons, Two Towers names and stats (Shoes +1 Defense, Cape +1 Missile
-  Armor). Not yet tested: legacy items through a save, the ranger hollow, co-op.
+  Armor). The in-game import was tested end to end (preview, import, load, the saved slot's handles,
+  pool and skill record), and so were legacy passives (Gandalf with Elusion 2, Wisdom 3 and Flame
+  of Anor 1 gets corruption resist 24, Wisdom 3, revive 20). Not yet tested: the ranger hollow,
+  co-op, a mid-mission save.
+- **Legacy item icons:** legacy rows borrow the icon of their ROTK template item. The data block
+  carries Two Towers' backpack icons (a SpriteAnimation per base item at ROM 0x080519F0, each
+  icon's tiles, frame set and palette contiguous), but using them as-is drew every icon as the
+  same garbled shape, so the frame set format or the palette upload differs from ROTK's. Not
+  used yet.
+- **Legacy skills:** `legacy_skills` applies the passives as their closest ROTK stats from the
+  slot's record (single player). Some have no ROTK mechanic and use the nearest stat (Meditation,
+  Spirit of the Forge, Duck). Page 3 and active legacy skills are still to do. Their state can
+  live in the host scratch like the legacy items', so the mod RAM does not have to move first.
 - **Mod ↔ PC port channel:** `PcHostInfo` in host RAM (version 4 adds the Two Towers data, the
   legacy item tables and the scratch). The menu button's
   switch request and the import hand-off can use the same block.

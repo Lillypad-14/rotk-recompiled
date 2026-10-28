@@ -22,6 +22,8 @@ namespace rotk {
 //   0x34  the Two Towers save's 4 character slots, 0x78 bytes each, zeroed for an empty one
 //         (the .sav beside the ROM, or ROTK_PC_TWO_TOWERS_SAV), 0x38 their count
 //
+//   0x3C  a backpack icon SpriteAnimation (16 bytes) per base item, its data copied along
+//
 // Item records are Two Towers' own 16 bytes: u16 name string, s16 gem value, 5 x (u8 stat,
 // s8 value) with stat 0x40 for none. Strings are NUL-terminated font bytes.
 

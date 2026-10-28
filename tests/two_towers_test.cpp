@@ -52,6 +52,11 @@ int main(int argc, char** argv)
     expect(text(0, 21) == "Gandalf", "hero 3 name: " + text(0, 21));
     expect(text(0, 271 + 0x31) == "Wisdom", "stat 0x31: " + text(0, 271 + 0x31));
     expect(text(0, 600) == "Leaf Sword" && text(0, 5) == "(none)", "item names carried, menu text not");
+    const std::uint32_t icons = word(kAt + 0x3C);
+    const std::uint32_t staffIcon = icons + 0x24 * 16;
+    expect(icons != 0 && word(staffIcon) != 0 && word(staffIcon + 4) - word(staffIcon) < 0x4000 &&
+               word(staffIcon + 8) > word(staffIcon + 4),
+           "Short Staff's icon is in the block");
     const std::uint32_t slots = word(kAt + 0x34);
     expect(word(kAt + 0x38) == 4 && slots != 0, "4 save slots");
     if (argc > 2) {

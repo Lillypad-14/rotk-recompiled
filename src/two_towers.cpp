@@ -32,7 +32,13 @@ constexpr std::uint32_t kHuffmanRoot = 0x100;
 // Two Towers' package for each ROTK language: EN, FR, DE, IT, ES (Two Towers adds Dutch as 1).
 constexpr std::array<std::uint32_t, 5> kPackageForLanguage = {0, 2, 3, 4, 5};
 constexpr std::uint32_t kSaveSlotsField = 0x20 + 4 * kPackageForLanguage.size();
-constexpr std::uint32_t kHeaderSize = kSaveSlotsField + 8;
+constexpr std::uint32_t kIconsField = kSaveSlotsField + 8;
+constexpr std::uint32_t kHeaderSize = kIconsField + 4;
+// Backpack icons: a 16-byte SpriteAnimation per base item (tiles, frame set, palette pointers and
+// a frame duration). Each icon's data is contiguous: tiles, frame set, then a 32-byte palette.
+constexpr std::uint32_t kBaseIcons = 0x080519F0u;
+constexpr std::uint32_t kIconRecordSize = 16;
+constexpr std::uint32_t kPaletteSize = 32;
 // The Two Towers save: a 512-byte EEPROM image with each 8-byte block byte-reversed in the .sav
 // file, and four 0x78-byte character slots at blocks 4, 19, 34 and 49 that sum to 0 as halfwords.
 constexpr std::uint32_t kSaveSize = 512;
@@ -206,6 +212,22 @@ void build(const std::vector<std::uint8_t>& rom)
     const std::vector<std::uint8_t> slots = loadSaveSlots();
     putPointer(kSaveSlotsField, append(slots.data(), slots.size()));
     put32(kSaveSlotsField + 4, static_cast<std::uint32_t>(std::size(kSaveSlotBlocks)));
+
+    std::vector<std::uint8_t> records(kBaseCount * kIconRecordSize, 0);
+    const std::uint32_t icons = append(records.data(), records.size());
+    putPointer(kIconsField, icons);
+    for (std::uint32_t i = 0; i < kBaseCount; ++i) {
+        const std::uint32_t record = kBaseIcons + i * kIconRecordSize;
+        const std::uint32_t tiles = read32(rom, record), frames = read32(rom, record + 4);
+        const std::uint32_t palette = read32(rom, record + 8);
+        if (!(tiles < frames && frames < palette && palette - tiles < 0x4000)) continue;
+        const std::uint32_t data = append(rom.data() + (tiles - kRomBase), palette + kPaletteSize - tiles);
+        const std::uint32_t at = icons + i * kIconRecordSize;
+        putPointer(at, data);
+        putPointer(at + 4, data + (frames - tiles));
+        putPointer(at + 8, data + (palette - tiles));
+        put32(at + 12, read32(rom, record + 12));
+    }
 }
 
 }  // namespace
