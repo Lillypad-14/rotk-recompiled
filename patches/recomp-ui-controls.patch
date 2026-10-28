@@ -11,7 +11,7 @@ index dd5c935..011aac2 100644
          ${RUI_SRC}/consoles/genesis/genesis_binds.c # Genesis-native settings.ini key.*/pad.* bridge
          ${RUI_SRC}/consoles/gb/gb_binds.c          # Game Boy-native keybinds.ini [controls] bridge
 diff --git a/src/common/backends/imgui/launcher_imgui.cpp b/src/common/backends/imgui/launcher_imgui.cpp
-index 7adbb70..f6c7c02 100644
+index 7adbb70..cc14b19 100644
 --- a/src/common/backends/imgui/launcher_imgui.cpp
 +++ b/src/common/backends/imgui/launcher_imgui.cpp
 @@ -3218,6 +3218,13 @@ void draw_source_selectables(LauncherModel* m, int p) {
@@ -28,6 +28,28 @@ index 7adbb70..f6c7c02 100644
      if (ImGui::Selectable(ui_text("None"), m->s.player_src[p] == 0)) {
          launcher_model_set_source(m, p, 0, 0, nullptr, nullptr);
          if (psx) launcher_binds_refresh(m);
+@@ -5561,6 +5568,7 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
+     const bool cfg_psx = cfg_prof && cfg_prof->id && !strcmp(cfg_prof->id, "psx");
+     const bool cfg_snes = cfg_prof && cfg_prof->id && !strcmp(cfg_prof->id, "snes");
+     const bool cfg_n64 = cfg_prof && cfg_prof->id && !strcmp(cfg_prof->id, "n64");
++    const bool cfg_gba = cfg_prof && cfg_prof->id && !strcmp(cfg_prof->id, "gba");
+     if (cfg_psx && m->s.player_src[p] == 2 &&
+         m->s.player_gamepad_guid[p][0] && !m->player_pad_name[p][0])
+         launcher_binds_hydrate_psx_pad_names(m);
+@@ -5777,8 +5785,11 @@ void draw_controller_config_view(LauncherModel* m, const LauncherTheme& th) {
+         // noise a player is trying to just clear -- 8% and 12% are different
+         // controllers. Whole percent, because the runner consumes a raw stick
+         // radius derived from this and a fraction would not survive the trip.
+-        row_label("Deadzone", th);
+-        {
++        //
++        // GBA keeps a dead zone per controller in input.ini, set in the game's
++        // Controls menu; this per-player value would be read by nothing.
++        if (!cfg_gba) {
++            row_label("Deadzone", th);
+             int dz = m->s.deadzone[p];
+             // 0-50% is the whole useful range -- half a stick's travel is
+             // already absurd -- but a settings file carrying more than that
 diff --git a/src/common/backends/imgui/runtime_ui_imgui.cpp b/src/common/backends/imgui/runtime_ui_imgui.cpp
 index 9828773..f52bae9 100644
 --- a/src/common/backends/imgui/runtime_ui_imgui.cpp
