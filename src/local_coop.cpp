@@ -16,7 +16,7 @@
 #include "multiplayer_session.h"
 #include "runtime_arm.h"
 #include "runtime_bus_bridge.h"
-#include "player2_controls.h"
+#include "controls_menu.h"
 #include "profiler.h"
 #include "self_heal.h"
 #include "widescreen.h"
@@ -44,10 +44,38 @@ constexpr int kCancelFrames = 6;
 // Linked frames the controls hint shows, the last kHintFadeFrames fading out.
 constexpr std::uint64_t kHintFrames = 420, kHintFadeFrames = 60;
 constexpr const char* kStartingCaption = "Starting split-screen co-op...";
-constexpr const char* kHintCaption =
-    "Player 2: second controller, or WASD to move\n"
-    "J = A   K = B   Space = Start   G = Select   U / I = L / R\n"
-    "Co-op ends when player 1 is back on the main menu";
+std::string g_hintCaption;   // player 2's actual controls, built when the consoles link
+
+// Player 2's controls as they are now: their controller by name, else their keys.
+std::string controlsHint()
+{
+    namespace controls = gbarecomp::controls;
+    std::string hint;
+    const int pad = gbarecomp::player_controller(1);
+    const auto pads = gbarecomp::connected_controllers();
+    const controls::Settings settings = gbarecomp::player_controls();
+    const controls::Source source = settings.player[1].source;
+    if (pad >= 0 && pad < static_cast<int>(pads.size())) {
+        hint = "Player 2: " + pads[pad].name;
+        if (source == controls::Source::Auto) hint += ", or the keys below";
+        hint += "\n";
+    } else if (source == controls::Source::None) {
+        hint = "Player 2 has no device: choose one in Menu > Controls\n";
+    } else {
+        hint = "Player 2: keyboard\n";
+    }
+    if (source != controls::Source::None && (pad < 0 || source == controls::Source::Auto)) {
+        auto key = [&](int bit) {
+            const int code = settings.player[1].keys[bit];
+            const char* name = code > 0 ? gbarecomp::player_control_names().scancode_name(code) : nullptr;
+            return std::string(name && name[0] ? name : "-");
+        };
+        // KEYINPUT bits: A B Select Start Right Left Up Down R L.
+        hint += key(6) + " " + key(5) + " " + key(7) + " " + key(4) + " to move   " + key(0) + " = A   " + key(1) +
+                " = B   " + key(3) + " = Start   " + key(2) + " = Select   " + key(9) + " / " + key(8) + " = L / R\n";
+    }
+    return hint + "Co-op ends when player 1 is back on the main menu";
+}
 constexpr const char* kWaitSaveCaption = "Waiting for player 2 to save";
 
 struct MenuState {
@@ -299,6 +327,7 @@ bool frame(gbarecomp::LocalLinkFrame* link)
         g_linked = waitingForPartner(one) && waitingForPartner(two);
         if (g_linked) {
             g_linkedAt = link->frame;
+            g_hintCaption = controlsHint();
             std::fprintf(stderr, "[rotk] split-screen co-op: consoles linked after %llu frames\n",
                          static_cast<unsigned long long>(link->frame));
         }
@@ -306,7 +335,7 @@ bool frame(gbarecomp::LocalLinkFrame* link)
     }
     link->screens = 2;
     if (const std::uint64_t linked = link->frame - g_linkedAt; linked < kHintFrames) {
-        link->caption = kHintCaption;
+        link->caption = g_hintCaption.c_str();
         if (linked + kHintFadeFrames > kHintFrames)
             link->caption_alpha = static_cast<std::uint8_t>(255 * (kHintFrames - linked) / kHintFadeFrames);
     }
@@ -483,7 +512,7 @@ const gbarecomp::LocalLinkPlay kLocalLink{wanted, frame, finished, partnerKeepsS
 void localCoopActivated()
 {
     g_enabled = true;
-    player2ControlsApply();
+    controlsApplyOldPlayerTwo();
 }
 
 void localCoopReset()

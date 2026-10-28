@@ -1,7 +1,7 @@
 # Controls overhaul (plan)
 
 Goal: controller and keyboard mapping that needs no explanation, for one player or split-screen co-op,
-on a desk or a Steam Deck. Status (2026-10-28): phases 1 (engine) and 2 (launcher) done, 3-5 to do.
+on a desk or a Steam Deck. Status (2026-10-28): phases 1-3 (engine, launcher, in-game menu) done, 4-5 to do.
 
 Decisions:
 
@@ -130,6 +130,26 @@ Checked: both patches rebuild the working trees from the pinned revisions; a scr
 bindings through `rui_gba_pad_binds_set` and read them with `controls::load` (and back after an
 engine save); the Expanded build boots isolated. The launcher page itself has not been looked at on
 screen yet.
+
+## Phase 3 (done)
+
+- In-game menu, section Controls (`src/controls_menu.cpp`, replacing `src/player2_controls.cpp`):
+  each player's device (Auto, Keyboard, up to five connected controllers by name, None), "press to
+  choose device", Swap players, and pages Player 1/2 keyboard and controller: ten press-to-bind rows
+  in pad order, Reset, and the controller's stick dead zone. A controller page edits the player's
+  controller, or the shared fallback while they have none (it says which).
+- recomp-ui (`recomp-ui-controls.patch`): row type `RECOMP_RUNTIME_UI_BINDING`, a row that shows
+  `get_text` and runs `run_action` on accept.
+- gbarecomp (`controls.patch`): `begin_binding_capture`; the next key, button or stick/trigger
+  direction (past 75%) binds, before the menu sees it. Only the player's own controller counts.
+  Escape or 10 s cancels; the prompt stays in the status line while it waits. A used binding swaps.
+  Press to choose works the same way. A missing or returning controller shows a 4 s toast.
+- `RotkControlsCheck` (`tests/controls_test.cpp`, 46 checks): a headless window (SDL dummy video)
+  with SDL virtual controllers covers migration, Auto, the left stick, press to choose, press to
+  bind (keys and buttons, conflicts, Escape, another player's controller ignored), unplug and
+  replug, swap, the three files, and every kind of Controls menu row through the menu's hooks.
+
+Not checked on screen: the menu's look, and the launcher page (phase 5).
 
 ## Phases
 

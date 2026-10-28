@@ -28,6 +28,19 @@ index 7adbb70..f6c7c02 100644
      if (ImGui::Selectable(ui_text("None"), m->s.player_src[p] == 0)) {
          launcher_model_set_source(m, p, 0, 0, nullptr, nullptr);
          if (psx) launcher_binds_refresh(m);
+diff --git a/src/common/backends/imgui/runtime_ui_imgui.cpp b/src/common/backends/imgui/runtime_ui_imgui.cpp
+index 9828773..f52bae9 100644
+--- a/src/common/backends/imgui/runtime_ui_imgui.cpp
++++ b/src/common/backends/imgui/runtime_ui_imgui.cpp
+@@ -26,7 +26,7 @@ void value_text(RecompRuntimeUi *ui, const RecompRuntimeUiItem *item,
+         std::snprintf(out, out_size, "OPEN");
+         return;
+     }
+-    if (item->type == RECOMP_RUNTIME_UI_TEXT) {
++    if (item->type == RECOMP_RUNTIME_UI_TEXT || item->type == RECOMP_RUNTIME_UI_BINDING) {
+         char buf[128];
+         recomp_runtime_ui_current_text(ui, item, buf, sizeof(buf));
+         std::snprintf(out, out_size, "%s", buf[0] ? buf : "(not set)");
 diff --git a/src/common/launcher_binds.c b/src/common/launcher_binds.c
 index 2e2bf4b..b5865d7 100644
 --- a/src/common/launcher_binds.c
@@ -192,6 +205,30 @@ index 352a587..e75463a 100644
      INT("GamepadMap", "Deadzone", deadzone[0], 0, 100),
      INT("GamepadMap", "DeadzoneP2", deadzone[1], 0, 100),
      FIELD("Controller", "GuidP1", player_gamepad_guid[0], TEXT, 0, 0, ALWAYS),
+diff --git a/src/common/recomp_runtime_ui.c b/src/common/recomp_runtime_ui.c
+index 3d87393..6d6bbc9 100644
+--- a/src/common/recomp_runtime_ui.c
++++ b/src/common/recomp_runtime_ui.c
+@@ -304,7 +304,7 @@ void recomp_runtime_ui_adjust_current(RecompRuntimeUi *ui, int direction,
+         return;
+     }
+     if (!recomp_runtime_ui_item_enabled(ui, item)) return;
+-    if (item->type == RECOMP_RUNTIME_UI_ACTION) {
++    if (item->type == RECOMP_RUNTIME_UI_ACTION || item->type == RECOMP_RUNTIME_UI_BINDING) {
+         if (!activate || repeat || !ui->config.callbacks.run_action) return;
+         const char *prompt = owned_confirm_prompt(ui, item);
+         if (prompt && !recomp_runtime_ui_confirm(ui, item, prompt)) return;
+@@ -627,6 +627,10 @@ static void item_value(RecompRuntimeUi *ui, const RecompRuntimeUiItem *item,
+         snprintf(out, out_size, ">");
+         return;
+     }
++    if (item->type == RECOMP_RUNTIME_UI_BINDING) {
++        recomp_runtime_ui_current_text(ui, item, out, out_size);
++        return;
++    }
+     int value = 0;
+     if (!recomp_runtime_ui_current_value(ui, item, &value)) {
+         snprintf(out, out_size, "?");
 diff --git a/src/consoles/gba/gba_pad_binds.c b/src/consoles/gba/gba_pad_binds.c
 new file mode 100644
 index 0000000..e50f108
@@ -327,3 +364,29 @@ index a38dd66..b54ce16 100644
      },
      // One battery save per cartridge: the runtime presents EEPROM/flash/SRAM
      // uniformly as a single .sav next to the ROM (or game.toml [save].path).
+diff --git a/src/recomp_runtime_ui.h b/src/recomp_runtime_ui.h
+index 8148bc4..ffc99ed 100644
+--- a/src/recomp_runtime_ui.h
++++ b/src/recomp_runtime_ui.h
+@@ -23,6 +23,7 @@ extern "C" {
+ #define RECOMP_RUNTIME_UI_HAS_STATUS 1
+ #define RECOMP_RUNTIME_UI_HAS_TOAST 1
+ #define RECOMP_RUNTIME_UI_HAS_CONFIRM 1
++#define RECOMP_RUNTIME_UI_HAS_BINDING 1
+ 
+ typedef struct RecompRuntimeUi RecompRuntimeUi;
+ 
+@@ -42,6 +43,13 @@ typedef enum RecompRuntimeUiItemType {
+      * recomp_runtime_ui_wants_text_input().
+      */
+     RECOMP_RUNTIME_UI_TEXT,
++    /*
++     * A control binding: shows get_text's value (the key or button bound now)
++     * and runs run_action on accept, where the host starts listening for the
++     * next press. The host owns the capture itself, before menu navigation
++     * sees the event, and reports through the status line.
++     */
++    RECOMP_RUNTIME_UI_BINDING,
+ } RecompRuntimeUiItemType;
+ 
+ typedef enum RecompRuntimeUiInput {

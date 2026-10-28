@@ -21,11 +21,10 @@ intro logos).
    unpaced), and both are steered into Multiplayer. Meanwhile the window shows the solo console's
    last frame dimmed, captioned "Starting split-screen co-op...". The window then fades in both
    screens, with player 2's controls and how co-op ends captioned for the first 7 s.
-3. Player 1 keeps the normal controls. Player 2 uses a second controller, or WASD, J = A, K = B,
-   Space = Start, G = Select, U/I = L/R by default. Each GBA button's key and controller button for
-   player 2 can be changed in the launcher (Split-screen co-op options) or in the in-game menu's
-   "Player 2 controls" section, which saves to the same options (`src/player2_controls.cpp`,
-   `gbarecomp::set_player_two_controls`, `gba_mod_set_option_value`). The left stick always moves. The sound is console 1's with console 2's sound effects
+3. Each player plays on Auto (the keyboard and the first free controller), the keyboard, a chosen
+   controller or nothing; by default player 1 gets the first controller and player 2 the next one,
+   or WASD, J = A, K = B, Space = Start, G = Select, U/I = L/R. Devices and bindings are changed in
+   the in-game menu's Controls section or the launcher's Controller page ([CONTROLS.md](CONTROLS.md)). The left stick always moves. The sound is console 1's with console 2's sound effects
    mixed in: console 2 boots with the game's own music option off (cleared in its save image,
    checksum kept valid), so the music is not doubled. Player 2's save keeps that option off.
 4. When console 1 is back on the main menu, the session ends: the solo console takes console 1's

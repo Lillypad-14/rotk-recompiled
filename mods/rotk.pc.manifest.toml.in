@@ -354,7 +354,7 @@ value = "copy"
 label = "A copy of yours each session"
 
 # Player 2's old controls, replaced by the Controls page (keybinds.ini, input.ini). Kept so
-# gbarecomp::set_player_two_controls can migrate them once; the lists match src/player2_controls.cpp.
+# src/controls_menu.cpp can hand them to gbarecomp::set_player_two_controls, which migrates them once.
 [[option]]
 feature = "local-coop"
 id = "p2-key-a"

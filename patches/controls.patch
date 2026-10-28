@@ -23,7 +23,7 @@ index b8e19bd..e69408d 100644
  add_gbarecomp_runtime_stack_test(touch_input_tests tests/touch_input/test_main.cpp)
  add_gbarecomp_runtime_stack_test(multiplayer_session_tests tests/link/session_test.cpp)
 diff --git a/src/runtime/host_window.cpp b/src/runtime/host_window.cpp
-index cf48963..6d35d52 100644
+index cf48963..688486d 100644
 --- a/src/runtime/host_window.cpp
 +++ b/src/runtime/host_window.cpp
 @@ -19,6 +19,7 @@
@@ -34,7 +34,7 @@ index cf48963..6d35d52 100644
  #include "presentation_layout.h"
  #include "touch_input.h"
  #include "../gba/mod_audio.h"
-@@ -454,10 +455,18 @@ struct Backend {
+@@ -454,10 +455,27 @@ struct Backend {
      bool linear_filter = false;
      bool sharp_filter = false;
  
@@ -47,6 +47,15 @@ index cf48963..6d35d52 100644
 +    controls::Assignment assigned;
 +    std::string controls_dir;           // set once load_input_config read the files
 +    int claim_player = -1;              // the next key or button press picks this player's device
++    struct Capture {                    // press to bind: the next press becomes this button's
++        int player = -1;
++        int button = -1;                // KEYINPUT bit
++        bool pad = false;               // a controller button (else a key)
++        Uint32 until = 0;               // gives up then, so a controller-only player is never stuck
++    } capture;
++    std::string controls_prompt;        // shown again while a capture or claim waits (status fades)
++    Uint32 controls_prompt_at = 0;
++    Uint32 controls_toast_until = 0;    // our device toast, cleared then (toasts have no clock)
 +    std::vector<std::pair<int, bool>> device_notices;  // player, controller found (true) or lost
 +
      // ---- rebindable input (see HostWindow::load_input_config) --------------
@@ -56,7 +65,7 @@ index cf48963..6d35d52 100644
      HotkeyBind   hotkeys[HK_COUNT];     // [KeyMap] bindings
      SDL_Scancode assist_key[2] = {
          SDL_SCANCODE_1, SDL_SCANCODE_2
-@@ -541,51 +550,120 @@ bool ensure_sharp_texture(Backend* b, int factor) {
+@@ -541,53 +559,133 @@ bool ensure_sharp_texture(Backend* b, int factor) {
      return true;
  }
  
@@ -108,8 +117,19 @@ index cf48963..6d35d52 100644
 +    const controls::Assignment before = b->assigned;
 +    b->assigned = controls::assign(b->controls, info);
 +    for (int p = 0; p < 2; ++p) {
-+        if (before.waiting[p] != b->assigned.waiting[p])
-+            b->device_notices.emplace_back(p, !b->assigned.waiting[p]);
++        if (before.waiting[p] == b->assigned.waiting[p]) continue;
++        b->device_notices.emplace_back(p, !b->assigned.waiting[p]);
++#if defined(GBARECOMP_RUNTIME_UI)
++        if (b->runtime_ui) {
++            char title[64];
++            std::snprintf(title, sizeof(title), b->assigned.waiting[p]
++                              ? "Player %d's controller is missing" : "Player %d's controller is back", p + 1);
++            recomp_runtime_ui_set_toast(b->runtime_ui, title, b->assigned.waiting[p]
++                                            ? "Using the keyboard until it is connected again."
++                                            : "");
++            b->controls_toast_until = SDL_GetTicks() + 4000;
++        }
++#endif
 +    }
 +    const int first = b->assigned.pad[0];
 +    set_player_one_controller(b, first >= 0 ? b->pads[first] : nullptr);
@@ -166,9 +186,9 @@ index cf48963..6d35d52 100644
 +        b->pads.erase(b->pads.begin() + static_cast<std::ptrdiff_t>(i));
 +        b->pad_guids.erase(b->pad_guids.begin() + static_cast<std::ptrdiff_t>(i));
 +        return;
-+    }
-+}
-+
+     }
+ }
+ 
 +void close_all_game_controllers(Backend* b) {
 +    if (!b) return;
 +    set_player_one_controller(b, nullptr);
@@ -202,12 +222,14 @@ index cf48963..6d35d52 100644
 +        for (int i = 0; i < SDL_CONTROLLER_AXIS_MAX && i < controls::kPadAxes; ++i)
 +            state.axis[i] = SDL_GameControllerGetAxis(pad, static_cast<SDL_GameControllerAxis>(i));
 +        held |= controls::pad_buttons(controls::profile_for(b->controls, b->pad_guids[index]), state);
-     }
++    }
 +    return held;
- }
- 
++}
++
  void open_device_gyro(Backend* b) {
-@@ -1142,33 +1220,6 @@ void save_touch_config(const Backend* b) {
+     if (!b || b->device_gyro) return;
+ #if SDL_VERSION_ATLEAST(2, 0, 9)
+@@ -1142,33 +1240,6 @@ void save_touch_config(const Backend* b) {
      }
  }
  
@@ -241,7 +263,7 @@ index cf48963..6d35d52 100644
  // config.ini [KeyMap] key names, in HostHotkey order, with the same defaults
  // recomp-ui's hotkey panel displays for the GBA catalog.
  const char* const kHotkeyNames[HK_COUNT] = {
-@@ -1620,6 +1671,77 @@ bool runtime_ui_event(RecompRuntimeUi* ui, const SDL_Event& e) {
+@@ -1620,6 +1691,192 @@ bool runtime_ui_event(RecompRuntimeUi* ui, const SDL_Event& e) {
  }
  #endif
  
@@ -295,6 +317,121 @@ index cf48963..6d35d52 100644
 +    save_player_controls(b);
 +}
 +
++void set_controls_status(Backend* b, const char* text) {
++#if defined(GBARECOMP_RUNTIME_UI)
++    if (b->runtime_ui) recomp_runtime_ui_set_status(b->runtime_ui, text);
++#else
++    (void)b; (void)text;
++#endif
++}
++
++// The waiting prompt, kept on screen until the press arrives.
++void set_controls_prompt(Backend* b, const char* text) {
++    b->controls_prompt = text ? text : "";
++    b->controls_prompt_at = SDL_GetTicks();
++    set_controls_status(b, text);
++}
++
++void finish_capture(Backend* b, const char* status) {
++    b->capture = Backend::Capture{};
++    b->controls_prompt.clear();
++    set_controls_status(b, status);
++}
++
++// Per pump: keep the prompt up, give up a stale capture, end our toast.
++void tick_controls(Backend* b) {
++    const Uint32 now = SDL_GetTicks();
++    if (b->capture.player >= 0 && SDL_TICKS_PASSED(now, b->capture.until))
++        finish_capture(b, "Cancelled");
++    if (!b->controls_prompt.empty() && (b->capture.player >= 0 || b->claim_player >= 0) &&
++        SDL_TICKS_PASSED(now, b->controls_prompt_at + 2500))
++        set_controls_prompt(b, b->controls_prompt.c_str());
++#if defined(GBARECOMP_RUNTIME_UI)
++    if (b->controls_toast_until && SDL_TICKS_PASSED(now, b->controls_toast_until)) {
++        b->controls_toast_until = 0;
++        if (b->runtime_ui) recomp_runtime_ui_set_toast(b->runtime_ui, nullptr, nullptr);
++    }
++#endif
++}
++
++// Press to bind and press to assign take the next key or controller press
++// before the menu or the game sees it. Returns true when the event was used.
++bool capture_event(Backend* b, const SDL_Event& e) {
++    const bool key = e.type == SDL_KEYDOWN && !e.key.repeat;
++    const bool escape = key && e.key.keysym.scancode == SDL_SCANCODE_ESCAPE;
++    if (b->claim_player >= 0) {
++        const int player = b->claim_player;
++        char text[96];
++        if (escape) {
++            b->claim_player = -1;
++            finish_capture(b, "Cancelled");
++            return true;
++        }
++        if (key) {
++            controls::claim_keyboard(b->controls, player);
++            std::snprintf(text, sizeof(text), "Player %d plays on the keyboard", player + 1);
++        } else if (e.type == SDL_CONTROLLERBUTTONDOWN) {
++            std::size_t i = 0;
++            while (i < b->pads.size() && controller_instance(b->pads[i]) != e.cbutton.which) ++i;
++            if (i == b->pads.size()) return true;
++            controls::claim_pad(b->controls, player, b->pad_guids[i]);
++            const char* name = SDL_GameControllerName(b->pads[i]);
++            std::snprintf(text, sizeof(text), "Player %d plays on %s", player + 1, name ? name : "this controller");
++        } else {
++            return false;
++        }
++        b->claim_player = -1;
++        b->controls.version = std::max(b->controls.version, 2);
++        save_player_controls(b);
++        finish_capture(b, text);
++        return true;
++    }
++    if (b->capture.player < 0) return false;
++    const int player = b->capture.player;
++    const int button = b->capture.button;
++    char text[96];
++    if (escape) {
++        finish_capture(b, "Cancelled");
++        return true;
++    }
++    int swapped = -1;
++    if (!b->capture.pad) {
++        if (!key) return e.type == SDL_CONTROLLERBUTTONDOWN;
++        swapped = controls::set_key(b->controls.player[player], button, e.key.keysym.scancode);
++        std::snprintf(text, sizeof(text), "Player %d %s = %s", player + 1, controls::kButtonLabels[button],
++                      SDL_GetScancodeName(e.key.keysym.scancode));
++    } else {
++        const SDL_JoystickID from = e.type == SDL_CONTROLLERBUTTONDOWN ? e.cbutton.which
++                                  : e.type == SDL_CONTROLLERAXISMOTION ? e.caxis.which : -1;
++        if (from < 0) return key;
++        // Only the player's own controller, or any one while they have none.
++        const int mine = b->assigned.pad[player];
++        std::size_t i = 0;
++        while (i < b->pads.size() && controller_instance(b->pads[i]) != from) ++i;
++        if (i == b->pads.size() || (mine >= 0 && static_cast<int>(i) != mine)) return true;
++        controls::PadBind bind;
++        if (e.type == SDL_CONTROLLERBUTTONDOWN) {
++            bind = {controls::PadBind::Button, e.cbutton.button};
++        } else {
++            if (e.caxis.value > -24000 && e.caxis.value < 24000) return true;
++            bind = {e.caxis.value < 0 ? controls::PadBind::AxisNegative : controls::PadBind::AxisPositive,
++                    e.caxis.axis};
++        }
++        // Their controller's layout, or the shared fallback the menu shows while they have none.
++        swapped = controls::set_pad_bind(b->controls, mine >= 0 ? b->pad_guids[i] : std::string(), button, bind);
++        std::snprintf(text, sizeof(text), "Player %d %s = %s", player + 1, controls::kButtonLabels[button],
++                      controls::bind_name(bind, sdl_control_names()).c_str());
++    }
++    if (swapped >= 0) {
++        const std::size_t used = std::strlen(text);
++        std::snprintf(text + used, sizeof(text) - used, " (swapped with %s)", controls::kButtonLabels[swapped]);
++    }
++    b->controls.version = std::max(b->controls.version, 2);
++    save_player_controls(b);
++    finish_capture(b, text);
++    return true;
++}
++
 +void load_player_controls(Backend* b, const char* dir) {
 +    b->controls = controls::load(dir, sdl_control_names());
 +    b->controls_dir = dir;
@@ -319,7 +456,7 @@ index cf48963..6d35d52 100644
  }  // namespace
  
  HostWindow::HostWindow() = default;
-@@ -1711,7 +1833,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
+@@ -1711,7 +1968,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
      // are ever delivered, so a backgrounded-then-killed app lost progress.
      SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "0");
  #endif
@@ -328,7 +465,7 @@ index cf48963..6d35d52 100644
      for (int h = 0; h < HK_COUNT; ++h)
          b->hotkeys[h] = parse_hotkey(kHotkeyDefaults[h]);
      // Linear vs nearest scaling is a texture-creation-time hint.
-@@ -1882,7 +2004,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
+@@ -1882,7 +2139,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
      }
  #endif
  
@@ -337,7 +474,7 @@ index cf48963..6d35d52 100644
      open_device_gyro(b);
  
      // Open the audio device at 65536 Hz mono 16-bit signed. The
-@@ -1964,6 +2086,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
+@@ -1964,6 +2221,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
      impl_ = b;
      open_ = true;
      g_haptic_window = this;
@@ -345,7 +482,7 @@ index cf48963..6d35d52 100644
      return true;
  }
  
-@@ -2288,10 +2411,11 @@ void HostWindow::close() {
+@@ -2288,10 +2546,11 @@ void HostWindow::close() {
      if (b->audio_rate_stream) SDL_FreeAudioStream(b->audio_rate_stream);
      if (b->bridge_ready) rab_free(&b->bridge);
      if (b->audio_mtx) SDL_DestroyMutex(b->audio_mtx);
@@ -358,7 +495,7 @@ index cf48963..6d35d52 100644
  #if defined(GBARECOMP_RUNTIME_UI)
      runtime_imgui_shutdown(b);
  #endif
-@@ -2584,16 +2708,9 @@ void HostWindow::load_input_config(const char* dir,
+@@ -2584,16 +2843,9 @@ void HostWindow::load_input_config(const char* dir,
          fast_forward_multiplier_default, 2, 10);
      const std::string base = std::string(dir) + "/";
  
@@ -378,7 +515,7 @@ index cf48963..6d35d52 100644
  
      // config.ini [KeyMap] (keycode names with Ctrl+/Alt+/Shift+ prefixes).
      ini_scan_section((base + "config.ini").c_str(), "KeyMap",
-@@ -2677,66 +2794,87 @@ void HostWindow::fit_window_to_surface() {
+@@ -2677,66 +2929,112 @@ void HostWindow::fit_window_to_surface() {
      SDL_SetWindowPosition(b->window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
  }
  
@@ -455,7 +592,32 @@ index cf48963..6d35d52 100644
 +}
 +
 +void begin_device_claim(int player) {
-+    if (g_controls_backend) g_controls_backend->claim_player = player >= 0 && player < 2 ? player : -1;
++    Backend* b = g_controls_backend;
++    if (!b) return;
++    b->capture = Backend::Capture{};
++    b->claim_player = player >= 0 && player < 2 ? player : -1;
++    if (b->claim_player < 0) return;
++    char text[96];
++    std::snprintf(text, sizeof(text), "Player %d: press any key or controller button (Esc cancels)", player + 1);
++    set_controls_prompt(b, text);
++}
++
++void begin_binding_capture(int player, int button, bool controller) {
++    Backend* b = g_controls_backend;
++    if (!b || player < 0 || player > 1 || button < 0 || button >= controls::kButtons) return;
++    b->claim_player = -1;
++    b->capture.player = player;
++    b->capture.button = button;
++    b->capture.pad = controller;
++    b->capture.until = SDL_GetTicks() + 10000;
++    char text[96];
++    std::snprintf(text, sizeof(text), "Player %d %s: press a %s (Esc or 10 s cancels)", player + 1,
++                  controls::kButtonLabels[button], controller ? "controller button" : "key");
++    set_controls_prompt(b, text);
++}
++
++bool binding_capture_active() {
++    return g_controls_backend && (g_controls_backend->capture.player >= 0 || g_controls_backend->claim_player >= 0);
 +}
 +
 +int device_claim_player() { return g_controls_backend ? g_controls_backend->claim_player : -1; }
@@ -514,7 +676,20 @@ index cf48963..6d35d52 100644
  }
  
  void HostWindow::adjust_scale(int delta) {
-@@ -3070,13 +3208,25 @@ HostWindow::Events HostWindow::pump() {
+@@ -3024,7 +3322,12 @@ HostWindow::Events HostWindow::pump() {
+     auto* b = static_cast<Backend*>(impl_);
+ 
+     SDL_Event e;
++    tick_controls(b);
+     while (SDL_PollEvent(&e)) {
++        // Device changes first: a capture must not hide a controller plugged in meanwhile.
++        if (e.type != SDL_CONTROLLERDEVICEADDED && e.type != SDL_CONTROLLERDEVICEREMOVED &&
++            e.type != SDL_QUIT && capture_event(b, e))
++            continue;
+ #if defined(GBARECOMP_RUNTIME_UI)
+         const bool finger_event =
+             e.type == SDL_FINGERDOWN || e.type == SDL_FINGERMOTION ||
+@@ -3070,13 +3373,11 @@ HostWindow::Events HostWindow::pump() {
              ev.terminating = true;
              ev.quit = true;
          } else if (e.type == SDL_CONTROLLERDEVICEADDED) {
@@ -525,27 +700,14 @@ index cf48963..6d35d52 100644
 -                e.cdevice.which == b->controller_id) {
 -                close_game_controller(b);
 -                open_first_game_controller(b);
+-            }
 +            close_game_controller(b, e.cdevice.which);
 +            reassign_controllers(b);
-+        } else if (b->claim_player >= 0 && e.type == SDL_CONTROLLERBUTTONDOWN) {
-+            // Press to assign: this controller becomes the claiming player's.
-+            for (std::size_t i = 0; i < b->pads.size(); ++i) {
-+                if (controller_instance(b->pads[i]) != e.cbutton.which) continue;
-+                controls::claim_pad(b->controls, b->claim_player, b->pad_guids[i]);
-+                b->claim_player = -1;
-+                save_player_controls(b);
-+                break;
-             }
-+        } else if (b->claim_player >= 0 && e.type == SDL_KEYDOWN && !e.key.repeat) {
-+            // A key claims the keyboard; Escape cancels.
-+            const bool cancel = e.key.keysym.scancode == SDL_SCANCODE_ESCAPE;
-+            if (!cancel) controls::claim_keyboard(b->controls, b->claim_player);
-+            b->claim_player = -1;
-+            if (!cancel) save_player_controls(b);
++
          } else if (e.type == SDL_WINDOWEVENT &&
                     e.window.event == SDL_WINDOWEVENT_CLOSE) {
              ev.quit = true;
-@@ -3257,40 +3407,10 @@ HostWindow::Events HostWindow::pump() {
+@@ -3257,40 +3558,10 @@ HostWindow::Events HostWindow::pump() {
  #endif
      }
  
@@ -589,7 +751,7 @@ index cf48963..6d35d52 100644
      if (b->touch_controls) {
          const uint16_t touch_buttons = active_touch_buttons(b);
          keys &= static_cast<uint16_t>(~touch_buttons);
-@@ -3411,6 +3531,22 @@ bool HostWindow::set_surface_size(int /*base_w*/, int /*base_h*/) {
+@@ -3411,6 +3682,24 @@ bool HostWindow::set_surface_size(int /*base_w*/, int /*base_h*/) {
  void HostWindow::fit_window_to_surface() {}
  std::uint16_t HostWindow::player_two_buttons() { return 0; }
  void set_player_two_controls(const char* const*, const char* const*) {}
@@ -607,6 +769,8 @@ index cf48963..6d35d52 100644
 +int player_controller(int) { return -1; }
 +bool player_waiting_for_controller(int) { return false; }
 +void begin_device_claim(int) {}
++void begin_binding_capture(int, int, bool) {}
++bool binding_capture_active() { return false; }
 +int device_claim_player() { return -1; }
 +bool take_device_notice(int*, bool*) { return false; }
  void HostWindow::rumble(int, std::uint16_t, std::uint16_t, std::uint32_t) {}
@@ -1189,7 +1353,7 @@ index 0000000..94fcbae
 +
 +}  // namespace gbarecomp::controls
 diff --git a/src/runtime/runtime.h b/src/runtime/runtime.h
-index 93a42ae..fde1d38 100644
+index 93a42ae..73ad6af 100644
 --- a/src/runtime/runtime.h
 +++ b/src/runtime/runtime.h
 @@ -10,6 +10,10 @@
@@ -1203,7 +1367,7 @@ index 93a42ae..fde1d38 100644
  
  namespace gba { class GbaBus; }
  
-@@ -415,6 +419,31 @@ void runtime_rumble(int player, std::uint16_t low, std::uint16_t high, std::uint
+@@ -415,6 +419,39 @@ void runtime_rumble(int player, std::uint16_t low, std::uint16_t high, std::uint
  // Start Right Left Up Down R L): SDL key names (SDL_GetScancodeFromName) and SDL game controller
  // button names (SDL_GameControllerGetButtonFromString). A null array or entry, or an unknown name,
  // keeps that control. The left stick always moves too.
@@ -1230,6 +1394,14 @@ index 93a42ae..fde1d38 100644
 +// device (Escape cancels). -1 cancels.
 +void begin_device_claim(int player);
 +int device_claim_player();
++// Press to bind: the next key (or, with `controller`, a button or stick/trigger
++// direction on the player's controller) becomes `button` (KEYINPUT bit) for
++// `player`. A player without a controller of their own edits the shared
++// input.ini [mapping] fallback, from any controller. A binding the button already
++// had elsewhere is swapped. Escape or 10 seconds cancels; the menu's status
++// line says what happened.
++void begin_binding_capture(int player, int button, bool controller);
++bool binding_capture_active();
 +// One device change per call: `player`'s controller came back (connected) or
 +// went missing.
 +bool take_device_notice(int* player, bool* connected);

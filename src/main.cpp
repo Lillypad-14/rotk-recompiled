@@ -20,7 +20,7 @@
 #include "legacy_item_tables.h"
 #include "two_towers.h"
 #include "minimap.h"
-#include "player2_controls.h"
+#include "controls_menu.h"
 #include "rumble.h"
 #include "local_coop.h"
 #include "smooth_motion.h"
@@ -742,7 +742,7 @@ int main(int argc, char** argv)
     rotk::widescreenRegister(options);
     rotk::hdIconsRegister(options);
     rotk::bugReportRegister(options);
-    rotk::player2ControlsRegister(options);
+    rotk::controlsMenuRegister(options);
     rotk::expandedEditionRegister(options);
     rotk::combatInfoRegister();
     rotk::rumbleRegister();

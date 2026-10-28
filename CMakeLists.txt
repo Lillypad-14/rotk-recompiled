@@ -53,7 +53,7 @@ target_link_gbarecomp_runtime_stack(RotkCart)
 
 add_executable(${ROTK_EXECUTABLE} src/main.cpp src/widescreen.cpp src/hd_audio.cpp src/hd_icons.cpp src/local_coop.cpp
     src/smooth_motion.cpp src/transparency.cpp src/combat_info.cpp src/duel_hud.cpp src/rumble.cpp src/color_vision.cpp src/bug_report.cpp
-    src/sample_packs.cpp src/minimap.cpp src/profiler.cpp src/player2_controls.cpp src/bps_patch.cpp
+    src/sample_packs.cpp src/minimap.cpp src/profiler.cpp src/controls_menu.cpp src/bps_patch.cpp
     src/expanded_edition.cpp src/two_towers.cpp src/legacy_item_tables.cpp $<TARGET_OBJECTS:RotkCart>)
 target_include_directories(${ROTK_EXECUTABLE} PRIVATE ${ROTK_HOST_INCLUDES})
 # Release downloads: a Windows GUI program, so no console window opens beside the game. Off for
@@ -139,6 +139,16 @@ target_sources(RotkHostRamCheck PRIVATE $<TARGET_OBJECTS:RotkCart>)
 target_include_directories(RotkHostRamCheck PRIVATE ${ROTK_HOST_INCLUDES})
 target_link_gbarecomp_runtime_stack(RotkHostRamCheck)
 gbarecomp_target_link_host_stack(RotkHostRamCheck PRIVATE)
+
+# Both players' devices and bindings on a headless window with virtual controllers.
+add_executable(RotkControlsCheck EXCLUDE_FROM_ALL tests/controls_test.cpp src/controls_menu.cpp)
+target_sources(RotkControlsCheck PRIVATE $<TARGET_OBJECTS:RotkCart>)
+target_include_directories(RotkControlsCheck PRIVATE src ${ROTK_HOST_INCLUDES})
+target_link_gbarecomp_runtime_stack(RotkControlsCheck)
+gbarecomp_target_link_host_stack(RotkControlsCheck PRIVATE)
+if(ROTK_LAUNCHER)
+    target_link_libraries(RotkControlsCheck PRIVATE RotkLauncher)
+endif()
 
 add_executable(RotkAudioRateCheck EXCLUDE_FROM_ALL tests/audio_rate_test.cpp)
 target_include_directories(RotkAudioRateCheck PRIVATE "${SDL2_INCLUDE_DIR}")
@@ -226,7 +236,7 @@ endforeach()
 
 add_executable(RotkCoopEngineCheck EXCLUDE_FROM_ALL tests/coop_engine_test.cpp src/widescreen.cpp
     src/hd_audio.cpp src/sample_packs.cpp src/hd_icons.cpp src/local_coop.cpp src/smooth_motion.cpp src/transparency.cpp
-    src/profiler.cpp src/player2_controls.cpp
+    src/profiler.cpp src/controls_menu.cpp
     $<TARGET_OBJECTS:RotkCart>)
 foreach(property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS LINK_LIBRARIES LINK_OPTIONS)
     get_target_property(value ${ROTK_EXECUTABLE} ${property})
