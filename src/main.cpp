@@ -11,7 +11,14 @@
 #include "gba_memory.h"
 #include "gba_ppu.h"
 #include "hd_audio.h"
+#include "bug_report.h"
+#include "color_vision.h"
+#include "combat_info.h"
+#include "expanded_edition.h"
 #include "hd_icons.h"
+#include "minimap.h"
+#include "player2_controls.h"
+#include "rumble.h"
 #include "local_coop.h"
 #include "smooth_motion.h"
 #include "transparency.h"
@@ -652,6 +659,20 @@ void pcFeaturesSelectConsole(int console)
 
 }  // namespace rotk
 
+// Each shown frame, for the host-drawn and host-read features.
+void presentDecorate(const gbarecomp::PresentFrame* frame)
+{
+    rotk::combatInfoDecorate(frame);
+    rotk::minimapDecorate(frame);
+    rotk::colorVisionDecorate(frame);
+    rotk::rumbleObserve(frame);
+}
+
+bool presentDecorateActive()
+{
+    return rotk::combatInfoActive() || rotk::minimapActive() || rotk::colorVisionActive() || rotk::rumbleActive();
+}
+
 int main(int argc, char** argv)
 {
     gba_mod_register_function_entry_plugin(kHeapHookId, kMemoryAddHeap, 1, pcHeapInit);
@@ -675,12 +696,26 @@ int main(int argc, char** argv)
     options.builtin_rom_sha1 = ROTK_ROM_SHA1;
     options.builtin_rom_crc32 = ROTK_ROM_CRC32;
     options.mod_game_id = ROTK_MOD_GAME_ID;
+    // Save states, fast-forward and rewind (Assist Tools in the in-game menu). A state is about 1 MB with
+    // the PC's game memory, so 20 s of rewind at four points a second keeps about 80 MB.
+    options.expose_assist_tools = true;
+    options.rewind_history_seconds = 20;
     rotk::widescreenRegister(options);
     rotk::hdIconsRegister(options);
+    rotk::bugReportRegister(options);
+    rotk::player2ControlsRegister(options);
+    rotk::expandedEditionRegister(options);
+    rotk::combatInfoRegister();
+    rotk::rumbleRegister();
+    rotk::colorVisionRegister();
+    rotk::minimapRegister();
+    options.present_decorate = presentDecorate;
+    options.present_decorate_active = presentDecorateActive;
     rotk::localCoopRegister(options);
 #if defined(ROTK_LAUNCHER)
     std::vector<std::string> args(argv, argv + argc);
     if (rotk_launcher_preboot(args, options)) return 0;  // the player quit the launcher
+    if (const int code = rotk::expandedEditionDispatch(args); code >= 0) return code;
     std::vector<char*> launchArgs;
     for (std::string& arg : args) launchArgs.push_back(arg.data());
     return gbarecomp::run_game(static_cast<int>(launchArgs.size()), launchArgs.data(), options);

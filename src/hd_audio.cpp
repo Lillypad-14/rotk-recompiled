@@ -1,5 +1,6 @@
 #include "hd_audio.h"
 #include "audio_envelope.h"
+#include "sample_packs.h"
 
 #include <algorithm>
 #include <cmath>
@@ -196,6 +197,30 @@ float sampleAt(const Voice& v, std::int64_t a)
     return static_cast<float>(readByte(static_cast<std::uint32_t>(a))) - 128.0f;
 }
 
+SampleSpan spanOf(const Voice& v)
+{
+    return {v.u32(kStart), v.u32(kEnd), v.u8(kLoopMode), v.u32(kLoopLen)};
+}
+
+// A sample pack's replacement at fractional position `a` (an address in the ROM sample), folded into
+// the loop like sampleAt, and linearly interpolated between the replacement's frames.
+float replacementAt(const Voice& v, const SampleReplacement& r, double a)
+{
+    const double start = v.u32(kStart), end = v.u32(kEnd);
+    const double loopLen = v.u32(kLoopLen), loopStart = v.u32(kLoopStart);
+    if (a >= end) {
+        if (v.u8(kLoopMode) == 0 || loopLen <= 0) return 0.0f;
+        if (v.u8(kLoopMode) == 2) a = end - 1 - (a - end);
+        else a = end - loopLen + std::fmod(a - end, loopLen);
+    }
+    if (v.u8(kLoopMode) == 2 && a < loopStart && v.s32(kStep) < 0) a = loopStart + (loopStart - a);
+    const double position = std::clamp((a - start) * r.ratio, 0.0, static_cast<double>(r.frames.size() - 1));
+    const std::size_t i = static_cast<std::size_t>(position);
+    const float f = static_cast<float>(position - static_cast<double>(i));
+    const float s0 = r.frames[i], s1 = i + 1 < r.frames.size() ? r.frames[i + 1] : s0;
+    return s0 + (s1 - s0) * f;
+}
+
 void voiceGains(const Voice& v, float& gl, float& gr)
 {
     constexpr float kScale = 1.0f / (128.0f * 128.0f);  // (sample - 128) * vol / 128, in s8 units
@@ -234,6 +259,8 @@ void renderSpan(const Voice& v, std::uint32_t off, std::uint32_t n)
     const double step = v.s32(kStep) / 65536.0;
     const bool linearGuest = v.u8(kInterp) != 0;
     const Interp interp = g_mode == Mode::Off ? Interp::Guest : g_interp;
+    samplePackNote(spanOf(v), readByte);
+    const SampleReplacement* replacement = interp == Interp::Guest ? nullptr : samplePackFind(spanOf(v));
     for (std::uint32_t k = k0; k < k1; ++k) {
         const double t = static_cast<double>(k - k0) / kOversample;
         const double pos = frac + t * step;
@@ -241,6 +268,12 @@ void renderSpan(const Voice& v, std::uint32_t off, std::uint32_t n)
         const std::int64_t i = base + static_cast<std::int64_t>(whole);
         const float f = static_cast<float>(pos - whole);
         float s;
+        if (replacement) {
+            s = replacementAt(v, *replacement, static_cast<double>(base) + pos);
+            g_mixL[k] += s * gl;
+            g_mixR[k] += s * gr;
+            continue;
+        }
         switch (interp) {
         case Interp::Guest:
             s = sampleAt(v, i);
@@ -677,6 +710,12 @@ void hdAudioApply()
         if (const char* path = std::getenv("ROTK_PC_HD_AUDIO_GUEST_WAV"))
             if (g_mode == Mode::Verify && !g_guestWav.file) g_guestWav.open(path, kGuestRate);
     }
+    // Sample packs replace instruments while HD audio smooths samples (not with "Original").
+    const char* packs = gba_mod_option_value(kPackageId, "hd-audio", "sample-packs");
+    if (g_mode != Mode::Off && (!packs || std::string(packs) != "false") && !std::getenv("ROTK_PC_NO_SAMPLE_PACKS"))
+        samplePacksLoad();
+    else
+        samplePacksClear();
     g_havePrediction = false;
     g_ringRead = g_ringFill = 0;
     g_ringPrimed = false;

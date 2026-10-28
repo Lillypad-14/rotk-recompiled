@@ -109,6 +109,24 @@ The recomp used to play mono end to end. Now the desktop device opens in stereo 
 - tools/lab.py now treats the patches as a stack (top applied = all applied), since this patch edits
   lines the desktop-audio-rate patch touched.
 
+## Sample packs (src/sample_packs.cpp)
+
+HD audio option "Instrument sample packs" (on): each folder in
+`mods/packages/rotk.pc/<version>/samples/<pack>/` with a `manifest.txt` replaces ROM instrument samples.
+A manifest line is `<start address hex> <length in bytes> <file.wav>`: the WAV (mono or stereo, 8 or
+16-bit PCM or 32-bit float) stands for the whole sample at any number of frames per original byte,
+and the original's loop scales with it. The mixer reads the replacement at the voice's exact position
+(`replacementAt` in src/hd_audio.cpp), so pitch, timing and loops stay the game's. Packs are not used
+with "Original" smoothing. No packs ship yet.
+
+Making one: `ROTK_PC_SAMPLE_DUMP=<folder>` writes every sample the mixer plays as `<start>.wav` (8-bit,
+nominal 16,384 Hz) and appends its manifest line, with its loop, to `samples.txt`. Enhance the WAVs
+(any length), copy `samples.txt` to `manifest.txt` and put the folder under `samples/`.
+
+Check (2026-10-27): the title music's 8 samples, dumped and upsampled 4x (cubic) as a pack, mix
+with a correlation of 1.000 to the plain HD mix in every second of 20 s, with the same level, so the
+addressing, pitch and loops are right. `ROTK_PC_NO_SAMPLE_PACKS=1` skips the packs.
+
 ## Next
 
 1. Lift voice limits: the 32-voice table is fixed in EWRAM; more voices need a host table and the

@@ -14,6 +14,8 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 CONSOLE_TRACE = re.compile(r" \d+ -?\d+ ([0-9a-f]{8}) ie=\S+ sio=\S+ rng=(\S+)")
+RNG_SPLIT_FRAMES = 30
+MAIN_MENU_SCENE = "5"
 LINK_LOG = re.compile(r"co-op test: frame (\d+) console (\d+) scene (\d+) link ([0-9a-f]{2})[0-9a-f]{2}")
 
 
@@ -31,6 +33,12 @@ def main() -> None:
     parser.add_argument("--dump-from", type=int, default=0)
     parser.add_argument("--dump-until", type=int, default=0)
     parser.add_argument("--visible", action="store_true", help="Show the window (muted)")
+    parser.add_argument("--profile", type=int, nargs=2, metavar=("FROM", "UNTIL"),
+                        help="Profile the emulation thread over these linked frames (profile.txt)")
+    parser.add_argument("--solo-route", type=Path,
+                        help="Keyinput replay (gbarecomp-keyinput-v1) that walks the normal game to Multiplayer")
+    parser.add_argument("--solo-frames", type=int, default=1500, help="Frames the normal game may take to get there")
+    parser.add_argument("--sound", action="store_true", help="Play the sound (otherwise muted)")
     parser.add_argument("--paced", action="store_true", help="Run at normal speed, for frame times")
     parser.add_argument("--show-from", type=int, default=0, help="Dump the window's frames from this linked frame")
     args = parser.parse_args()
@@ -53,8 +61,11 @@ def main() -> None:
         source_file = args.inputs if args.inputs and target == "inputs.txt" else Path(prefix + suffix)
         shutil.copyfile(source_file, run / target)
     solo = run / "solo.csv"
-    solo.write_text("# gbarecomp-keyinput-v1\n0,0x3ff\n450,0x3f7\n460,0x3ff\n"
-                    "600,0x37f\n610,0x3ff\n640,0x37f\n650,0x3ff\n700,0x3fe\n712,0x3ff\n")
+    if args.solo_route:
+        shutil.copyfile(args.solo_route, solo)
+    else:
+        solo.write_text("# gbarecomp-keyinput-v1\n0,0x3ff\n450,0x3f7\n460,0x3ff\n"
+                        "600,0x37f\n610,0x3ff\n640,0x37f\n650,0x3ff\n700,0x3fe\n712,0x3ff\n")
     env = dict(os.environ)
     for name in list(env):
         if name.startswith("ROTK_PC_COOP_TEST_"):
@@ -70,6 +81,12 @@ def main() -> None:
     if args.visible:
         env.pop("SDL_VIDEODRIVER")
         env.pop("SDL_RENDER_DRIVER")
+    if args.sound:
+        env.pop("SDL_AUDIODRIVER")
+    if args.profile:
+        env.update(ROTK_PC_COOP_TEST_PROFILE=str(run / "profile.txt"),
+                   ROTK_PC_COOP_TEST_PROFILE_FROM=str(args.profile[0]),
+                   ROTK_PC_COOP_TEST_PROFILE_UNTIL=str(args.profile[1]))
     if not args.paced:
         env.update(ROTK_PC_COOP_TEST_FAST="1")
     if args.show_from:
@@ -84,7 +101,7 @@ def main() -> None:
                    GBARECOMP_LINK_CAPTURE=str(run / "link-payloads.txt"),
                    ROTK_PC_COOP_TEST_DUMP_EWRAM_TOP=str(run / "ewram-top.bin"))
     command = [str(exe), "--config", str(args.config.resolve()), "--window",
-               "--save-path", str(run / "session.sram"), "--frames", "1500", "--volume", "0"]
+               "--save-path", str(run / "session.sram"), "--frames", str(args.solo_frames)] + ([] if args.sound else ["--volume", "0"])
     timed_out = False
     with (run / "runtime.log").open("w", encoding="utf-8") as log:
         try:
@@ -98,7 +115,7 @@ def main() -> None:
     session = re.findall(r"local link (session ended after .*|late frames .*)", log_text)
     trace = run / "trace.txt"
     last_frame, checksum_flags = 0, []
-    rng_matched, rng_split = 0, None
+    rng_matched, rng_differs, rng_split = 0, None, None
     if trace.exists():
         for line in trace.read_text().splitlines():
             # Per console: scene, frames since a link message, g_MpMessageMask, then rng=cursor/remaining.
@@ -108,10 +125,14 @@ def main() -> None:
             last_frame = int(line.split(maxsplit=1)[0])
             if any(int(mask, 16) & 0x100 for mask, _ in consoles):
                 checksum_flags.append(last_frame)
+            # The consoles tick the game on alternate frames at times, so one can be a draw ahead
+            # for a frame. Only a difference lasting RNG_SPLIT_FRAMES counts as a split.
             if consoles[0][1] == consoles[1][1]:
-                rng_matched, rng_split = last_frame, None
-            elif rng_split is None:
-                rng_split = last_frame
+                rng_matched, rng_differs = last_frame, None
+            elif rng_differs is None:
+                rng_differs = last_frame
+            if rng_split is None and rng_differs is not None and last_frame - rng_differs >= RNG_SPLIT_FRAMES:
+                rng_split = rng_differs
     # The link state's high byte is 0xFF until the session starts and again once a console drops it.
     disconnects, started = [], set()
     for frame, console, scene, high in LINK_LOG.findall(log_text):
@@ -119,8 +140,12 @@ def main() -> None:
             started.add(console)
         elif console in started:
             disconnects.append((frame, console, scene))
-    passed = (code == 0 and last_frame >= args.frames and not disconnects and not checksum_flags
-              and "split-screen co-op test exit:" in log_text)
+    # Both players back on the main menu before the requested frame: the recording ended co-op.
+    final_scenes = {console: scene for _, console, scene, _ in LINK_LOG.findall(log_text)}
+    left_coop = ("split-screen co-op test exit:" not in log_text and bool(session) and
+                 set(final_scenes.values()) == {MAIN_MENU_SCENE})
+    passed = (code == 0 and not disconnects and not checksum_flags and rng_split is None and
+              (left_coop or (last_frame >= args.frames and "split-screen co-op test exit:" in log_text)))
     coverage = run / "coverage.json"
     coverage_data = json.loads(coverage.read_text()) if coverage.exists() else None
     passed = passed and coverage_data is not None
@@ -129,6 +154,7 @@ def main() -> None:
                   chunk_cycles=args.chunk_cycles,
                   disconnects=disconnects, checksum_flag_frames=checksum_flags,
                   session_report=session,
+                  players_left_coop=left_coop,
                   rng_last_matched_frame=rng_matched, rng_split_frame=rng_split,
                   executable_sha256=hashlib.sha256(exe.read_bytes()).hexdigest(),
                   coverage=coverage_data)

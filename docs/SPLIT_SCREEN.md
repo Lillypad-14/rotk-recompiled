@@ -5,6 +5,16 @@ The game's own two-player link co-op, with both consoles on this PC.
 
 ## How it plays
 
+Both games have it: the original game saves to EEPROM, Expanded to SRAM, and the session copies,
+records and writes back whichever chip the cartridge uses (`GbaSave::contents`, `load_contents`,
+`store_contents`, which marks the save dirty so the battery flush writes it). The original game's
+EEPROM keeps each 8-byte block in reverse byte order, which muting console 2's music undoes. The
+collision-order fix hooks both copies of `actor_checkCollisions`: Expanded's IWRAM copy and the
+original game's ROM function. Checked on the original game (2026-10-27): a session from its own
+EEPROM save links both consoles, reaches the save menu together, holds through 600 linked frames,
+and console 2's music stays off (`tools/check_coop.py --solo-route` with a route timed for its
+intro logos).
+
 1. Solo play is the normal game with every PC feature.
 2. Choosing Multiplayer on the title menu freezes the solo console and opens a local link session:
    two fresh consoles boot unshown from the solo console's save (about 5 s of game time, run
@@ -12,7 +22,10 @@ The game's own two-player link co-op, with both consoles on this PC.
    last frame dimmed, captioned "Starting split-screen co-op...". The window then fades in both
    screens, with player 2's controls and how co-op ends captioned for the first 7 s.
 3. Player 1 keeps the normal controls. Player 2 uses a second controller, or WASD, J = A, K = B,
-   Space = Start, G = Select, U/I = L/R. The sound is console 1's with console 2's sound effects
+   Space = Start, G = Select, U/I = L/R by default. Each GBA button's key and controller button for
+   player 2 can be changed in the launcher (Split-screen co-op options) or in the in-game menu's
+   "Player 2 controls" section, which saves to the same options (`src/player2_controls.cpp`,
+   `gbarecomp::set_player_two_controls`, `gba_mod_set_option_value`). The left stick always moves. The sound is console 1's with console 2's sound effects
    mixed in: console 2 boots with the game's own music option off (cleared in its save image,
    checksum kept valid), so the music is not doubled. Player 2's save keeps that option off.
 4. When console 1 is back on the main menu, the session ends: the solo console takes console 1's
@@ -247,7 +260,7 @@ cmake --build build/host-expanded --target RotkCoopEngineCheck --parallel 2
 python tools/check_coop.py .private/expanded/play/rotk.sram.coop-YYYYMMDD-HHMMSS --exe build/host-expanded/RotkPcLabExpanded.exe --frames 6000 --name regression
 ```
 
-The prefix requires `.inputs.txt`, `-1.sram` and `-2.sram` sidecars. The runner copies them and the selected executable/packages into `.private/coop-checks`, mutes dummy audio/video, saves a per-frame trace and retains CPU coverage. A pass requires reaching the requested linked frame, an explicit planned test exit, no checksum-error flag, no aborted peer and a coverage report. A disconnect is a peer whose link state returns to 0xFF after its session started (every console reads 0xFF before the link, on frame 1). `rng_split_frame` is the frame from which the two consoles' gameplay random streams last differed, or null if they match at the end (they differ for a few frames while the seed is handed over); it does not fail a run. `--mods-state` selects an isolated options fixture; `--chunk-cycles 0` selects the strict scheduler. `--config` picks another game.toml, `--inputs` replays edited inputs against the recording's saves, `--show-from` dumps the window's frames from a linked frame, and `--dump-until` adds the EWRAM top dump. `--paced` runs at normal speed for the session report's frame times, and `--visible` shows the window (muted). Input snapshots and replays remain private.
+The prefix requires `.inputs.txt`, `-1.sram` and `-2.sram` sidecars. The runner copies them and the selected executable/packages into `.private/coop-checks`, mutes dummy audio/video, saves a per-frame trace and retains CPU coverage. A pass requires reaching the requested linked frame, an explicit planned test exit, no checksum-error flag, no aborted peer and a coverage report. A disconnect is a peer whose link state returns to 0xFF after its session started (every console reads 0xFF before the link, on frame 1). `rng_split_frame` is where the two consoles' gameplay random streams start to differ for 30 frames or more, which fails the run. Shorter differences are normal: while the seed is handed over, and when one console ticks the game a frame ahead of the other. A recording whose players both return to the main menu before the requested frame passes as `players_left_coop`. `tools/regress.py` replays every recording in `.private/expanded/play` this way, saves a summary in `.private/regress` and names any recording that passed in the previous summary and fails now. `--mods-state` selects an isolated options fixture; `--chunk-cycles 0` selects the strict scheduler. `--config` picks another game.toml, `--inputs` replays edited inputs against the recording's saves, `--show-from` dumps the window's frames from a linked frame, and `--dump-until` adds the EWRAM top dump. `--paced` runs at normal speed for the session report's frame times, and `--visible` shows the window (muted). Input snapshots and replays remain private.
 
 Final launcher-build verification: the rebuilt normal `RotkPcLabExpanded.exe` passed the 18:13 recording through 6,000 linked frames, with no checksum flags or disconnects. Its SHA-256 is `95ec5799857f3b073457a614e7c49964e12890e6c60150b51cc9e5bf2ed868a1`; the executable installed under `build/host-expanded` matches the tested copy exactly.
 
@@ -310,7 +323,9 @@ The burst about 5 s into the level (2026-10-27, 18:47 recording, x4): linked fra
 frames there (player 2 walking into new map), and native code, not the interpreter, runs it: the
 trace counts 31,000 interpreted instructions over 800 frames. Without the boost the same work
 spreads over more frames, which are slow too (520 presents over 20 ms against 197 at x4, on a
-busier machine), so lowering the boost in co-op doesn't help.
+busier machine), so lowering the boost in co-op doesn't help. Larger chunks don't either: on the same recording at
+x4, 4,928-cycle chunks gave the burst frames 21-24 ms against 20-25 ms at 1,232, and a mean of
+5.13 ms against 5.03 ms, so the exception that ends each chunk is not the burst's cost.
 
 Checks: every recording (17:24, 17:49, 18:13, 18:47) and the 15-minute random fight hold the link
 (at most 49 frames between messages), `RotkCoopEngineCheck` passes, and the single-player

@@ -13,7 +13,7 @@ save_compatibility = "shared"
 [[target]]
 game_id = "@ROTK_MOD_GAME_ID@"
 rom_sha1 = "@ROTK_ROM_SHA1@"
-
+@ROTK_EDITION_TARGET@
 [[feature]]
 id = "large-memory"
 name = "Large game memory"
@@ -167,6 +167,116 @@ type = "boolean"
 default = true
 
 [[feature]]
+id = "combat-info"
+name = "Health bars and damage numbers"
+description = "Shows a health bar over hurt enemies and the damage of each hit, drawn in the game's pixel style. Display only: gameplay is unchanged."
+group = "Display"
+default_enabled = false
+
+[[option]]
+feature = "combat-info"
+id = "health-bars"
+label = "Enemy health bars"
+type = "boolean"
+default = true
+
+[[option]]
+feature = "combat-info"
+id = "always"
+label = "Bars on unhurt enemies"
+description = "Also shows the bar on enemies at full health. Off shows it once an enemy is hurt."
+type = "boolean"
+default = false
+
+[[option]]
+feature = "combat-info"
+id = "damage-numbers"
+label = "Damage numbers"
+description = "Shows the damage of each hit rising from the enemy."
+type = "boolean"
+default = true
+
+[[feature]]
+id = "minimap"
+name = "Minimap"
+description = "A small map of the level in the top right corner, with your view, both players and the enemies. Display only."
+group = "Display"
+default_enabled = false
+
+[[option]]
+feature = "minimap"
+id = "enemies"
+label = "Show enemies"
+type = "boolean"
+default = true
+
+[[feature]]
+id = "color-vision"
+name = "Color vision correction"
+description = "Recolors the screen so colors that are hard to tell apart with color blindness look different. Display only."
+group = "Accessibility"
+default_enabled = false
+
+[[option]]
+feature = "color-vision"
+id = "type"
+label = "Type"
+type = "choice"
+default = "deutan"
+
+[[option.choice]]
+value = "deutan"
+label = "Deuteranopia (green)"
+
+[[option.choice]]
+value = "protan"
+label = "Protanopia (red)"
+
+[[option.choice]]
+value = "tritan"
+label = "Tritanopia (blue)"
+
+[[feature]]
+id = "rumble"
+name = "Controller rumble"
+description = "Rumbles your controller when your hero is hit (harder for bigger hits) and on level-ups. In co-op each player's own controller rumbles."
+group = "Gameplay"
+default_enabled = false
+
+[[option]]
+feature = "rumble"
+id = "strength"
+label = "Strength"
+type = "choice"
+default = "2"
+
+[[option.choice]]
+value = "1"
+label = "Light"
+
+[[option.choice]]
+value = "2"
+label = "Normal"
+
+[[option.choice]]
+value = "3"
+label = "Strong"
+
+[[option]]
+feature = "rumble"
+id = "hits"
+label = "When hit"
+type = "boolean"
+default = true
+
+[[option]]
+feature = "rumble"
+id = "level-up"
+label = "On level-up"
+type = "boolean"
+default = true
+
+[[feature]]
 id = "transparency"
 name = "Real transparency"
 description = "Draws see-through effects such as water and ice reflections as real transparency instead of the GBA's every-other-frame flicker."
@@ -223,7 +333,7 @@ label = "6x"
 [[feature]]
 id = "local-coop"
 name = "Split-screen co-op (experimental)"
-description = "Choosing Multiplayer starts two-player co-op on this PC. Player 2 uses a second controller or WASD, J/K and Space. Both consoles use private engine buffers, even with solo engine limits off. Widescreen, smooth motion and transparency work per console; CPU boost and HD audio stay off during co-op. Your save is backed up first."
+description = "Choosing Multiplayer starts two-player co-op on this PC. Player 2 uses a second controller or WASD, J/K and Space, changeable below or in the in-game menu. Both consoles use private engine buffers, even with solo engine limits off. Widescreen, smooth motion, transparency, HD icons, health bars, CPU boost and HD audio all work in co-op. Your save is backed up first."
 group = "Gameplay"
 default_enabled = true
 
@@ -242,6 +352,3507 @@ label = "Player 2's own save"
 [[option.choice]]
 value = "copy"
 label = "A copy of yours each session"
+
+# Player 2's controls: generated from the lists in src/player2_controls.cpp, keep them equal.
+[[option]]
+feature = "local-coop"
+id = "p2-key-a"
+label = "Player 2 A (keyboard)"
+type = "choice"
+default = "J"
+
+[[option.choice]]
+value = "A"
+label = "A"
+
+[[option.choice]]
+value = "B"
+label = "B"
+
+[[option.choice]]
+value = "C"
+label = "C"
+
+[[option.choice]]
+value = "D"
+label = "D"
+
+[[option.choice]]
+value = "E"
+label = "E"
+
+[[option.choice]]
+value = "F"
+label = "F"
+
+[[option.choice]]
+value = "G"
+label = "G"
+
+[[option.choice]]
+value = "H"
+label = "H"
+
+[[option.choice]]
+value = "I"
+label = "I"
+
+[[option.choice]]
+value = "J"
+label = "J"
+
+[[option.choice]]
+value = "K"
+label = "K"
+
+[[option.choice]]
+value = "L"
+label = "L"
+
+[[option.choice]]
+value = "M"
+label = "M"
+
+[[option.choice]]
+value = "N"
+label = "N"
+
+[[option.choice]]
+value = "O"
+label = "O"
+
+[[option.choice]]
+value = "P"
+label = "P"
+
+[[option.choice]]
+value = "Q"
+label = "Q"
+
+[[option.choice]]
+value = "R"
+label = "R"
+
+[[option.choice]]
+value = "S"
+label = "S"
+
+[[option.choice]]
+value = "T"
+label = "T"
+
+[[option.choice]]
+value = "U"
+label = "U"
+
+[[option.choice]]
+value = "V"
+label = "V"
+
+[[option.choice]]
+value = "W"
+label = "W"
+
+[[option.choice]]
+value = "X"
+label = "X"
+
+[[option.choice]]
+value = "Y"
+label = "Y"
+
+[[option.choice]]
+value = "Z"
+label = "Z"
+
+[[option.choice]]
+value = "0"
+label = "0"
+
+[[option.choice]]
+value = "1"
+label = "1"
+
+[[option.choice]]
+value = "2"
+label = "2"
+
+[[option.choice]]
+value = "3"
+label = "3"
+
+[[option.choice]]
+value = "4"
+label = "4"
+
+[[option.choice]]
+value = "5"
+label = "5"
+
+[[option.choice]]
+value = "6"
+label = "6"
+
+[[option.choice]]
+value = "7"
+label = "7"
+
+[[option.choice]]
+value = "8"
+label = "8"
+
+[[option.choice]]
+value = "9"
+label = "9"
+
+[[option.choice]]
+value = "Space"
+label = "Space"
+
+[[option.choice]]
+value = "Return"
+label = "Return"
+
+[[option.choice]]
+value = "Tab"
+label = "Tab"
+
+[[option.choice]]
+value = "Backspace"
+label = "Backspace"
+
+[[option.choice]]
+value = "Left Shift"
+label = "Left Shift"
+
+[[option.choice]]
+value = "Right Shift"
+label = "Right Shift"
+
+[[option.choice]]
+value = "Left Ctrl"
+label = "Left Ctrl"
+
+[[option.choice]]
+value = "Right Ctrl"
+label = "Right Ctrl"
+
+[[option.choice]]
+value = "Left Alt"
+label = "Left Alt"
+
+[[option.choice]]
+value = "Right Alt"
+label = "Right Alt"
+
+[[option.choice]]
+value = "Up"
+label = "Up"
+
+[[option.choice]]
+value = "Down"
+label = "Down"
+
+[[option.choice]]
+value = "Left"
+label = "Left"
+
+[[option.choice]]
+value = "Right"
+label = "Right"
+
+[[option.choice]]
+value = ";"
+label = ";"
+
+[[option.choice]]
+value = "'"
+label = "'"
+
+[[option.choice]]
+value = ","
+label = ","
+
+[[option.choice]]
+value = "."
+label = "."
+
+[[option.choice]]
+value = "/"
+label = "/"
+
+[[option.choice]]
+value = "["
+label = "["
+
+[[option.choice]]
+value = "]"
+label = "]"
+
+[[option.choice]]
+value = "Keypad 0"
+label = "Keypad 0"
+
+[[option.choice]]
+value = "Keypad 1"
+label = "Keypad 1"
+
+[[option.choice]]
+value = "Keypad 2"
+label = "Keypad 2"
+
+[[option.choice]]
+value = "Keypad 3"
+label = "Keypad 3"
+
+[[option.choice]]
+value = "Keypad 4"
+label = "Keypad 4"
+
+[[option.choice]]
+value = "Keypad 5"
+label = "Keypad 5"
+
+[[option.choice]]
+value = "Keypad 6"
+label = "Keypad 6"
+
+[[option.choice]]
+value = "Keypad 7"
+label = "Keypad 7"
+
+[[option.choice]]
+value = "Keypad 8"
+label = "Keypad 8"
+
+[[option.choice]]
+value = "Keypad 9"
+label = "Keypad 9"
+
+[[option.choice]]
+value = "Keypad Enter"
+label = "Keypad Enter"
+
+[[option.choice]]
+value = "Keypad +"
+label = "Keypad +"
+
+[[option.choice]]
+value = "Keypad -"
+label = "Keypad -"
+
+[[option]]
+feature = "local-coop"
+id = "p2-pad-a"
+label = "Player 2 A (controller)"
+type = "choice"
+default = "a"
+
+[[option.choice]]
+value = "a"
+label = "A"
+
+[[option.choice]]
+value = "b"
+label = "B"
+
+[[option.choice]]
+value = "x"
+label = "X"
+
+[[option.choice]]
+value = "y"
+label = "Y"
+
+[[option.choice]]
+value = "back"
+label = "Back"
+
+[[option.choice]]
+value = "start"
+label = "Start"
+
+[[option.choice]]
+value = "leftshoulder"
+label = "Left bumper"
+
+[[option.choice]]
+value = "rightshoulder"
+label = "Right bumper"
+
+[[option.choice]]
+value = "leftstick"
+label = "Left stick press"
+
+[[option.choice]]
+value = "rightstick"
+label = "Right stick press"
+
+[[option.choice]]
+value = "dpup"
+label = "D-pad up"
+
+[[option.choice]]
+value = "dpdown"
+label = "D-pad down"
+
+[[option.choice]]
+value = "dpleft"
+label = "D-pad left"
+
+[[option.choice]]
+value = "dpright"
+label = "D-pad right"
+
+[[option]]
+feature = "local-coop"
+id = "p2-key-b"
+label = "Player 2 B (keyboard)"
+type = "choice"
+default = "K"
+
+[[option.choice]]
+value = "A"
+label = "A"
+
+[[option.choice]]
+value = "B"
+label = "B"
+
+[[option.choice]]
+value = "C"
+label = "C"
+
+[[option.choice]]
+value = "D"
+label = "D"
+
+[[option.choice]]
+value = "E"
+label = "E"
+
+[[option.choice]]
+value = "F"
+label = "F"
+
+[[option.choice]]
+value = "G"
+label = "G"
+
+[[option.choice]]
+value = "H"
+label = "H"
+
+[[option.choice]]
+value = "I"
+label = "I"
+
+[[option.choice]]
+value = "J"
+label = "J"
+
+[[option.choice]]
+value = "K"
+label = "K"
+
+[[option.choice]]
+value = "L"
+label = "L"
+
+[[option.choice]]
+value = "M"
+label = "M"
+
+[[option.choice]]
+value = "N"
+label = "N"
+
+[[option.choice]]
+value = "O"
+label = "O"
+
+[[option.choice]]
+value = "P"
+label = "P"
+
+[[option.choice]]
+value = "Q"
+label = "Q"
+
+[[option.choice]]
+value = "R"
+label = "R"
+
+[[option.choice]]
+value = "S"
+label = "S"
+
+[[option.choice]]
+value = "T"
+label = "T"
+
+[[option.choice]]
+value = "U"
+label = "U"
+
+[[option.choice]]
+value = "V"
+label = "V"
+
+[[option.choice]]
+value = "W"
+label = "W"
+
+[[option.choice]]
+value = "X"
+label = "X"
+
+[[option.choice]]
+value = "Y"
+label = "Y"
+
+[[option.choice]]
+value = "Z"
+label = "Z"
+
+[[option.choice]]
+value = "0"
+label = "0"
+
+[[option.choice]]
+value = "1"
+label = "1"
+
+[[option.choice]]
+value = "2"
+label = "2"
+
+[[option.choice]]
+value = "3"
+label = "3"
+
+[[option.choice]]
+value = "4"
+label = "4"
+
+[[option.choice]]
+value = "5"
+label = "5"
+
+[[option.choice]]
+value = "6"
+label = "6"
+
+[[option.choice]]
+value = "7"
+label = "7"
+
+[[option.choice]]
+value = "8"
+label = "8"
+
+[[option.choice]]
+value = "9"
+label = "9"
+
+[[option.choice]]
+value = "Space"
+label = "Space"
+
+[[option.choice]]
+value = "Return"
+label = "Return"
+
+[[option.choice]]
+value = "Tab"
+label = "Tab"
+
+[[option.choice]]
+value = "Backspace"
+label = "Backspace"
+
+[[option.choice]]
+value = "Left Shift"
+label = "Left Shift"
+
+[[option.choice]]
+value = "Right Shift"
+label = "Right Shift"
+
+[[option.choice]]
+value = "Left Ctrl"
+label = "Left Ctrl"
+
+[[option.choice]]
+value = "Right Ctrl"
+label = "Right Ctrl"
+
+[[option.choice]]
+value = "Left Alt"
+label = "Left Alt"
+
+[[option.choice]]
+value = "Right Alt"
+label = "Right Alt"
+
+[[option.choice]]
+value = "Up"
+label = "Up"
+
+[[option.choice]]
+value = "Down"
+label = "Down"
+
+[[option.choice]]
+value = "Left"
+label = "Left"
+
+[[option.choice]]
+value = "Right"
+label = "Right"
+
+[[option.choice]]
+value = ";"
+label = ";"
+
+[[option.choice]]
+value = "'"
+label = "'"
+
+[[option.choice]]
+value = ","
+label = ","
+
+[[option.choice]]
+value = "."
+label = "."
+
+[[option.choice]]
+value = "/"
+label = "/"
+
+[[option.choice]]
+value = "["
+label = "["
+
+[[option.choice]]
+value = "]"
+label = "]"
+
+[[option.choice]]
+value = "Keypad 0"
+label = "Keypad 0"
+
+[[option.choice]]
+value = "Keypad 1"
+label = "Keypad 1"
+
+[[option.choice]]
+value = "Keypad 2"
+label = "Keypad 2"
+
+[[option.choice]]
+value = "Keypad 3"
+label = "Keypad 3"
+
+[[option.choice]]
+value = "Keypad 4"
+label = "Keypad 4"
+
+[[option.choice]]
+value = "Keypad 5"
+label = "Keypad 5"
+
+[[option.choice]]
+value = "Keypad 6"
+label = "Keypad 6"
+
+[[option.choice]]
+value = "Keypad 7"
+label = "Keypad 7"
+
+[[option.choice]]
+value = "Keypad 8"
+label = "Keypad 8"
+
+[[option.choice]]
+value = "Keypad 9"
+label = "Keypad 9"
+
+[[option.choice]]
+value = "Keypad Enter"
+label = "Keypad Enter"
+
+[[option.choice]]
+value = "Keypad +"
+label = "Keypad +"
+
+[[option.choice]]
+value = "Keypad -"
+label = "Keypad -"
+
+[[option]]
+feature = "local-coop"
+id = "p2-pad-b"
+label = "Player 2 B (controller)"
+type = "choice"
+default = "b"
+
+[[option.choice]]
+value = "a"
+label = "A"
+
+[[option.choice]]
+value = "b"
+label = "B"
+
+[[option.choice]]
+value = "x"
+label = "X"
+
+[[option.choice]]
+value = "y"
+label = "Y"
+
+[[option.choice]]
+value = "back"
+label = "Back"
+
+[[option.choice]]
+value = "start"
+label = "Start"
+
+[[option.choice]]
+value = "leftshoulder"
+label = "Left bumper"
+
+[[option.choice]]
+value = "rightshoulder"
+label = "Right bumper"
+
+[[option.choice]]
+value = "leftstick"
+label = "Left stick press"
+
+[[option.choice]]
+value = "rightstick"
+label = "Right stick press"
+
+[[option.choice]]
+value = "dpup"
+label = "D-pad up"
+
+[[option.choice]]
+value = "dpdown"
+label = "D-pad down"
+
+[[option.choice]]
+value = "dpleft"
+label = "D-pad left"
+
+[[option.choice]]
+value = "dpright"
+label = "D-pad right"
+
+[[option]]
+feature = "local-coop"
+id = "p2-key-select"
+label = "Player 2 Select (keyboard)"
+type = "choice"
+default = "G"
+
+[[option.choice]]
+value = "A"
+label = "A"
+
+[[option.choice]]
+value = "B"
+label = "B"
+
+[[option.choice]]
+value = "C"
+label = "C"
+
+[[option.choice]]
+value = "D"
+label = "D"
+
+[[option.choice]]
+value = "E"
+label = "E"
+
+[[option.choice]]
+value = "F"
+label = "F"
+
+[[option.choice]]
+value = "G"
+label = "G"
+
+[[option.choice]]
+value = "H"
+label = "H"
+
+[[option.choice]]
+value = "I"
+label = "I"
+
+[[option.choice]]
+value = "J"
+label = "J"
+
+[[option.choice]]
+value = "K"
+label = "K"
+
+[[option.choice]]
+value = "L"
+label = "L"
+
+[[option.choice]]
+value = "M"
+label = "M"
+
+[[option.choice]]
+value = "N"
+label = "N"
+
+[[option.choice]]
+value = "O"
+label = "O"
+
+[[option.choice]]
+value = "P"
+label = "P"
+
+[[option.choice]]
+value = "Q"
+label = "Q"
+
+[[option.choice]]
+value = "R"
+label = "R"
+
+[[option.choice]]
+value = "S"
+label = "S"
+
+[[option.choice]]
+value = "T"
+label = "T"
+
+[[option.choice]]
+value = "U"
+label = "U"
+
+[[option.choice]]
+value = "V"
+label = "V"
+
+[[option.choice]]
+value = "W"
+label = "W"
+
+[[option.choice]]
+value = "X"
+label = "X"
+
+[[option.choice]]
+value = "Y"
+label = "Y"
+
+[[option.choice]]
+value = "Z"
+label = "Z"
+
+[[option.choice]]
+value = "0"
+label = "0"
+
+[[option.choice]]
+value = "1"
+label = "1"
+
+[[option.choice]]
+value = "2"
+label = "2"
+
+[[option.choice]]
+value = "3"
+label = "3"
+
+[[option.choice]]
+value = "4"
+label = "4"
+
+[[option.choice]]
+value = "5"
+label = "5"
+
+[[option.choice]]
+value = "6"
+label = "6"
+
+[[option.choice]]
+value = "7"
+label = "7"
+
+[[option.choice]]
+value = "8"
+label = "8"
+
+[[option.choice]]
+value = "9"
+label = "9"
+
+[[option.choice]]
+value = "Space"
+label = "Space"
+
+[[option.choice]]
+value = "Return"
+label = "Return"
+
+[[option.choice]]
+value = "Tab"
+label = "Tab"
+
+[[option.choice]]
+value = "Backspace"
+label = "Backspace"
+
+[[option.choice]]
+value = "Left Shift"
+label = "Left Shift"
+
+[[option.choice]]
+value = "Right Shift"
+label = "Right Shift"
+
+[[option.choice]]
+value = "Left Ctrl"
+label = "Left Ctrl"
+
+[[option.choice]]
+value = "Right Ctrl"
+label = "Right Ctrl"
+
+[[option.choice]]
+value = "Left Alt"
+label = "Left Alt"
+
+[[option.choice]]
+value = "Right Alt"
+label = "Right Alt"
+
+[[option.choice]]
+value = "Up"
+label = "Up"
+
+[[option.choice]]
+value = "Down"
+label = "Down"
+
+[[option.choice]]
+value = "Left"
+label = "Left"
+
+[[option.choice]]
+value = "Right"
+label = "Right"
+
+[[option.choice]]
+value = ";"
+label = ";"
+
+[[option.choice]]
+value = "'"
+label = "'"
+
+[[option.choice]]
+value = ","
+label = ","
+
+[[option.choice]]
+value = "."
+label = "."
+
+[[option.choice]]
+value = "/"
+label = "/"
+
+[[option.choice]]
+value = "["
+label = "["
+
+[[option.choice]]
+value = "]"
+label = "]"
+
+[[option.choice]]
+value = "Keypad 0"
+label = "Keypad 0"
+
+[[option.choice]]
+value = "Keypad 1"
+label = "Keypad 1"
+
+[[option.choice]]
+value = "Keypad 2"
+label = "Keypad 2"
+
+[[option.choice]]
+value = "Keypad 3"
+label = "Keypad 3"
+
+[[option.choice]]
+value = "Keypad 4"
+label = "Keypad 4"
+
+[[option.choice]]
+value = "Keypad 5"
+label = "Keypad 5"
+
+[[option.choice]]
+value = "Keypad 6"
+label = "Keypad 6"
+
+[[option.choice]]
+value = "Keypad 7"
+label = "Keypad 7"
+
+[[option.choice]]
+value = "Keypad 8"
+label = "Keypad 8"
+
+[[option.choice]]
+value = "Keypad 9"
+label = "Keypad 9"
+
+[[option.choice]]
+value = "Keypad Enter"
+label = "Keypad Enter"
+
+[[option.choice]]
+value = "Keypad +"
+label = "Keypad +"
+
+[[option.choice]]
+value = "Keypad -"
+label = "Keypad -"
+
+[[option]]
+feature = "local-coop"
+id = "p2-pad-select"
+label = "Player 2 Select (controller)"
+type = "choice"
+default = "back"
+
+[[option.choice]]
+value = "a"
+label = "A"
+
+[[option.choice]]
+value = "b"
+label = "B"
+
+[[option.choice]]
+value = "x"
+label = "X"
+
+[[option.choice]]
+value = "y"
+label = "Y"
+
+[[option.choice]]
+value = "back"
+label = "Back"
+
+[[option.choice]]
+value = "start"
+label = "Start"
+
+[[option.choice]]
+value = "leftshoulder"
+label = "Left bumper"
+
+[[option.choice]]
+value = "rightshoulder"
+label = "Right bumper"
+
+[[option.choice]]
+value = "leftstick"
+label = "Left stick press"
+
+[[option.choice]]
+value = "rightstick"
+label = "Right stick press"
+
+[[option.choice]]
+value = "dpup"
+label = "D-pad up"
+
+[[option.choice]]
+value = "dpdown"
+label = "D-pad down"
+
+[[option.choice]]
+value = "dpleft"
+label = "D-pad left"
+
+[[option.choice]]
+value = "dpright"
+label = "D-pad right"
+
+[[option]]
+feature = "local-coop"
+id = "p2-key-start"
+label = "Player 2 Start (keyboard)"
+type = "choice"
+default = "Space"
+
+[[option.choice]]
+value = "A"
+label = "A"
+
+[[option.choice]]
+value = "B"
+label = "B"
+
+[[option.choice]]
+value = "C"
+label = "C"
+
+[[option.choice]]
+value = "D"
+label = "D"
+
+[[option.choice]]
+value = "E"
+label = "E"
+
+[[option.choice]]
+value = "F"
+label = "F"
+
+[[option.choice]]
+value = "G"
+label = "G"
+
+[[option.choice]]
+value = "H"
+label = "H"
+
+[[option.choice]]
+value = "I"
+label = "I"
+
+[[option.choice]]
+value = "J"
+label = "J"
+
+[[option.choice]]
+value = "K"
+label = "K"
+
+[[option.choice]]
+value = "L"
+label = "L"
+
+[[option.choice]]
+value = "M"
+label = "M"
+
+[[option.choice]]
+value = "N"
+label = "N"
+
+[[option.choice]]
+value = "O"
+label = "O"
+
+[[option.choice]]
+value = "P"
+label = "P"
+
+[[option.choice]]
+value = "Q"
+label = "Q"
+
+[[option.choice]]
+value = "R"
+label = "R"
+
+[[option.choice]]
+value = "S"
+label = "S"
+
+[[option.choice]]
+value = "T"
+label = "T"
+
+[[option.choice]]
+value = "U"
+label = "U"
+
+[[option.choice]]
+value = "V"
+label = "V"
+
+[[option.choice]]
+value = "W"
+label = "W"
+
+[[option.choice]]
+value = "X"
+label = "X"
+
+[[option.choice]]
+value = "Y"
+label = "Y"
+
+[[option.choice]]
+value = "Z"
+label = "Z"
+
+[[option.choice]]
+value = "0"
+label = "0"
+
+[[option.choice]]
+value = "1"
+label = "1"
+
+[[option.choice]]
+value = "2"
+label = "2"
+
+[[option.choice]]
+value = "3"
+label = "3"
+
+[[option.choice]]
+value = "4"
+label = "4"
+
+[[option.choice]]
+value = "5"
+label = "5"
+
+[[option.choice]]
+value = "6"
+label = "6"
+
+[[option.choice]]
+value = "7"
+label = "7"
+
+[[option.choice]]
+value = "8"
+label = "8"
+
+[[option.choice]]
+value = "9"
+label = "9"
+
+[[option.choice]]
+value = "Space"
+label = "Space"
+
+[[option.choice]]
+value = "Return"
+label = "Return"
+
+[[option.choice]]
+value = "Tab"
+label = "Tab"
+
+[[option.choice]]
+value = "Backspace"
+label = "Backspace"
+
+[[option.choice]]
+value = "Left Shift"
+label = "Left Shift"
+
+[[option.choice]]
+value = "Right Shift"
+label = "Right Shift"
+
+[[option.choice]]
+value = "Left Ctrl"
+label = "Left Ctrl"
+
+[[option.choice]]
+value = "Right Ctrl"
+label = "Right Ctrl"
+
+[[option.choice]]
+value = "Left Alt"
+label = "Left Alt"
+
+[[option.choice]]
+value = "Right Alt"
+label = "Right Alt"
+
+[[option.choice]]
+value = "Up"
+label = "Up"
+
+[[option.choice]]
+value = "Down"
+label = "Down"
+
+[[option.choice]]
+value = "Left"
+label = "Left"
+
+[[option.choice]]
+value = "Right"
+label = "Right"
+
+[[option.choice]]
+value = ";"
+label = ";"
+
+[[option.choice]]
+value = "'"
+label = "'"
+
+[[option.choice]]
+value = ","
+label = ","
+
+[[option.choice]]
+value = "."
+label = "."
+
+[[option.choice]]
+value = "/"
+label = "/"
+
+[[option.choice]]
+value = "["
+label = "["
+
+[[option.choice]]
+value = "]"
+label = "]"
+
+[[option.choice]]
+value = "Keypad 0"
+label = "Keypad 0"
+
+[[option.choice]]
+value = "Keypad 1"
+label = "Keypad 1"
+
+[[option.choice]]
+value = "Keypad 2"
+label = "Keypad 2"
+
+[[option.choice]]
+value = "Keypad 3"
+label = "Keypad 3"
+
+[[option.choice]]
+value = "Keypad 4"
+label = "Keypad 4"
+
+[[option.choice]]
+value = "Keypad 5"
+label = "Keypad 5"
+
+[[option.choice]]
+value = "Keypad 6"
+label = "Keypad 6"
+
+[[option.choice]]
+value = "Keypad 7"
+label = "Keypad 7"
+
+[[option.choice]]
+value = "Keypad 8"
+label = "Keypad 8"
+
+[[option.choice]]
+value = "Keypad 9"
+label = "Keypad 9"
+
+[[option.choice]]
+value = "Keypad Enter"
+label = "Keypad Enter"
+
+[[option.choice]]
+value = "Keypad +"
+label = "Keypad +"
+
+[[option.choice]]
+value = "Keypad -"
+label = "Keypad -"
+
+[[option]]
+feature = "local-coop"
+id = "p2-pad-start"
+label = "Player 2 Start (controller)"
+type = "choice"
+default = "start"
+
+[[option.choice]]
+value = "a"
+label = "A"
+
+[[option.choice]]
+value = "b"
+label = "B"
+
+[[option.choice]]
+value = "x"
+label = "X"
+
+[[option.choice]]
+value = "y"
+label = "Y"
+
+[[option.choice]]
+value = "back"
+label = "Back"
+
+[[option.choice]]
+value = "start"
+label = "Start"
+
+[[option.choice]]
+value = "leftshoulder"
+label = "Left bumper"
+
+[[option.choice]]
+value = "rightshoulder"
+label = "Right bumper"
+
+[[option.choice]]
+value = "leftstick"
+label = "Left stick press"
+
+[[option.choice]]
+value = "rightstick"
+label = "Right stick press"
+
+[[option.choice]]
+value = "dpup"
+label = "D-pad up"
+
+[[option.choice]]
+value = "dpdown"
+label = "D-pad down"
+
+[[option.choice]]
+value = "dpleft"
+label = "D-pad left"
+
+[[option.choice]]
+value = "dpright"
+label = "D-pad right"
+
+[[option]]
+feature = "local-coop"
+id = "p2-key-right"
+label = "Player 2 Right (keyboard)"
+type = "choice"
+default = "D"
+
+[[option.choice]]
+value = "A"
+label = "A"
+
+[[option.choice]]
+value = "B"
+label = "B"
+
+[[option.choice]]
+value = "C"
+label = "C"
+
+[[option.choice]]
+value = "D"
+label = "D"
+
+[[option.choice]]
+value = "E"
+label = "E"
+
+[[option.choice]]
+value = "F"
+label = "F"
+
+[[option.choice]]
+value = "G"
+label = "G"
+
+[[option.choice]]
+value = "H"
+label = "H"
+
+[[option.choice]]
+value = "I"
+label = "I"
+
+[[option.choice]]
+value = "J"
+label = "J"
+
+[[option.choice]]
+value = "K"
+label = "K"
+
+[[option.choice]]
+value = "L"
+label = "L"
+
+[[option.choice]]
+value = "M"
+label = "M"
+
+[[option.choice]]
+value = "N"
+label = "N"
+
+[[option.choice]]
+value = "O"
+label = "O"
+
+[[option.choice]]
+value = "P"
+label = "P"
+
+[[option.choice]]
+value = "Q"
+label = "Q"
+
+[[option.choice]]
+value = "R"
+label = "R"
+
+[[option.choice]]
+value = "S"
+label = "S"
+
+[[option.choice]]
+value = "T"
+label = "T"
+
+[[option.choice]]
+value = "U"
+label = "U"
+
+[[option.choice]]
+value = "V"
+label = "V"
+
+[[option.choice]]
+value = "W"
+label = "W"
+
+[[option.choice]]
+value = "X"
+label = "X"
+
+[[option.choice]]
+value = "Y"
+label = "Y"
+
+[[option.choice]]
+value = "Z"
+label = "Z"
+
+[[option.choice]]
+value = "0"
+label = "0"
+
+[[option.choice]]
+value = "1"
+label = "1"
+
+[[option.choice]]
+value = "2"
+label = "2"
+
+[[option.choice]]
+value = "3"
+label = "3"
+
+[[option.choice]]
+value = "4"
+label = "4"
+
+[[option.choice]]
+value = "5"
+label = "5"
+
+[[option.choice]]
+value = "6"
+label = "6"
+
+[[option.choice]]
+value = "7"
+label = "7"
+
+[[option.choice]]
+value = "8"
+label = "8"
+
+[[option.choice]]
+value = "9"
+label = "9"
+
+[[option.choice]]
+value = "Space"
+label = "Space"
+
+[[option.choice]]
+value = "Return"
+label = "Return"
+
+[[option.choice]]
+value = "Tab"
+label = "Tab"
+
+[[option.choice]]
+value = "Backspace"
+label = "Backspace"
+
+[[option.choice]]
+value = "Left Shift"
+label = "Left Shift"
+
+[[option.choice]]
+value = "Right Shift"
+label = "Right Shift"
+
+[[option.choice]]
+value = "Left Ctrl"
+label = "Left Ctrl"
+
+[[option.choice]]
+value = "Right Ctrl"
+label = "Right Ctrl"
+
+[[option.choice]]
+value = "Left Alt"
+label = "Left Alt"
+
+[[option.choice]]
+value = "Right Alt"
+label = "Right Alt"
+
+[[option.choice]]
+value = "Up"
+label = "Up"
+
+[[option.choice]]
+value = "Down"
+label = "Down"
+
+[[option.choice]]
+value = "Left"
+label = "Left"
+
+[[option.choice]]
+value = "Right"
+label = "Right"
+
+[[option.choice]]
+value = ";"
+label = ";"
+
+[[option.choice]]
+value = "'"
+label = "'"
+
+[[option.choice]]
+value = ","
+label = ","
+
+[[option.choice]]
+value = "."
+label = "."
+
+[[option.choice]]
+value = "/"
+label = "/"
+
+[[option.choice]]
+value = "["
+label = "["
+
+[[option.choice]]
+value = "]"
+label = "]"
+
+[[option.choice]]
+value = "Keypad 0"
+label = "Keypad 0"
+
+[[option.choice]]
+value = "Keypad 1"
+label = "Keypad 1"
+
+[[option.choice]]
+value = "Keypad 2"
+label = "Keypad 2"
+
+[[option.choice]]
+value = "Keypad 3"
+label = "Keypad 3"
+
+[[option.choice]]
+value = "Keypad 4"
+label = "Keypad 4"
+
+[[option.choice]]
+value = "Keypad 5"
+label = "Keypad 5"
+
+[[option.choice]]
+value = "Keypad 6"
+label = "Keypad 6"
+
+[[option.choice]]
+value = "Keypad 7"
+label = "Keypad 7"
+
+[[option.choice]]
+value = "Keypad 8"
+label = "Keypad 8"
+
+[[option.choice]]
+value = "Keypad 9"
+label = "Keypad 9"
+
+[[option.choice]]
+value = "Keypad Enter"
+label = "Keypad Enter"
+
+[[option.choice]]
+value = "Keypad +"
+label = "Keypad +"
+
+[[option.choice]]
+value = "Keypad -"
+label = "Keypad -"
+
+[[option]]
+feature = "local-coop"
+id = "p2-pad-right"
+label = "Player 2 Right (controller)"
+type = "choice"
+default = "dpright"
+
+[[option.choice]]
+value = "a"
+label = "A"
+
+[[option.choice]]
+value = "b"
+label = "B"
+
+[[option.choice]]
+value = "x"
+label = "X"
+
+[[option.choice]]
+value = "y"
+label = "Y"
+
+[[option.choice]]
+value = "back"
+label = "Back"
+
+[[option.choice]]
+value = "start"
+label = "Start"
+
+[[option.choice]]
+value = "leftshoulder"
+label = "Left bumper"
+
+[[option.choice]]
+value = "rightshoulder"
+label = "Right bumper"
+
+[[option.choice]]
+value = "leftstick"
+label = "Left stick press"
+
+[[option.choice]]
+value = "rightstick"
+label = "Right stick press"
+
+[[option.choice]]
+value = "dpup"
+label = "D-pad up"
+
+[[option.choice]]
+value = "dpdown"
+label = "D-pad down"
+
+[[option.choice]]
+value = "dpleft"
+label = "D-pad left"
+
+[[option.choice]]
+value = "dpright"
+label = "D-pad right"
+
+[[option]]
+feature = "local-coop"
+id = "p2-key-left"
+label = "Player 2 Left (keyboard)"
+type = "choice"
+default = "A"
+
+[[option.choice]]
+value = "A"
+label = "A"
+
+[[option.choice]]
+value = "B"
+label = "B"
+
+[[option.choice]]
+value = "C"
+label = "C"
+
+[[option.choice]]
+value = "D"
+label = "D"
+
+[[option.choice]]
+value = "E"
+label = "E"
+
+[[option.choice]]
+value = "F"
+label = "F"
+
+[[option.choice]]
+value = "G"
+label = "G"
+
+[[option.choice]]
+value = "H"
+label = "H"
+
+[[option.choice]]
+value = "I"
+label = "I"
+
+[[option.choice]]
+value = "J"
+label = "J"
+
+[[option.choice]]
+value = "K"
+label = "K"
+
+[[option.choice]]
+value = "L"
+label = "L"
+
+[[option.choice]]
+value = "M"
+label = "M"
+
+[[option.choice]]
+value = "N"
+label = "N"
+
+[[option.choice]]
+value = "O"
+label = "O"
+
+[[option.choice]]
+value = "P"
+label = "P"
+
+[[option.choice]]
+value = "Q"
+label = "Q"
+
+[[option.choice]]
+value = "R"
+label = "R"
+
+[[option.choice]]
+value = "S"
+label = "S"
+
+[[option.choice]]
+value = "T"
+label = "T"
+
+[[option.choice]]
+value = "U"
+label = "U"
+
+[[option.choice]]
+value = "V"
+label = "V"
+
+[[option.choice]]
+value = "W"
+label = "W"
+
+[[option.choice]]
+value = "X"
+label = "X"
+
+[[option.choice]]
+value = "Y"
+label = "Y"
+
+[[option.choice]]
+value = "Z"
+label = "Z"
+
+[[option.choice]]
+value = "0"
+label = "0"
+
+[[option.choice]]
+value = "1"
+label = "1"
+
+[[option.choice]]
+value = "2"
+label = "2"
+
+[[option.choice]]
+value = "3"
+label = "3"
+
+[[option.choice]]
+value = "4"
+label = "4"
+
+[[option.choice]]
+value = "5"
+label = "5"
+
+[[option.choice]]
+value = "6"
+label = "6"
+
+[[option.choice]]
+value = "7"
+label = "7"
+
+[[option.choice]]
+value = "8"
+label = "8"
+
+[[option.choice]]
+value = "9"
+label = "9"
+
+[[option.choice]]
+value = "Space"
+label = "Space"
+
+[[option.choice]]
+value = "Return"
+label = "Return"
+
+[[option.choice]]
+value = "Tab"
+label = "Tab"
+
+[[option.choice]]
+value = "Backspace"
+label = "Backspace"
+
+[[option.choice]]
+value = "Left Shift"
+label = "Left Shift"
+
+[[option.choice]]
+value = "Right Shift"
+label = "Right Shift"
+
+[[option.choice]]
+value = "Left Ctrl"
+label = "Left Ctrl"
+
+[[option.choice]]
+value = "Right Ctrl"
+label = "Right Ctrl"
+
+[[option.choice]]
+value = "Left Alt"
+label = "Left Alt"
+
+[[option.choice]]
+value = "Right Alt"
+label = "Right Alt"
+
+[[option.choice]]
+value = "Up"
+label = "Up"
+
+[[option.choice]]
+value = "Down"
+label = "Down"
+
+[[option.choice]]
+value = "Left"
+label = "Left"
+
+[[option.choice]]
+value = "Right"
+label = "Right"
+
+[[option.choice]]
+value = ";"
+label = ";"
+
+[[option.choice]]
+value = "'"
+label = "'"
+
+[[option.choice]]
+value = ","
+label = ","
+
+[[option.choice]]
+value = "."
+label = "."
+
+[[option.choice]]
+value = "/"
+label = "/"
+
+[[option.choice]]
+value = "["
+label = "["
+
+[[option.choice]]
+value = "]"
+label = "]"
+
+[[option.choice]]
+value = "Keypad 0"
+label = "Keypad 0"
+
+[[option.choice]]
+value = "Keypad 1"
+label = "Keypad 1"
+
+[[option.choice]]
+value = "Keypad 2"
+label = "Keypad 2"
+
+[[option.choice]]
+value = "Keypad 3"
+label = "Keypad 3"
+
+[[option.choice]]
+value = "Keypad 4"
+label = "Keypad 4"
+
+[[option.choice]]
+value = "Keypad 5"
+label = "Keypad 5"
+
+[[option.choice]]
+value = "Keypad 6"
+label = "Keypad 6"
+
+[[option.choice]]
+value = "Keypad 7"
+label = "Keypad 7"
+
+[[option.choice]]
+value = "Keypad 8"
+label = "Keypad 8"
+
+[[option.choice]]
+value = "Keypad 9"
+label = "Keypad 9"
+
+[[option.choice]]
+value = "Keypad Enter"
+label = "Keypad Enter"
+
+[[option.choice]]
+value = "Keypad +"
+label = "Keypad +"
+
+[[option.choice]]
+value = "Keypad -"
+label = "Keypad -"
+
+[[option]]
+feature = "local-coop"
+id = "p2-pad-left"
+label = "Player 2 Left (controller)"
+type = "choice"
+default = "dpleft"
+
+[[option.choice]]
+value = "a"
+label = "A"
+
+[[option.choice]]
+value = "b"
+label = "B"
+
+[[option.choice]]
+value = "x"
+label = "X"
+
+[[option.choice]]
+value = "y"
+label = "Y"
+
+[[option.choice]]
+value = "back"
+label = "Back"
+
+[[option.choice]]
+value = "start"
+label = "Start"
+
+[[option.choice]]
+value = "leftshoulder"
+label = "Left bumper"
+
+[[option.choice]]
+value = "rightshoulder"
+label = "Right bumper"
+
+[[option.choice]]
+value = "leftstick"
+label = "Left stick press"
+
+[[option.choice]]
+value = "rightstick"
+label = "Right stick press"
+
+[[option.choice]]
+value = "dpup"
+label = "D-pad up"
+
+[[option.choice]]
+value = "dpdown"
+label = "D-pad down"
+
+[[option.choice]]
+value = "dpleft"
+label = "D-pad left"
+
+[[option.choice]]
+value = "dpright"
+label = "D-pad right"
+
+[[option]]
+feature = "local-coop"
+id = "p2-key-up"
+label = "Player 2 Up (keyboard)"
+type = "choice"
+default = "W"
+
+[[option.choice]]
+value = "A"
+label = "A"
+
+[[option.choice]]
+value = "B"
+label = "B"
+
+[[option.choice]]
+value = "C"
+label = "C"
+
+[[option.choice]]
+value = "D"
+label = "D"
+
+[[option.choice]]
+value = "E"
+label = "E"
+
+[[option.choice]]
+value = "F"
+label = "F"
+
+[[option.choice]]
+value = "G"
+label = "G"
+
+[[option.choice]]
+value = "H"
+label = "H"
+
+[[option.choice]]
+value = "I"
+label = "I"
+
+[[option.choice]]
+value = "J"
+label = "J"
+
+[[option.choice]]
+value = "K"
+label = "K"
+
+[[option.choice]]
+value = "L"
+label = "L"
+
+[[option.choice]]
+value = "M"
+label = "M"
+
+[[option.choice]]
+value = "N"
+label = "N"
+
+[[option.choice]]
+value = "O"
+label = "O"
+
+[[option.choice]]
+value = "P"
+label = "P"
+
+[[option.choice]]
+value = "Q"
+label = "Q"
+
+[[option.choice]]
+value = "R"
+label = "R"
+
+[[option.choice]]
+value = "S"
+label = "S"
+
+[[option.choice]]
+value = "T"
+label = "T"
+
+[[option.choice]]
+value = "U"
+label = "U"
+
+[[option.choice]]
+value = "V"
+label = "V"
+
+[[option.choice]]
+value = "W"
+label = "W"
+
+[[option.choice]]
+value = "X"
+label = "X"
+
+[[option.choice]]
+value = "Y"
+label = "Y"
+
+[[option.choice]]
+value = "Z"
+label = "Z"
+
+[[option.choice]]
+value = "0"
+label = "0"
+
+[[option.choice]]
+value = "1"
+label = "1"
+
+[[option.choice]]
+value = "2"
+label = "2"
+
+[[option.choice]]
+value = "3"
+label = "3"
+
+[[option.choice]]
+value = "4"
+label = "4"
+
+[[option.choice]]
+value = "5"
+label = "5"
+
+[[option.choice]]
+value = "6"
+label = "6"
+
+[[option.choice]]
+value = "7"
+label = "7"
+
+[[option.choice]]
+value = "8"
+label = "8"
+
+[[option.choice]]
+value = "9"
+label = "9"
+
+[[option.choice]]
+value = "Space"
+label = "Space"
+
+[[option.choice]]
+value = "Return"
+label = "Return"
+
+[[option.choice]]
+value = "Tab"
+label = "Tab"
+
+[[option.choice]]
+value = "Backspace"
+label = "Backspace"
+
+[[option.choice]]
+value = "Left Shift"
+label = "Left Shift"
+
+[[option.choice]]
+value = "Right Shift"
+label = "Right Shift"
+
+[[option.choice]]
+value = "Left Ctrl"
+label = "Left Ctrl"
+
+[[option.choice]]
+value = "Right Ctrl"
+label = "Right Ctrl"
+
+[[option.choice]]
+value = "Left Alt"
+label = "Left Alt"
+
+[[option.choice]]
+value = "Right Alt"
+label = "Right Alt"
+
+[[option.choice]]
+value = "Up"
+label = "Up"
+
+[[option.choice]]
+value = "Down"
+label = "Down"
+
+[[option.choice]]
+value = "Left"
+label = "Left"
+
+[[option.choice]]
+value = "Right"
+label = "Right"
+
+[[option.choice]]
+value = ";"
+label = ";"
+
+[[option.choice]]
+value = "'"
+label = "'"
+
+[[option.choice]]
+value = ","
+label = ","
+
+[[option.choice]]
+value = "."
+label = "."
+
+[[option.choice]]
+value = "/"
+label = "/"
+
+[[option.choice]]
+value = "["
+label = "["
+
+[[option.choice]]
+value = "]"
+label = "]"
+
+[[option.choice]]
+value = "Keypad 0"
+label = "Keypad 0"
+
+[[option.choice]]
+value = "Keypad 1"
+label = "Keypad 1"
+
+[[option.choice]]
+value = "Keypad 2"
+label = "Keypad 2"
+
+[[option.choice]]
+value = "Keypad 3"
+label = "Keypad 3"
+
+[[option.choice]]
+value = "Keypad 4"
+label = "Keypad 4"
+
+[[option.choice]]
+value = "Keypad 5"
+label = "Keypad 5"
+
+[[option.choice]]
+value = "Keypad 6"
+label = "Keypad 6"
+
+[[option.choice]]
+value = "Keypad 7"
+label = "Keypad 7"
+
+[[option.choice]]
+value = "Keypad 8"
+label = "Keypad 8"
+
+[[option.choice]]
+value = "Keypad 9"
+label = "Keypad 9"
+
+[[option.choice]]
+value = "Keypad Enter"
+label = "Keypad Enter"
+
+[[option.choice]]
+value = "Keypad +"
+label = "Keypad +"
+
+[[option.choice]]
+value = "Keypad -"
+label = "Keypad -"
+
+[[option]]
+feature = "local-coop"
+id = "p2-pad-up"
+label = "Player 2 Up (controller)"
+type = "choice"
+default = "dpup"
+
+[[option.choice]]
+value = "a"
+label = "A"
+
+[[option.choice]]
+value = "b"
+label = "B"
+
+[[option.choice]]
+value = "x"
+label = "X"
+
+[[option.choice]]
+value = "y"
+label = "Y"
+
+[[option.choice]]
+value = "back"
+label = "Back"
+
+[[option.choice]]
+value = "start"
+label = "Start"
+
+[[option.choice]]
+value = "leftshoulder"
+label = "Left bumper"
+
+[[option.choice]]
+value = "rightshoulder"
+label = "Right bumper"
+
+[[option.choice]]
+value = "leftstick"
+label = "Left stick press"
+
+[[option.choice]]
+value = "rightstick"
+label = "Right stick press"
+
+[[option.choice]]
+value = "dpup"
+label = "D-pad up"
+
+[[option.choice]]
+value = "dpdown"
+label = "D-pad down"
+
+[[option.choice]]
+value = "dpleft"
+label = "D-pad left"
+
+[[option.choice]]
+value = "dpright"
+label = "D-pad right"
+
+[[option]]
+feature = "local-coop"
+id = "p2-key-down"
+label = "Player 2 Down (keyboard)"
+type = "choice"
+default = "S"
+
+[[option.choice]]
+value = "A"
+label = "A"
+
+[[option.choice]]
+value = "B"
+label = "B"
+
+[[option.choice]]
+value = "C"
+label = "C"
+
+[[option.choice]]
+value = "D"
+label = "D"
+
+[[option.choice]]
+value = "E"
+label = "E"
+
+[[option.choice]]
+value = "F"
+label = "F"
+
+[[option.choice]]
+value = "G"
+label = "G"
+
+[[option.choice]]
+value = "H"
+label = "H"
+
+[[option.choice]]
+value = "I"
+label = "I"
+
+[[option.choice]]
+value = "J"
+label = "J"
+
+[[option.choice]]
+value = "K"
+label = "K"
+
+[[option.choice]]
+value = "L"
+label = "L"
+
+[[option.choice]]
+value = "M"
+label = "M"
+
+[[option.choice]]
+value = "N"
+label = "N"
+
+[[option.choice]]
+value = "O"
+label = "O"
+
+[[option.choice]]
+value = "P"
+label = "P"
+
+[[option.choice]]
+value = "Q"
+label = "Q"
+
+[[option.choice]]
+value = "R"
+label = "R"
+
+[[option.choice]]
+value = "S"
+label = "S"
+
+[[option.choice]]
+value = "T"
+label = "T"
+
+[[option.choice]]
+value = "U"
+label = "U"
+
+[[option.choice]]
+value = "V"
+label = "V"
+
+[[option.choice]]
+value = "W"
+label = "W"
+
+[[option.choice]]
+value = "X"
+label = "X"
+
+[[option.choice]]
+value = "Y"
+label = "Y"
+
+[[option.choice]]
+value = "Z"
+label = "Z"
+
+[[option.choice]]
+value = "0"
+label = "0"
+
+[[option.choice]]
+value = "1"
+label = "1"
+
+[[option.choice]]
+value = "2"
+label = "2"
+
+[[option.choice]]
+value = "3"
+label = "3"
+
+[[option.choice]]
+value = "4"
+label = "4"
+
+[[option.choice]]
+value = "5"
+label = "5"
+
+[[option.choice]]
+value = "6"
+label = "6"
+
+[[option.choice]]
+value = "7"
+label = "7"
+
+[[option.choice]]
+value = "8"
+label = "8"
+
+[[option.choice]]
+value = "9"
+label = "9"
+
+[[option.choice]]
+value = "Space"
+label = "Space"
+
+[[option.choice]]
+value = "Return"
+label = "Return"
+
+[[option.choice]]
+value = "Tab"
+label = "Tab"
+
+[[option.choice]]
+value = "Backspace"
+label = "Backspace"
+
+[[option.choice]]
+value = "Left Shift"
+label = "Left Shift"
+
+[[option.choice]]
+value = "Right Shift"
+label = "Right Shift"
+
+[[option.choice]]
+value = "Left Ctrl"
+label = "Left Ctrl"
+
+[[option.choice]]
+value = "Right Ctrl"
+label = "Right Ctrl"
+
+[[option.choice]]
+value = "Left Alt"
+label = "Left Alt"
+
+[[option.choice]]
+value = "Right Alt"
+label = "Right Alt"
+
+[[option.choice]]
+value = "Up"
+label = "Up"
+
+[[option.choice]]
+value = "Down"
+label = "Down"
+
+[[option.choice]]
+value = "Left"
+label = "Left"
+
+[[option.choice]]
+value = "Right"
+label = "Right"
+
+[[option.choice]]
+value = ";"
+label = ";"
+
+[[option.choice]]
+value = "'"
+label = "'"
+
+[[option.choice]]
+value = ","
+label = ","
+
+[[option.choice]]
+value = "."
+label = "."
+
+[[option.choice]]
+value = "/"
+label = "/"
+
+[[option.choice]]
+value = "["
+label = "["
+
+[[option.choice]]
+value = "]"
+label = "]"
+
+[[option.choice]]
+value = "Keypad 0"
+label = "Keypad 0"
+
+[[option.choice]]
+value = "Keypad 1"
+label = "Keypad 1"
+
+[[option.choice]]
+value = "Keypad 2"
+label = "Keypad 2"
+
+[[option.choice]]
+value = "Keypad 3"
+label = "Keypad 3"
+
+[[option.choice]]
+value = "Keypad 4"
+label = "Keypad 4"
+
+[[option.choice]]
+value = "Keypad 5"
+label = "Keypad 5"
+
+[[option.choice]]
+value = "Keypad 6"
+label = "Keypad 6"
+
+[[option.choice]]
+value = "Keypad 7"
+label = "Keypad 7"
+
+[[option.choice]]
+value = "Keypad 8"
+label = "Keypad 8"
+
+[[option.choice]]
+value = "Keypad 9"
+label = "Keypad 9"
+
+[[option.choice]]
+value = "Keypad Enter"
+label = "Keypad Enter"
+
+[[option.choice]]
+value = "Keypad +"
+label = "Keypad +"
+
+[[option.choice]]
+value = "Keypad -"
+label = "Keypad -"
+
+[[option]]
+feature = "local-coop"
+id = "p2-pad-down"
+label = "Player 2 Down (controller)"
+type = "choice"
+default = "dpdown"
+
+[[option.choice]]
+value = "a"
+label = "A"
+
+[[option.choice]]
+value = "b"
+label = "B"
+
+[[option.choice]]
+value = "x"
+label = "X"
+
+[[option.choice]]
+value = "y"
+label = "Y"
+
+[[option.choice]]
+value = "back"
+label = "Back"
+
+[[option.choice]]
+value = "start"
+label = "Start"
+
+[[option.choice]]
+value = "leftshoulder"
+label = "Left bumper"
+
+[[option.choice]]
+value = "rightshoulder"
+label = "Right bumper"
+
+[[option.choice]]
+value = "leftstick"
+label = "Left stick press"
+
+[[option.choice]]
+value = "rightstick"
+label = "Right stick press"
+
+[[option.choice]]
+value = "dpup"
+label = "D-pad up"
+
+[[option.choice]]
+value = "dpdown"
+label = "D-pad down"
+
+[[option.choice]]
+value = "dpleft"
+label = "D-pad left"
+
+[[option.choice]]
+value = "dpright"
+label = "D-pad right"
+
+[[option]]
+feature = "local-coop"
+id = "p2-key-r"
+label = "Player 2 R (keyboard)"
+type = "choice"
+default = "I"
+
+[[option.choice]]
+value = "A"
+label = "A"
+
+[[option.choice]]
+value = "B"
+label = "B"
+
+[[option.choice]]
+value = "C"
+label = "C"
+
+[[option.choice]]
+value = "D"
+label = "D"
+
+[[option.choice]]
+value = "E"
+label = "E"
+
+[[option.choice]]
+value = "F"
+label = "F"
+
+[[option.choice]]
+value = "G"
+label = "G"
+
+[[option.choice]]
+value = "H"
+label = "H"
+
+[[option.choice]]
+value = "I"
+label = "I"
+
+[[option.choice]]
+value = "J"
+label = "J"
+
+[[option.choice]]
+value = "K"
+label = "K"
+
+[[option.choice]]
+value = "L"
+label = "L"
+
+[[option.choice]]
+value = "M"
+label = "M"
+
+[[option.choice]]
+value = "N"
+label = "N"
+
+[[option.choice]]
+value = "O"
+label = "O"
+
+[[option.choice]]
+value = "P"
+label = "P"
+
+[[option.choice]]
+value = "Q"
+label = "Q"
+
+[[option.choice]]
+value = "R"
+label = "R"
+
+[[option.choice]]
+value = "S"
+label = "S"
+
+[[option.choice]]
+value = "T"
+label = "T"
+
+[[option.choice]]
+value = "U"
+label = "U"
+
+[[option.choice]]
+value = "V"
+label = "V"
+
+[[option.choice]]
+value = "W"
+label = "W"
+
+[[option.choice]]
+value = "X"
+label = "X"
+
+[[option.choice]]
+value = "Y"
+label = "Y"
+
+[[option.choice]]
+value = "Z"
+label = "Z"
+
+[[option.choice]]
+value = "0"
+label = "0"
+
+[[option.choice]]
+value = "1"
+label = "1"
+
+[[option.choice]]
+value = "2"
+label = "2"
+
+[[option.choice]]
+value = "3"
+label = "3"
+
+[[option.choice]]
+value = "4"
+label = "4"
+
+[[option.choice]]
+value = "5"
+label = "5"
+
+[[option.choice]]
+value = "6"
+label = "6"
+
+[[option.choice]]
+value = "7"
+label = "7"
+
+[[option.choice]]
+value = "8"
+label = "8"
+
+[[option.choice]]
+value = "9"
+label = "9"
+
+[[option.choice]]
+value = "Space"
+label = "Space"
+
+[[option.choice]]
+value = "Return"
+label = "Return"
+
+[[option.choice]]
+value = "Tab"
+label = "Tab"
+
+[[option.choice]]
+value = "Backspace"
+label = "Backspace"
+
+[[option.choice]]
+value = "Left Shift"
+label = "Left Shift"
+
+[[option.choice]]
+value = "Right Shift"
+label = "Right Shift"
+
+[[option.choice]]
+value = "Left Ctrl"
+label = "Left Ctrl"
+
+[[option.choice]]
+value = "Right Ctrl"
+label = "Right Ctrl"
+
+[[option.choice]]
+value = "Left Alt"
+label = "Left Alt"
+
+[[option.choice]]
+value = "Right Alt"
+label = "Right Alt"
+
+[[option.choice]]
+value = "Up"
+label = "Up"
+
+[[option.choice]]
+value = "Down"
+label = "Down"
+
+[[option.choice]]
+value = "Left"
+label = "Left"
+
+[[option.choice]]
+value = "Right"
+label = "Right"
+
+[[option.choice]]
+value = ";"
+label = ";"
+
+[[option.choice]]
+value = "'"
+label = "'"
+
+[[option.choice]]
+value = ","
+label = ","
+
+[[option.choice]]
+value = "."
+label = "."
+
+[[option.choice]]
+value = "/"
+label = "/"
+
+[[option.choice]]
+value = "["
+label = "["
+
+[[option.choice]]
+value = "]"
+label = "]"
+
+[[option.choice]]
+value = "Keypad 0"
+label = "Keypad 0"
+
+[[option.choice]]
+value = "Keypad 1"
+label = "Keypad 1"
+
+[[option.choice]]
+value = "Keypad 2"
+label = "Keypad 2"
+
+[[option.choice]]
+value = "Keypad 3"
+label = "Keypad 3"
+
+[[option.choice]]
+value = "Keypad 4"
+label = "Keypad 4"
+
+[[option.choice]]
+value = "Keypad 5"
+label = "Keypad 5"
+
+[[option.choice]]
+value = "Keypad 6"
+label = "Keypad 6"
+
+[[option.choice]]
+value = "Keypad 7"
+label = "Keypad 7"
+
+[[option.choice]]
+value = "Keypad 8"
+label = "Keypad 8"
+
+[[option.choice]]
+value = "Keypad 9"
+label = "Keypad 9"
+
+[[option.choice]]
+value = "Keypad Enter"
+label = "Keypad Enter"
+
+[[option.choice]]
+value = "Keypad +"
+label = "Keypad +"
+
+[[option.choice]]
+value = "Keypad -"
+label = "Keypad -"
+
+[[option]]
+feature = "local-coop"
+id = "p2-pad-r"
+label = "Player 2 R (controller)"
+type = "choice"
+default = "rightshoulder"
+
+[[option.choice]]
+value = "a"
+label = "A"
+
+[[option.choice]]
+value = "b"
+label = "B"
+
+[[option.choice]]
+value = "x"
+label = "X"
+
+[[option.choice]]
+value = "y"
+label = "Y"
+
+[[option.choice]]
+value = "back"
+label = "Back"
+
+[[option.choice]]
+value = "start"
+label = "Start"
+
+[[option.choice]]
+value = "leftshoulder"
+label = "Left bumper"
+
+[[option.choice]]
+value = "rightshoulder"
+label = "Right bumper"
+
+[[option.choice]]
+value = "leftstick"
+label = "Left stick press"
+
+[[option.choice]]
+value = "rightstick"
+label = "Right stick press"
+
+[[option.choice]]
+value = "dpup"
+label = "D-pad up"
+
+[[option.choice]]
+value = "dpdown"
+label = "D-pad down"
+
+[[option.choice]]
+value = "dpleft"
+label = "D-pad left"
+
+[[option.choice]]
+value = "dpright"
+label = "D-pad right"
+
+[[option]]
+feature = "local-coop"
+id = "p2-key-l"
+label = "Player 2 L (keyboard)"
+type = "choice"
+default = "U"
+
+[[option.choice]]
+value = "A"
+label = "A"
+
+[[option.choice]]
+value = "B"
+label = "B"
+
+[[option.choice]]
+value = "C"
+label = "C"
+
+[[option.choice]]
+value = "D"
+label = "D"
+
+[[option.choice]]
+value = "E"
+label = "E"
+
+[[option.choice]]
+value = "F"
+label = "F"
+
+[[option.choice]]
+value = "G"
+label = "G"
+
+[[option.choice]]
+value = "H"
+label = "H"
+
+[[option.choice]]
+value = "I"
+label = "I"
+
+[[option.choice]]
+value = "J"
+label = "J"
+
+[[option.choice]]
+value = "K"
+label = "K"
+
+[[option.choice]]
+value = "L"
+label = "L"
+
+[[option.choice]]
+value = "M"
+label = "M"
+
+[[option.choice]]
+value = "N"
+label = "N"
+
+[[option.choice]]
+value = "O"
+label = "O"
+
+[[option.choice]]
+value = "P"
+label = "P"
+
+[[option.choice]]
+value = "Q"
+label = "Q"
+
+[[option.choice]]
+value = "R"
+label = "R"
+
+[[option.choice]]
+value = "S"
+label = "S"
+
+[[option.choice]]
+value = "T"
+label = "T"
+
+[[option.choice]]
+value = "U"
+label = "U"
+
+[[option.choice]]
+value = "V"
+label = "V"
+
+[[option.choice]]
+value = "W"
+label = "W"
+
+[[option.choice]]
+value = "X"
+label = "X"
+
+[[option.choice]]
+value = "Y"
+label = "Y"
+
+[[option.choice]]
+value = "Z"
+label = "Z"
+
+[[option.choice]]
+value = "0"
+label = "0"
+
+[[option.choice]]
+value = "1"
+label = "1"
+
+[[option.choice]]
+value = "2"
+label = "2"
+
+[[option.choice]]
+value = "3"
+label = "3"
+
+[[option.choice]]
+value = "4"
+label = "4"
+
+[[option.choice]]
+value = "5"
+label = "5"
+
+[[option.choice]]
+value = "6"
+label = "6"
+
+[[option.choice]]
+value = "7"
+label = "7"
+
+[[option.choice]]
+value = "8"
+label = "8"
+
+[[option.choice]]
+value = "9"
+label = "9"
+
+[[option.choice]]
+value = "Space"
+label = "Space"
+
+[[option.choice]]
+value = "Return"
+label = "Return"
+
+[[option.choice]]
+value = "Tab"
+label = "Tab"
+
+[[option.choice]]
+value = "Backspace"
+label = "Backspace"
+
+[[option.choice]]
+value = "Left Shift"
+label = "Left Shift"
+
+[[option.choice]]
+value = "Right Shift"
+label = "Right Shift"
+
+[[option.choice]]
+value = "Left Ctrl"
+label = "Left Ctrl"
+
+[[option.choice]]
+value = "Right Ctrl"
+label = "Right Ctrl"
+
+[[option.choice]]
+value = "Left Alt"
+label = "Left Alt"
+
+[[option.choice]]
+value = "Right Alt"
+label = "Right Alt"
+
+[[option.choice]]
+value = "Up"
+label = "Up"
+
+[[option.choice]]
+value = "Down"
+label = "Down"
+
+[[option.choice]]
+value = "Left"
+label = "Left"
+
+[[option.choice]]
+value = "Right"
+label = "Right"
+
+[[option.choice]]
+value = ";"
+label = ";"
+
+[[option.choice]]
+value = "'"
+label = "'"
+
+[[option.choice]]
+value = ","
+label = ","
+
+[[option.choice]]
+value = "."
+label = "."
+
+[[option.choice]]
+value = "/"
+label = "/"
+
+[[option.choice]]
+value = "["
+label = "["
+
+[[option.choice]]
+value = "]"
+label = "]"
+
+[[option.choice]]
+value = "Keypad 0"
+label = "Keypad 0"
+
+[[option.choice]]
+value = "Keypad 1"
+label = "Keypad 1"
+
+[[option.choice]]
+value = "Keypad 2"
+label = "Keypad 2"
+
+[[option.choice]]
+value = "Keypad 3"
+label = "Keypad 3"
+
+[[option.choice]]
+value = "Keypad 4"
+label = "Keypad 4"
+
+[[option.choice]]
+value = "Keypad 5"
+label = "Keypad 5"
+
+[[option.choice]]
+value = "Keypad 6"
+label = "Keypad 6"
+
+[[option.choice]]
+value = "Keypad 7"
+label = "Keypad 7"
+
+[[option.choice]]
+value = "Keypad 8"
+label = "Keypad 8"
+
+[[option.choice]]
+value = "Keypad 9"
+label = "Keypad 9"
+
+[[option.choice]]
+value = "Keypad Enter"
+label = "Keypad Enter"
+
+[[option.choice]]
+value = "Keypad +"
+label = "Keypad +"
+
+[[option.choice]]
+value = "Keypad -"
+label = "Keypad -"
+
+[[option]]
+feature = "local-coop"
+id = "p2-pad-l"
+label = "Player 2 L (controller)"
+type = "choice"
+default = "leftshoulder"
+
+[[option.choice]]
+value = "a"
+label = "A"
+
+[[option.choice]]
+value = "b"
+label = "B"
+
+[[option.choice]]
+value = "x"
+label = "X"
+
+[[option.choice]]
+value = "y"
+label = "Y"
+
+[[option.choice]]
+value = "back"
+label = "Back"
+
+[[option.choice]]
+value = "start"
+label = "Start"
+
+[[option.choice]]
+value = "leftshoulder"
+label = "Left bumper"
+
+[[option.choice]]
+value = "rightshoulder"
+label = "Right bumper"
+
+[[option.choice]]
+value = "leftstick"
+label = "Left stick press"
+
+[[option.choice]]
+value = "rightstick"
+label = "Right stick press"
+
+[[option.choice]]
+value = "dpup"
+label = "D-pad up"
+
+[[option.choice]]
+value = "dpdown"
+label = "D-pad down"
+
+[[option.choice]]
+value = "dpleft"
+label = "D-pad left"
+
+[[option.choice]]
+value = "dpright"
+label = "D-pad right"
 
 [[feature]]
 id = "stereo"
@@ -276,6 +3887,14 @@ label = "Linear"
 value = "guest"
 label = "Original (as on GBA)"
 
+[[option]]
+feature = "hd-audio"
+id = "sample-packs"
+label = "Instrument sample packs"
+description = "Plays instruments from the sample packs in the rotk.pc package (samples/), if any are installed, in place of the GBA's. Not used with Original smoothing."
+type = "boolean"
+default = true
+
 [[plugin]]
 feature = "large-memory"
 id = "rotk.pc.large-memory"
@@ -299,6 +3918,22 @@ id = "rotk.pc.widescreen"
 [[plugin]]
 feature = "smooth-motion"
 id = "rotk.pc.smooth-motion"
+
+[[plugin]]
+feature = "combat-info"
+id = "rotk.pc.combat-info"
+
+[[plugin]]
+feature = "minimap"
+id = "rotk.pc.minimap"
+
+[[plugin]]
+feature = "color-vision"
+id = "rotk.pc.color-vision"
+
+[[plugin]]
+feature = "rumble"
+id = "rotk.pc.rumble"
 
 [[plugin]]
 feature = "transparency"

@@ -1,0 +1,122 @@
+diff --git a/src/common/backends/imgui/launcher_imgui.cpp b/src/common/backends/imgui/launcher_imgui.cpp
+index 4dc73c7..601af6a 100644
+--- a/src/common/backends/imgui/launcher_imgui.cpp
++++ b/src/common/backends/imgui/launcher_imgui.cpp
+@@ -2209,6 +2209,8 @@ void draw_game_panel(LauncherModel* m, const LauncherTheme& th, bool fill_h = fa
+         if (m->password_save_path || m->password_sram_path)
+             reserve += px(96.0f);                      // password-save row (same footprint)
+         if (m->bios_name && launcher_model_bios_missing(m)) reserve += px(110.0f);  // "required" notice
++        if (m->edition_label && m->edition_label[0])
++            reserve += px(120.0f);                     // edition row: checkbox + wrapped note
+         if (m->msu1_patch_available) reserve += px(198.0f);  // MSU-1 patch-available sub-block
+                                                               // (title + up-to-3-line wrapped note + 2 stacked buttons)
+         if (builtin_file_picker_should_be_offered()) reserve += px(84.0f);
+@@ -2358,6 +2360,29 @@ void draw_game_panel(LauncherModel* m, const LauncherTheme& th, bool fill_h = fa
+     // (snesrecomp/runner/src/launcher/launcher_gui.cpp: msu1_patch_available +
+     // do_patch()/patch_rom/skip_patch). "warn" amber styling — this is a
+     // choice the player should notice, not a routine control.
++    // Alternate edition row (GameInfo.edition_label): an on/off choice the
++    // player makes before Play, so it sits on the front page with the ROM.
++    if (m->edition_label && m->edition_label[0]) {
++        ImGui::Dummy(ImVec2(0, px(10)));
++        ImGui::PushStyleColor(ImGuiCol_ChildBg, col(th.panel_hovered));
++        ImGui::PushStyleColor(ImGuiCol_Border,
++                              col(m->s.edition_enabled ? th.accent : th.border));
++        if (ImGui::BeginChild("edition_block", ImVec2(availw, 0),
++                              ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY,
++                              ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
++            bool enabled = m->s.edition_enabled != 0;
++            if (ImGui::Checkbox(m->edition_label, &enabled)) launcher_model_toggle_edition(m);
++            if (m->edition_note && m->edition_note[0]) {
++                const float inner_w = ImGui::GetContentRegionAvail().x;
++                ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + inner_w);
++                ImGui::TextColored(col(th.text_muted), "%s", m->edition_note);
++                ImGui::PopTextWrapPos();
++            }
++        }
++        ImGui::EndChild();
++        ImGui::PopStyleColor(2);
++    }
++
+     if (m->msu1_patch_available) {
+         ImGui::Dummy(ImVec2(0, px(10)));
+         ImGui::PushStyleColor(ImGuiCol_ChildBg, col(th.panel_hovered));
+diff --git a/src/common/launcher_model.c b/src/common/launcher_model.c
+index febe98d..b42362d 100644
+--- a/src/common/launcher_model.c
++++ b/src/common/launcher_model.c
+@@ -362,6 +362,8 @@ void launcher_model_init(LauncherModel* m,
+         m->msu1_supported       = game->msu1_supported != 0;
+         m->msu1_note            = game->msu1_note;
+         m->msu1_patch_path      = game->msu1_patch_path;
++        m->edition_label        = game->edition_label;
++        m->edition_note         = game->edition_note;
+         m->saves_supported      = game->sram_path != NULL;
+         m->sram_path            = game->sram_path;
+         m->has_solar_sensor     = game->has_solar_sensor != 0;
+@@ -3893,6 +3895,11 @@ void launcher_model_clear_sram(LauncherModel* m) {
+     if (existing) { fclose(existing); lm_copy_file(m->sram_path, bak); remove(m->sram_path); }
+ }
+ 
++void launcher_model_toggle_edition(LauncherModel* m) {
++    if (!m->edition_label) return;
++    m->s.edition_enabled = m->s.edition_enabled ? 0 : 1;
++}
++
+ void launcher_model_toggle_msu1(LauncherModel* m) {
+     if (!m->msu1_supported) return;
+     m->s.msu1_enabled = !m->s.msu1_enabled;
+diff --git a/src/common/launcher_model.h b/src/common/launcher_model.h
+index d01602e..4ab0c05 100644
+--- a/src/common/launcher_model.h
++++ b/src/common/launcher_model.h
+@@ -175,6 +175,9 @@ typedef struct {
+     // Mirrors the legacy launcher's `msu1_patch_available` predicate exactly.
+     bool        msu1_patch_available;
+     bool        msu1_patch_skipped;  // session-only "Play Unpatched" dismissal
++    // Alternate edition (GameInfo.edition_label): borrowed; NULL = none.
++    const char* edition_label;
++    const char* edition_note;
+     bool        saves_supported;     // sram_path != NULL -> show the SAVES panel
+     const char* sram_path;           // borrowed; NULL when the game has no SRAM
+ 
+@@ -1084,6 +1087,8 @@ const char* launcher_model_audio_device_label(const LauncherModel* m);
+ 
+ // ---- MSU-1 (only when msu1_supported) ----
+ void launcher_model_toggle_msu1(LauncherModel* m);
++// ---- Alternate edition (only when edition_label) ----
++void launcher_model_toggle_edition(LauncherModel* m);
+ void launcher_model_set_msu1_dir(LauncherModel* m, const char* dir);
+ 
+ // ---- NES-style settings (capability-gated like the PSX deep set) ----
+diff --git a/src/recomp_launcher.h b/src/recomp_launcher.h
+index c3ff46e..3ea1f18 100644
+--- a/src/recomp_launcher.h
++++ b/src/recomp_launcher.h
+@@ -1570,6 +1570,10 @@ struct RecompLauncherCSettings {
+      * additively; a zero-initialized host reads as unset. */
+     int  quality_preset;
+     int  quality_base;
++    /* The game's alternate edition (GameInfo.edition_label) is chosen: the host
++     * plays the edition, e.g. a mod built from the verified ROM, instead of the
++     * plain game. Appended additively; zero = the plain game. */
++    int  edition_enabled;
+ };
+ #define RECOMP_LAUNCHER_HAS_ZAPPER_SETTINGS 1
+ 
+@@ -2376,6 +2380,15 @@ typedef struct RecompLauncherCGameInfo {
+     const char* const* texture_filter_labels;
+     const int*         texture_filter_values;
+     int                num_texture_filters;
++
++    /* ---- Alternate edition (Settings.edition_enabled) ----------------------
++     * A game that can also be played as another edition of itself (a mod the
++     * host builds from the verified ROM) names it here; the front page's game
++     * card then shows an on/off row for it, with edition_note below. NULL
++     * label = no edition. Borrowed for the launcher's lifetime. Appended for
++     * ABI stability. */
++    const char*        edition_label;
++    const char*        edition_note;
+ } RecompLauncherCGameInfo;
+ 
+ /* RecompLauncherCGameInfo carries texture_filter_labels / _values. */

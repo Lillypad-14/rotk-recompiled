@@ -1,5 +1,6 @@
 #include "local_coop.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -15,6 +16,8 @@
 #include "multiplayer_session.h"
 #include "runtime_arm.h"
 #include "runtime_bus_bridge.h"
+#include "player2_controls.h"
+#include "profiler.h"
 #include "self_heal.h"
 #include "widescreen.h"
 
@@ -101,15 +104,18 @@ int g_cancelFrames = 0;
 // partitioned stably first, so the game's swaps leave it as it is and both consoles test the shared
 // actors in the same order.
 constexpr std::uint32_t kCheckCollisions = 0x03002D30u;
-constexpr std::uint32_t kCollisionQueueLiteral = kCheckCollisions + (0x0800D0D0u - 0x0800CD5Cu);
+// The original game runs it from ROM.
+constexpr std::uint32_t kCheckCollisionsRom = 0x0800CD5Cu;
+constexpr std::uint32_t kCollisionQueueOffset = 0x0800D0D0u - kCheckCollisionsRom;  // literal: the queue
 constexpr std::uint32_t kCollisionQueueCount = 0x03002428u;  // g_CollisionCheckQueueCount
 constexpr std::uint32_t kActorFlags = 0xE8u;
 constexpr std::uint32_t kFlagCollisionPassive = 1u << 17;
 constexpr const char* kCollisionOrderHookId = "rotk.pc.coop-collision-order";
+constexpr const char* kCollisionOrderRomHookId = "rotk.pc.coop-collision-order-rom";
 
-int stableCollisionOrder(std::uint32_t, int, ArmCpuState*)
+int stableCollisionOrder(std::uint32_t entry, int, ArmCpuState*)
 {
-    const std::uint32_t queue = bus_read_u32(kCollisionQueueLiteral);  // the engine limits may move it
+    const std::uint32_t queue = bus_read_u32(entry + kCollisionQueueOffset);  // the engine limits may move it
     const std::uint32_t count = bus_read_u32(kCollisionQueueCount);
     if (count < 2u || count > 4096u) return 0;
     std::vector<std::uint32_t> active, passive;
@@ -167,8 +173,10 @@ void suspendFeatureHooks()
 {
     g_saved = {gba::g_present_scanline_hook, gba::g_extra_obj_provider, gba::g_rom_read32_override, g_dma_observer};
     gba_mod_set_function_hooks_suspended(1);
-    gba_mod_set_function_hook_enabled(kCollisionOrderHookId, 1);
-    gba_mod_set_function_hook_runs_suspended(kCollisionOrderHookId, 1);
+    for (const char* id : {kCollisionOrderHookId, kCollisionOrderRomHookId}) {
+        gba_mod_set_function_hook_enabled(id, 1);
+        gba_mod_set_function_hook_runs_suspended(id, 1);
+    }
     gbarecomp::runtime_add_session_idle_loop(kWaitVBlankLoop, waitVBlankSpins);
     gbarecomp::runtime_add_session_idle_loop(kWaitMessageLoop, waitMessageSpins);
     pcFeaturesStartCoop();
@@ -178,8 +186,10 @@ void resumeFeatureHooks()
 {
     pcFeaturesEndCoop();
     gbarecomp::runtime_clear_session_idle_loops();
-    gba_mod_set_function_hook_runs_suspended(kCollisionOrderHookId, 0);
-    gba_mod_set_function_hook_enabled(kCollisionOrderHookId, 0);
+    for (const char* id : {kCollisionOrderHookId, kCollisionOrderRomHookId}) {
+        gba_mod_set_function_hook_runs_suspended(id, 0);
+        gba_mod_set_function_hook_enabled(id, 0);
+    }
     gba_mod_set_function_hooks_suspended(0);
     gba::g_present_scanline_hook = g_saved.present;
     gba::g_extra_obj_provider = g_saved.extraObjects;
@@ -211,15 +221,25 @@ constexpr std::uint8_t kMusicEnabled = 1u << 1;
 // runs, keeping the checksum valid.
 void muteMusic(gba::GbaBus& bus)
 {
-    const auto save = bus.save().sram_bytes();
-    if (save.size() < kSaveGlobalsBytes || !(save[kOptionsFlags] & kMusicEnabled)) return;
+    auto save = bus.save().contents();  // SRAM (Expanded) or EEPROM (the original game)
+    if (save.size() < kSaveGlobalsBytes) return;
+    // The EEPROM keeps each 8-byte block in reverse byte order.
+    const bool eeprom = bus.save().eeprom_enabled();
+    const auto flipBlocks = [&] {
+        if (eeprom)
+            for (std::uint32_t i = 0; i < kSaveGlobalsBytes; i += 8) std::reverse(save.begin() + i, save.begin() + i + 8);
+    };
+    flipBlocks();
+    if (!(save[kOptionsFlags] & kMusicEnabled)) return;
     std::uint16_t sum = 0;
     for (std::uint32_t i = 0; i < kSaveGlobalsBytes; i += 2) sum += save[i] | save[i + 1] << 8;
     if (sum != 0) return;  // no valid globals yet (a blank save)
     const std::uint16_t checksum = (save[kChecksum] | save[kChecksum + 1] << 8) + kMusicEnabled;
-    bus.save().sram_write(kOptionsFlags, save[kOptionsFlags] & ~kMusicEnabled);
-    bus.save().sram_write(kChecksum, checksum & 0xFF);
-    bus.save().sram_write(kChecksum + 1, checksum >> 8);
+    save[kOptionsFlags] &= ~kMusicEnabled;
+    save[kChecksum] = checksum & 0xFF;
+    save[kChecksum + 1] = checksum >> 8;
+    flipBlocks();
+    bus.save().load_contents(save.data(), save.size());
 }
 
 // Every session is recorded next to the save, so a reported problem can be replayed exactly with
@@ -246,8 +266,8 @@ void startRecording(const gbarecomp::LocalLinkFrame& link)
     const std::time_t now = std::time(nullptr);
     std::strftime(stamp, sizeof(stamp), ".coop-%Y%m%d-%H%M%S", std::localtime(&now));
     const std::string base = std::string(link.save_path) + stamp;
-    writeFile(base + "-1.sram", link.machines[0]->bus.save().sram_bytes());
-    writeFile(base + "-2.sram", link.machines[1]->bus.save().sram_bytes());
+    writeFile(base + "-1.sram", link.machines[0]->bus.save().contents());
+    writeFile(base + "-2.sram", link.machines[1]->bus.save().contents());
     g_recording = std::fopen((base + ".inputs.txt").c_str(), "w");
     if (g_recording)
         std::fprintf(g_recording, "# split-screen co-op session: frame p1 p2 (pressed GBA buttons), from the link\n");
@@ -351,6 +371,12 @@ bool frame(gbarecomp::LocalLinkFrame* link)
             if (ewramSnapshots)
                 std::fflush(ewramSnapshots);
         }
+        // ROTK_PC_COOP_TEST_PROFILE=<file>: profiles the emulation thread over linked frames
+        // ROTK_PC_COOP_TEST_PROFILE_FROM..UNTIL (default all), for tools/profile_report.py.
+        static const char* profileFrom = std::getenv("ROTK_PC_COOP_TEST_PROFILE_FROM");
+        static const char* profileUntil = std::getenv("ROTK_PC_COOP_TEST_PROFILE_UNTIL");
+        profilerSample((!profileFrom || linked >= std::strtoull(profileFrom, nullptr, 10)) &&
+                       (!profileUntil || linked <= std::strtoull(profileUntil, nullptr, 10)));
         link->fast = fast && !(showFrom && linked >= std::strtoull(showFrom, nullptr, 10)) &&
                      !(showEvery && linked % std::strtoull(showEvery, nullptr, 10) == 0);
         static std::uint32_t scenes[2] = {~0u, ~0u};
@@ -457,6 +483,7 @@ const gbarecomp::LocalLinkPlay kLocalLink{wanted, frame, finished, partnerKeepsS
 void localCoopActivated()
 {
     g_enabled = true;
+    player2ControlsApply();
 }
 
 void localCoopReset()
@@ -469,9 +496,11 @@ void localCoopReset()
 void localCoopRegister(gbarecomp::RunOptions& options)
 {
     gba_mod_register_function_entry_plugin(kCollisionOrderHookId, kCheckCollisions, 0, stableCollisionOrder);
+    gba_mod_register_function_entry_plugin(kCollisionOrderRomHookId, kCheckCollisionsRom, 0, stableCollisionOrder);
     gba_mod_register_activation_plugin("rotk.pc.local-coop", localCoopActivated);
     gba_mod_register_reset_callback(localCoopReset);
     options.local_link = &kLocalLink;
+    if (const char* path = std::getenv("ROTK_PC_COOP_TEST_PROFILE")) profilerStart(path);
 }
 
 }  // namespace rotk

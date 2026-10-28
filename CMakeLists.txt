@@ -13,6 +13,12 @@ set(ROTK_GAME_NAME "ROTK PC Lab" CACHE STRING "Window title and game name")
 set(ROTK_ROM_SHA1 "ec3d126d37ea6e2ad7030d8a99cf87c6e46c03fd" CACHE STRING "Expected ROM SHA-1")
 set(ROTK_ROM_CRC32 "0x7590ebfa" CACHE STRING "Expected ROM CRC32")
 set(ROTK_DEBUG_PORT "19852" CACHE STRING "TCP debug port")
+# The launcher's "Expanded" row (vanilla build): the Expanded mod as a BPS patch made by
+# tools/make_edition_patch.py, the Expanded build that plays it (both relative to this executable,
+# or absolute) and the patched ROM's SHA-1. Empty = no row.
+set(ROTK_EDITION_PATCH "" CACHE FILEPATH "Expanded mod BPS patch to copy beside the executable")
+set(ROTK_EDITION_EXE "" CACHE STRING "Expanded build executable, relative to this one or absolute")
+set(ROTK_EDITION_SHA1 "" CACHE STRING "SHA-1 of the patched (Expanded) ROM")
 # recomp-ui: the pre-boot launcher and its Mods page, where the PC enhancements are chosen.
 set(GBARECOMP_RUNTIME_UI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/external/recomp-ui" CACHE PATH "recomp-ui checkout")
 set(RECOMP_UI_ROOT "${GBARECOMP_RUNTIME_UI_ROOT}" CACHE PATH "recomp-ui checkout")
@@ -46,7 +52,9 @@ target_include_directories(RotkCart PRIVATE ${ROTK_HOST_INCLUDES})
 target_link_gbarecomp_runtime_stack(RotkCart)
 
 add_executable(${ROTK_EXECUTABLE} src/main.cpp src/widescreen.cpp src/hd_audio.cpp src/hd_icons.cpp src/local_coop.cpp
-    src/smooth_motion.cpp src/transparency.cpp $<TARGET_OBJECTS:RotkCart>)
+    src/smooth_motion.cpp src/transparency.cpp src/combat_info.cpp src/rumble.cpp src/color_vision.cpp src/bug_report.cpp
+    src/sample_packs.cpp src/minimap.cpp src/profiler.cpp src/player2_controls.cpp src/bps_patch.cpp
+    src/expanded_edition.cpp $<TARGET_OBJECTS:RotkCart>)
 target_include_directories(${ROTK_EXECUTABLE} PRIVATE ${ROTK_HOST_INCLUDES})
 # stb_image decodes the HD art packs.
 target_include_directories(${ROTK_EXECUTABLE} PRIVATE "${RECOMP_UI_ROOT}/src/third_party")
@@ -79,9 +87,24 @@ endif()
 
 # Built-in package for the PC enhancements, preloaded next to the executable for this target's ROM.
 set(ROTK_MOD_GAME_ID "rotk")
+# An edition build's settings also serve the Expanded build it starts (GBARECOMP_MODS_ROOT).
+set(ROTK_EDITION_TARGET "")
+if(ROTK_EDITION_SHA1)
+    set(ROTK_EDITION_TARGET "
+[[target]]
+game_id = \"${ROTK_MOD_GAME_ID}\"
+rom_sha1 = \"${ROTK_EDITION_SHA1}\"
+")
+endif()
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/mods/rotk.pc.manifest.toml.in"
     "${CMAKE_CURRENT_BINARY_DIR}/mods/packages/rotk.pc/1.0.0/manifest.toml" @ONLY)
 target_compile_definitions(${ROTK_EXECUTABLE} PRIVATE ROTK_MOD_GAME_ID="${ROTK_MOD_GAME_ID}")
+if(ROTK_EDITION_PATCH AND ROTK_EDITION_EXE AND ROTK_EDITION_SHA1)
+    target_compile_definitions(${ROTK_EXECUTABLE} PRIVATE ROTK_EDITION_PATCH="expanded.bps"
+        ROTK_EDITION_EXE="${ROTK_EDITION_EXE}" ROTK_EDITION_SHA1="${ROTK_EDITION_SHA1}")
+    add_custom_command(TARGET ${ROTK_EXECUTABLE} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${ROTK_EDITION_PATCH}" "$<TARGET_FILE_DIR:${ROTK_EXECUTABLE}>/expanded.bps")
+endif()
 
 # HD art packs from the romhack (skill_icon_art.py build --hd-out), one folder per pack.
 file(GLOB ROTK_HD_PACKS LIST_DIRECTORIES true CONFIGURE_DEPENDS
@@ -93,6 +116,11 @@ foreach(pack ${ROTK_HD_PACKS})
     file(GLOB pack_files CONFIGURE_DEPENDS "${pack}/*")
     file(COPY ${pack_files} DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/mods/packages/rotk.pc/1.0.0/hd/${name}")
 endforeach()
+
+# Applies a BPS patch to a ROM (the Expanded toggle's patcher): RotkBpsPatchCheck <rom> <patch> [out].
+add_executable(RotkBpsPatchCheck EXCLUDE_FROM_ALL tests/bps_patch_test.cpp src/bps_patch.cpp)
+target_include_directories(RotkBpsPatchCheck PRIVATE src ${ROTK_HOST_INCLUDES})
+target_link_gbarecomp_runtime_stack(RotkBpsPatchCheck)
 
 add_executable(RotkHostRamCheck EXCLUDE_FROM_ALL tests/host_ram_test.cpp)
 target_sources(RotkHostRamCheck PRIVATE $<TARGET_OBJECTS:RotkCart>)
@@ -185,7 +213,8 @@ foreach(property SOURCES INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS
 endforeach()
 
 add_executable(RotkCoopEngineCheck EXCLUDE_FROM_ALL tests/coop_engine_test.cpp src/widescreen.cpp
-    src/hd_audio.cpp src/hd_icons.cpp src/local_coop.cpp src/smooth_motion.cpp src/transparency.cpp
+    src/hd_audio.cpp src/sample_packs.cpp src/hd_icons.cpp src/local_coop.cpp src/smooth_motion.cpp src/transparency.cpp
+    src/profiler.cpp src/player2_controls.cpp
     $<TARGET_OBJECTS:RotkCart>)
 foreach(property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS LINK_LIBRARIES LINK_OPTIONS)
     get_target_property(value ${ROTK_EXECUTABLE} ${property})
