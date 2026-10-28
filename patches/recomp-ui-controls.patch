@@ -1,0 +1,329 @@
+diff --git a/recomp_ui.cmake b/recomp_ui.cmake
+index dd5c935..011aac2 100644
+--- a/recomp_ui.cmake
++++ b/recomp_ui.cmake
+@@ -183,6 +183,7 @@ function(recomp_target_launcher_ui TGT)
+         ${RUI_SRC}/consoles/snes/snes_pad_binds.c  # SNES button table over common/pad_binds.c
+         ${RUI_SRC}/consoles/n64/n64_binds.c        # N64-native input.cfg bridge (keyboard table + mirror)
+         ${RUI_SRC}/consoles/n64/n64_pad_binds.c    # N64 button table over common/pad_binds.c
++        ${RUI_SRC}/consoles/gba/gba_pad_binds.c    # GBA button table over common/pad_binds.c (shared with gbarecomp)
+         ${RUI_SRC}/consoles/nes/nes_binds.c        # NES-native keybind persistence bridge
+         ${RUI_SRC}/consoles/genesis/genesis_binds.c # Genesis-native settings.ini key.*/pad.* bridge
+         ${RUI_SRC}/consoles/gb/gb_binds.c          # Game Boy-native keybinds.ini [controls] bridge
+diff --git a/src/common/backends/imgui/launcher_imgui.cpp b/src/common/backends/imgui/launcher_imgui.cpp
+index 7adbb70..f6c7c02 100644
+--- a/src/common/backends/imgui/launcher_imgui.cpp
++++ b/src/common/backends/imgui/launcher_imgui.cpp
+@@ -3218,6 +3218,13 @@ void draw_source_selectables(LauncherModel* m, int p) {
+                            !strcmp(src_prof->id, "snes");
+     const bool n64_prof = src_prof && src_prof->id &&
+                           !strcmp(src_prof->id, "n64");
++    // GBA: Auto plays on the keyboard and the first free controller, and is
++    // what gbarecomp does when nothing was chosen.
++    if (src_prof && src_prof->id && !strcmp(src_prof->id, "gba") &&
++        ImGui::Selectable(ui_text("Auto (keyboard + any controller)"), m->s.player_src[p] == 3)) {
++        launcher_model_set_source(m, p, 3, 0, nullptr, nullptr);
++        launcher_binds_refresh(m);
++    }
+     if (ImGui::Selectable(ui_text("None"), m->s.player_src[p] == 0)) {
+         launcher_model_set_source(m, p, 0, 0, nullptr, nullptr);
+         if (psx) launcher_binds_refresh(m);
+diff --git a/src/common/launcher_binds.c b/src/common/launcher_binds.c
+index 2e2bf4b..b5865d7 100644
+--- a/src/common/launcher_binds.c
++++ b/src/common/launcher_binds.c
+@@ -13,6 +13,7 @@
+ #include "consoles/genesis/genesis_binds.h"   // Genesis-native bridge (settings.ini [input.pN])
+ #include "consoles/gb/gb_binds.h"     // Game Boy-native bridge (keybinds.ini [controls])
+ #include "consoles/snes/snes_pad_binds.h" // SNES pad shape (default deadzone)
++#include "consoles/gba/gba_pad_binds.h"   // GBA gamepad input.ini per-GUID store (shared with gbarecomp)
+ 
+ #include <ctype.h>
+ #include <stdio.h>
+@@ -65,6 +66,39 @@ static const int* active_kb_index(const LauncherModel* m, int* out_n) {
+     return kKbIndexSnes;
+ }
+ 
++// GBA: keyboard keys in the generic keybinds.ini store (above), controller
++// layouts per GUID in input.ini (consoles/gba/gba_pad_binds.c). gbarecomp reads
++// both, plus config.ini [Controller] for each player's source, where 3 is Auto
++// (the keyboard and the first free controller).
++static int is_gba_profile(const LauncherModel* m) {
++    const SystemProfile* prof = m ? (const SystemProfile*)m->profile : NULL;
++    return prof && prof->id && !strcmp(prof->id, "gba");
++}
++
++static const char* keybinds_file_path(void);
++
++static const char* gba_input_ini_path(void) {
++    static char buf[1024];
++    rui_gba_pad_binds_path(keybinds_file_path(), buf, (int)sizeof(buf));
++    return buf;
++}
++
++// The controller whose layout the page edits: the player's chosen one. Auto
++// and the keyboard have no single controller, so the page shows the fallback.
++static const char* gba_player_guid(const LauncherModel* m, int player /*1-based*/) {
++    if (player < 1 || player > 2 || m->s.player_src[player - 1] != 2) return "";
++    return m->s.player_gamepad_guid[player - 1];
++}
++
++// Player 2's own keyboard defaults (gbarecomp player_controls.cpp), in
++// kGbaPadButtons order: the generic store's player 2 defaults are player 1's
++// keys, which would move both players at once on one keyboard.
++static const SDL_Scancode kGbaPlayerTwoKeys[LNG_GBA_PAD_BUTTON_COUNT] = {
++    SDL_SCANCODE_W, SDL_SCANCODE_S, SDL_SCANCODE_A, SDL_SCANCODE_D,
++    SDL_SCANCODE_J, SDL_SCANCODE_K, SDL_SCANCODE_U, SDL_SCANCODE_I,
++    SDL_SCANCODE_SPACE, SDL_SCANCODE_G,
++};
++
+ // ---- PSX-native keybind bridge ---------------------------------------------
+ // Lives in consoles/psx/psx_binds.c (the console's own unit) â€” for a PSX
+ // SystemProfile, persistence routes through psxrecomp's native 24-scancode
+@@ -355,6 +389,12 @@ static void reload_player_display(LauncherModel* m, int player) {
+         SDL_Scancode sc = recompui_keybinds_get_button(player, kb_index[b]);
+         copy_str(m->binds[player - 1][b], sizeof(m->binds[player - 1][b]), scancode_label(sc));
+     }
++    if (is_gba_profile(m)) {
++        for (int b = 0; b < n; ++b)
++            rui_gba_pad_binds_label(gba_input_ini_path(), gba_player_guid(m, player), b,
++                                    m->pad_binds[player - 1][b],
++                                    (int)sizeof(m->pad_binds[player - 1][b]));
++    }
+     if (is_snes_profile(m)) {
+         char controls[LNG_SNES_PAD_BUTTON_COUNT][48];
+         snes_gamepad_read_controls(player - 1, controls);
+@@ -921,6 +961,8 @@ void launcher_binds_load(LauncherModel* m, const char* config_path_in, const cha
+         rui_gb_binds_init(gb_binds_file_path());   // load/generate keybinds.ini [controls] (gb-recompiled format)
+     } else {
+         recompui_keybinds_init(NULL);              // load/generate keybinds.ini (exe-anchored)
++        if (is_gba_profile(m))
++            rui_gba_pad_binds_init(gba_input_ini_path());   // controller layouts (input.ini, per GUID)
+     }
+ loaded:
+     launcher_binds_refresh(m);
+@@ -1085,6 +1127,17 @@ void launcher_binds_set_pad_button(LauncherModel* m, int player, int b,
+         (void)snes_gamepad_set_button(m, player - 1, b, kind, code, axis_dir);
+         return;
+     }
++    if (is_gba_profile(m)) {
++        if (player > 2 || b < 0 || b >= LNG_GBA_PAD_BUTTON_COUNT) return;
++        const char* guid = gba_player_guid(m, player);
++        if (!guid[0]) return;          // the layout belongs to a chosen controller
++        rui_gba_pad_binds_set(gba_input_ini_path(), guid, b, kind, code, axis_dir);
++        rui_gba_pad_binds_remember(gba_input_ini_path(), guid, m->player_pad_name[player - 1]);
++        rui_gba_pad_binds_label(gba_input_ini_path(), guid, b,
++                                m->pad_binds[player - 1][b],
++                                (int)sizeof(m->pad_binds[player - 1][b]));
++        return;
++    }
+     // Genesis: has_pad_binds console (key + pad pair per logical button).
+     if (!is_genesis_profile(m)) return;
+     if (player > 2) return;
+@@ -1501,6 +1554,24 @@ void launcher_binds_reset_player(LauncherModel* m, int player) {
+         reload_player_display(m, player);
+         return;
+     }
++    if (is_gba_profile(m)) {
++        // Reset what the page shows: the chosen controller's layout, or the keys.
++        const char* guid = gba_player_guid(m, player);
++        if (guid[0]) {
++            rui_gba_pad_binds_reset(gba_input_ini_path(), guid);
++        } else {
++            recompui_keybinds_reset_player(player);
++            if (player == 2) {
++                int n = 0;
++                const int* kb_index = active_kb_index(m, &n);
++                for (int b = 0; b < n; ++b)
++                    recompui_keybinds_set_button(player, kb_index[b], kGbaPlayerTwoKeys[b]);
++            }
++            recompui_keybinds_save();
++        }
++        reload_player_display(m, player);
++        return;
++    }
+     recompui_keybinds_reset_player(player);
+     recompui_keybinds_save();
+     reload_player_display(m, player);
+diff --git a/src/common/launcher_model.c b/src/common/launcher_model.c
+index b42362d..b954c52 100644
+--- a/src/common/launcher_model.c
++++ b/src/common/launcher_model.c
+@@ -60,7 +60,7 @@ static const char* kViewNames[8] = {
+     "Dashboard", "Settings", "Controller", "Netplay", "Mods",
+     "Assist Tools", "Credits", "Lobby"
+ };
+-static const char* kSrcNames[3]  = { "None", "Keyboard", "Gamepad" };
++static const char* kSrcNames[4]  = { "None", "Keyboard", "Gamepad", "Auto" };
+ 
+ static void safe_copy(char* dst, size_t cap, const char* src) {
+     if (!dst || cap == 0) return;
+@@ -4383,7 +4383,7 @@ void launcher_model_set_source(LauncherModel* m, int player, int kind,
+                                uint32_t pad_id, const char* pad_name,
+                                const char* pad_guid) {
+     player = clampi(player, 0, LNG_MAX_PLAYERS - 1);
+-    m->s.player_src[player] = clampi(kind, 0, 2);
++    m->s.player_src[player] = clampi(kind, 0, 3);   // 3 = Auto (GBA)
+     if (kind == 2) {
+         m->player_pad_id[player] = pad_id;
+         m->s.player_gamepad_instance[player] = pad_id + 1;
+@@ -4625,7 +4625,7 @@ const char* launcher_model_freq_label(const LauncherModel* m) {
+ 
+ const char* launcher_model_player_src_label(const LauncherModel* m, int player) {
+     player = clampi(player, 0, LNG_MAX_PLAYERS - 1);
+-    int src = clampi(m->s.player_src[player], 0, 2);
++    int src = clampi(m->s.player_src[player], 0, 3);
+     if (src == 2) {
+         // Never show the generic "Gamepad" placeholder when we have a concrete
+         // pad name (or at least a GUID-backed label filled by sync/hydrate).
+diff --git a/src/common/launcher_settings.inc b/src/common/launcher_settings.inc
+index 352a587..e75463a 100644
+--- a/src/common/launcher_settings.inc
++++ b/src/common/launcher_settings.inc
+@@ -57,8 +57,9 @@ static const Setting kSettings[] = {
+     OPTIONAL("Rewind", "Enabled", rewind_enabled, BOOLEAN, 0, 1, has_rewind_depth),
+     OPTIONAL("Rewind", "Depth", rewind_depth, NUMBER, 1, 600, has_rewind_depth),
+     OPTIONAL("Rewind", "Interval", rewind_interval, NUMBER, 1, 60, has_rewind_depth),
+-    INT("Controller", "SourceP1", player_src[0], 0, 2),
+-    INT("Controller", "SourceP2", player_src[1], 0, 2),
++    /* 3 = Auto (GBA: the keyboard and the first free controller). */
++    INT("Controller", "SourceP1", player_src[0], 0, 3),
++    INT("Controller", "SourceP2", player_src[1], 0, 3),
+     INT("GamepadMap", "Deadzone", deadzone[0], 0, 100),
+     INT("GamepadMap", "DeadzoneP2", deadzone[1], 0, 100),
+     FIELD("Controller", "GuidP1", player_gamepad_guid[0], TEXT, 0, 0, ALWAYS),
+diff --git a/src/consoles/gba/gba_pad_binds.c b/src/consoles/gba/gba_pad_binds.c
+new file mode 100644
+index 0000000..e50f108
+--- /dev/null
++++ b/src/consoles/gba/gba_pad_binds.c
+@@ -0,0 +1,61 @@
++// consoles/gba/gba_pad_binds.c — the GBA shape of the shared per-GUID input.ini
++// store. See gba_pad_binds.h.
++
++#include "gba_pad_binds.h"
++#include "pad_binds.h"
++
++// kGbaPadButtons order: Up Down Left Right A B L R Start Select.
++static const char* const kGbaPadKeyName[] = {
++    "up", "down", "left", "right", "a", "b", "l", "r", "start", "select",
++};
++
++// gbarecomp's built-in controller layout (player_controls.cpp kPadDefaults).
++static const char* const kGbaPadDefaults[] = {
++    "dpup", "dpdown", "dpleft", "dpright", "a", "b",
++    "leftshoulder", "rightshoulder", "start", "back",
++};
++
++static const char kGbaSeed[] =
++    "; GBA controller mapping, shared with the game. A GBA button is pressed\n"
++    "; when its listed source is. [mapping.<guid>] is one controller's layout\n"
++    "; and stick dead zone (percent); [mapping] is the fallback for the rest.\n"
++    "; The left stick always moves too. Keyboard keys are in keybinds.ini.\n\n";
++
++static const RuiPadSpec kGbaPadSpec = {
++    kGbaPadKeyName,
++    kGbaPadDefaults,
++    (int)(sizeof(kGbaPadKeyName) / sizeof(kGbaPadKeyName[0])),
++    4,                                   /* four d-pad cardinals ... */
++    RUI_GBA_PAD_DEFAULT_DEADZONE_PCT,
++    0,
++    kGbaSeed,
++    0,
++    0,                                   /* ... starting at Up, index 0 */
++};
++
++void rui_gba_pad_binds_path(const char* keybinds_path, char* out, int cap) {
++    rui_pad_binds_sibling_path(keybinds_path, "input.ini", out, cap);
++}
++
++void rui_gba_pad_binds_init(const char* path) {
++    rui_pad_binds_init(&kGbaPadSpec, path);
++}
++
++void rui_gba_pad_binds_label(const char* path, const char* guid, int b,
++                             char* out, int cap) {
++    rui_pad_binds_label(&kGbaPadSpec, path, guid, b, out, cap);
++}
++
++void rui_gba_pad_binds_set(const char* path, const char* guid, int b,
++                           int kind, int code, int axis_dir) {
++    rui_pad_binds_set(&kGbaPadSpec, path, guid, b, kind, code, axis_dir);
++}
++
++void rui_gba_pad_binds_reset(const char* path, const char* guid) {
++    rui_pad_binds_reset(&kGbaPadSpec, path, guid);
++}
++
++void rui_gba_pad_binds_remember(const char* path, const char* guid,
++                                const char* name) {
++    rui_pad_binds_remember(&kGbaPadSpec, path, guid, name, -1);
++}
+diff --git a/src/consoles/gba/gba_pad_binds.h b/src/consoles/gba/gba_pad_binds.h
+new file mode 100644
+index 0000000..b87eead
+--- /dev/null
++++ b/src/consoles/gba/gba_pad_binds.h
+@@ -0,0 +1,36 @@
++// consoles/gba/gba_pad_binds.h — the GBA shape of the shared per-GUID input.ini
++// store (common/pad_binds.h).
++//
++// gbarecomp reads the same file (src/runtime/player_controls.h): [mapping] is
++// every controller's fallback, [mapping.<guid>] one controller's layout and
++// stick dead zone. Keys are the GBA inputs by name (a b select start right left
++// up down r l), so the table below is in the launcher's display order
++// (gba_profile.h kGbaPadButtons) and the runtime's KEYINPUT order never has to
++// match it. Keyboard keys stay in keybinds.ini.
++
++#ifndef RUI_CONSOLE_GBA_PAD_BINDS_H
++#define RUI_CONSOLE_GBA_PAD_BINDS_H
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#define RUI_GBA_PAD_DEFAULT_DEADZONE_PCT 50
++
++// input.ini next to `keybinds_path`.
++void rui_gba_pad_binds_path(const char* keybinds_path, char* out, int cap);
++void rui_gba_pad_binds_init(const char* path);
++// Label for button `b` (launcher order); an empty guid shows the fallback.
++void rui_gba_pad_binds_label(const char* path, const char* guid, int b,
++                             char* out, int cap);
++void rui_gba_pad_binds_set(const char* path, const char* guid, int b,
++                           int kind, int code, int axis_dir);
++void rui_gba_pad_binds_reset(const char* path, const char* guid);
++void rui_gba_pad_binds_remember(const char* path, const char* guid,
++                                const char* name);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif // RUI_CONSOLE_GBA_PAD_BINDS_H
+diff --git a/src/consoles/gba/gba_profile.h b/src/consoles/gba/gba_profile.h
+index a38dd66..b54ce16 100644
+--- a/src/consoles/gba/gba_profile.h
++++ b/src/consoles/gba/gba_profile.h
+@@ -7,7 +7,8 @@
+ // src/launcher_profile.h (ABI apply) — consumers never include this directly.
+ //
+ // GBA is the cartridge-HANDHELD model console (vs PSX, the deep disc-console
+-// model): a single player, a 10-input pad that is the console itself, one
++// model): a 10-input pad that is the console itself (two players for games
++// with local link play, each on Auto, the keyboard or a controller), one
+ // battery-backed save file per cartridge (the runtime unifies EEPROM/flash/
+ // SRAM behind one .sav), a required BIOS image (LLE by default), and an LCD
+ // screen-model filter instead of CRT emulation.
+@@ -79,7 +80,10 @@ static const SystemProfile kSystemProfileGba = {
+     /* controller */ {
+         kGbaPadButtons, LNG_GBA_PAD_BUTTON_COUNT,
+         "pad_gba.tga", NULL, NULL,     // handheld art; no analog/digital pair
+-        /* max_players */ 1, /* has_pad_mode */ 0, /* link seats are netplay-only: create_max_slots */
++        /* max_players */ 2, /* has_pad_mode */ 0, /* player 2: local link play; netplay seats: create_max_slots */
++        /* binds_per_input */ 1,
++        /* modes */ NULL, /* mode_count */ 0,
++        /* has_pad_binds */ 1,         // controller layouts per GUID (consoles/gba/gba_pad_binds.c)
+     },
+     // One battery save per cartridge: the runtime presents EEPROM/flash/SRAM
+     // uniformly as a single .sav next to the ROM (or game.toml [save].path).

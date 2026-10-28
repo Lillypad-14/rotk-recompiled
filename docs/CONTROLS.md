@@ -1,7 +1,7 @@
 # Controls overhaul (plan)
 
 Goal: controller and keyboard mapping that needs no explanation, for one player or split-screen co-op,
-on a desk or a Steam Deck. Status (2026-10-28): phase 1 (engine) done, phases 2-5 to do.
+on a desk or a Steam Deck. Status (2026-10-28): phases 1 (engine) and 2 (launcher) done, 3-5 to do.
 
 Decisions:
 
@@ -109,6 +109,27 @@ settings, so they keep working until phase 3 replaces them.
 Checked: `player_controls_tests`; an isolated boot (`tools/check.py --mods-state`) writes the three
 files as above; an old `p2-key-a = "Q"` / `p2-pad-r = "y"` arrives as `[player2] a = Q` and
 `[mapping] r = y`.
+
+## Phase 2 (done)
+
+`patches/recomp-ui-controls.patch`:
+
+- GBA profile: two players and a controller column on the Controller page (`has_pad_binds`). A
+  player whose source is a controller edits that controller's layout; Auto and Keyboard edit keys.
+- `consoles/gba/gba_pad_binds.c`: the GBA table over the shared `input.ini` store, by the same key
+  names the engine reads, default dead zone 50.
+- Source 3 = Auto ("Auto (keyboard + any controller)"), the seeded default for both players
+  (`launcher_seam.h` in `controls.patch`).
+- Reset on player 2's keys gives player 2's WASD layout, not the generic store's copy of player 1's.
+
+The old `p2-key-*` / `p2-pad-*` options stay in the manifest (only declared options keep their saved
+values, and the migration reads them) in the group "Old player 2 controls", marked as replaced.
+Remove them a release or two later.
+
+Checked: both patches rebuild the working trees from the pinned revisions; a scratch program wrote
+bindings through `rui_gba_pad_binds_set` and read them with `controls::load` (and back after an
+engine save); the Expanded build boots isolated. The launcher page itself has not been looked at on
+screen yet.
 
 ## Phases
 

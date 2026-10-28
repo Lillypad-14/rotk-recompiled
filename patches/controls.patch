@@ -612,12 +612,28 @@ index cf48963..6d35d52 100644
  void HostWindow::rumble(int, std::uint16_t, std::uint16_t, std::uint32_t) {}
  
  bool HostWindow::drawable_size(int* /*width*/, int* /*height*/) const {
+diff --git a/src/runtime/launcher_seam.h b/src/runtime/launcher_seam.h
+index 4171951..e5788a8 100644
+--- a/src/runtime/launcher_seam.h
++++ b/src/runtime/launcher_seam.h
+@@ -787,7 +787,10 @@ inline int gbarecomp_launcher_preboot(std::vector<std::string>& args,
+     ls.enable_audio  = 1;
+     ls.audio_freq    = 32768;             // GBA mixer base rate (display only)
+     ls.volume        = cfg.volume;
+-    ls.player_src[0] = 1;                 // keyboard (gbarecomp host input)
++    // Auto (3): the keyboard and the first free controller, what the host
++    // does until config.ini [Controller] says otherwise (player_controls.h).
++    ls.player_src[0] = 3;
++    ls.player_src[1] = 3;
+     ls.skip_launcher = cfg.skip_launcher;
+     bool solar_in_launcher = false;
+     if (opts.has_solar_sensor) solar_in_launcher = push_solar_settings(ls, solar);
 diff --git a/src/runtime/player_controls.cpp b/src/runtime/player_controls.cpp
 new file mode 100644
-index 0000000..066d15a
+index 0000000..7303318
 --- /dev/null
 +++ b/src/runtime/player_controls.cpp
-@@ -0,0 +1,403 @@
+@@ -0,0 +1,404 @@
 +#include "player_controls.h"
 +
 +#include <algorithm>
@@ -854,7 +870,8 @@ index 0000000..066d15a
 +
 +bool save(const std::string& dir, const Settings& s, const Names& names) {
 +    const std::string base = dir.empty() ? std::string() : dir + "/";
-+    // Auto is written as no SourceP<n> at all: the launcher reads 0..2 only.
++    // Auto is written as no SourceP<n> at all, which every launcher reads as
++    // its default (Auto in recomp-ui-controls.patch; older ones read 0..2 only).
 +    Values controller;
 +    std::vector<std::string> removed;
 +    for (int p = 0; p < 2; ++p) {
@@ -1023,7 +1040,7 @@ index 0000000..066d15a
 +}  // namespace gbarecomp::controls
 diff --git a/src/runtime/player_controls.h b/src/runtime/player_controls.h
 new file mode 100644
-index 0000000..d7aac50
+index 0000000..94fcbae
 --- /dev/null
 +++ b/src/runtime/player_controls.h
 @@ -0,0 +1,144 @@
@@ -1031,8 +1048,8 @@ index 0000000..d7aac50
 +//
 +// Files (all in the exe directory, shared with recomp-ui's launcher):
 +//   * config.ini [Controller]: SourceP1/SourceP2 (0 None, 1 Keyboard, 2 Gamepad;
-+//     absent = Auto, keyboard plus the first free controller; 3 also reads as
-+//     Auto, but save() leaves the key out because the launcher reads 0..2) and
++//     3 or absent = Auto, keyboard plus the first free controller; save()
++//     writes Auto as no key, which launchers before Auto also read cleanly) and
 +//     GuidP1/GuidP2 (a Gamepad player's controller; empty = the first free one).
 +//     ControlsVersion marks a completed migration from older settings.
 +//   * keybinds.ini [player1]/[player2]: keyboard keys per GBA button (SDL
