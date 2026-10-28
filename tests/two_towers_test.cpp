@@ -1,5 +1,5 @@
 // Builds The Two Towers data block from a ROM and checks its tables and strings:
-// two_towers_test <Two Towers ROM>.
+// two_towers_test <Two Towers ROM> [a save slot holding Gandalf].
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -52,5 +52,11 @@ int main(int argc, char** argv)
     expect(text(0, 21) == "Gandalf", "hero 3 name: " + text(0, 21));
     expect(text(0, 271 + 0x31) == "Wisdom", "stat 0x31: " + text(0, 271 + 0x31));
     expect(text(0, 600) == "Leaf Sword" && text(0, 5) == "(none)", "item names carried, menu text not");
+    const std::uint32_t slots = word(kAt + 0x34);
+    expect(word(kAt + 0x38) == 4 && slots != 0, "4 save slots");
+    if (argc > 2) {
+        const std::uint8_t* slot = g_block.data() + (slots - kAt) + std::stoul(argv[2]) * 0x78;
+        expect(slot[0x5B] == 3, "the save's slot " + std::string(argv[2]) + " holds Gandalf");
+    }
     return g_failures ? 1 : 0;
 }

@@ -154,15 +154,18 @@ suffix) needs 29 bits. So the ROTK item is a handle:
 - **Legacy skill records:** a per-slot region beside skill_expansion's: hero, 11 skill levels and
   a tag, 16 bytes per slot.
 - Both regions are reserved in the mod's `save_layout.h` (region 7 at 0x5FAC, region 8 at 0x642C).
-- **Importer:** `tools/ttt_import.py` lays a Two Towers slot over a freshly created ROTK character
-  of the same hero (the in-game import will do the same: create the hero, then apply the Two
-  Towers data), writing a new .sav. `--no-items` keeps the template's gear for builds that cannot
-  show legacy items yet; the current build would read a legacy handle as an out-of-range unique.
+- **In-game import:** on the Load Game menu, L on an empty slot shows a Two Towers hero from the
+  save beside the Two Towers ROM (Left/Right picks another, A imports, B cancels). The mod builds
+  a fresh ROTK character of the same hero (`player_initHeroStats`/`player_initHeroLoadout`),
+  gives it the Two Towers items as legacy items, saves it through `save_serializePlayer` and then
+  lays the Two Towers level, stats and points over the slot.
+- **Importer tool:** `tools/ttt_import.py` does the same offline: it lays a Two Towers slot over a
+  freshly created ROTK character of the same hero and writes a new .sav.
 - **Room:** the save has 8276 bytes free after region 6. 72 slots x 16 bytes of skill records
   plus a 1024-entry pool (4 KB) leaves about 3 KB spare.
-- The mod hooks the item name, icon, stat and equip lookups for the handle. A legacy stat with a
+- In memory a legacy item is a real ROTK item (see "Legacy items in memory"). A legacy stat with a
   ROTK equivalent applies as that stat. A Two Towers skill bonus (+Wisdom, +all passive skills,
-  ...) applies to the page 3 skill and does nothing until page 3 exists.
+  ...) is dropped until page 3 exists.
 
 ## Technical notes
 
@@ -171,17 +174,27 @@ suffix) needs 29 bits. So the ROTK item is a handle:
   see `hacks/lib/pc_host.h` / `src/main.cpp` host RAM layout) with a PC build setting. Needed
   before page 3.
 - **Two Towers data for the mod:** the PC port finds The Two Towers ROM (`ROTK_PC_TWO_TOWERS_ROM`,
-  else beside the ROTK ROM or the executable, SHA-1 checked) and copies a 92 KB block into host
-  RAM after the heap: the three item tables and the item, stat, hero and skill text decoded for
-  ROTK's 5 languages (`src/two_towers.h`). Info block version 4 points at it
+  else beside the ROTK ROM or the executable, SHA-1 checked) and copies a 93 KB block into host
+  RAM before the heap: the three item tables, the item, stat, hero and skill text decoded for
+  ROTK's 5 languages, and the character slots of the .sav beside that ROM (`src/two_towers.h`). Info block version 4 points at it
   (`PcHostInfo.twoTowers`, `hackLib_twoTowersData()`). Only this block goes into host RAM, not the
   16 MB ROM, so save states and rewind stay small. `RotkTwoTowersCheck <ROM>` checks it.
+- **Legacy item tables:** the PC port copies `ItemTypeInfos` and every item table it points to
+  into host RAM with 256 rows each and redirects the ROM literals that point at them
+  (`src/legacy_item_tables.h`). Rows up to 0xBF copy the ROM (Ringwraith gear reaches 0xAF), rows
+  0xC0..0xFD are legacy rows. A 4 KB scratch area before them holds the mod's bookkeeping.
 - **Legacy items in memory:** the save keeps legacy handles. When a slot or hollow page loads, the
-  mod turns each handle into a real ROTK item of the matching type whose base, prefix and suffix
-  rows it builds in host RAM from the Two Towers records (Two Towers stats mapped to ROTK stats,
-  both prefixes merged into one row), the way the Ringwraith gear extends the item tables. Stock
-  code then handles icons, equipping, stats and names. Saving turns them back into handles.
-- **Mod ↔ PC port channel:** `PcHostInfo` in host RAM (version 3 adds `duel`). The menu button's
+  `legacy_items` patch turns each handle into a real ROTK item of the matching type whose base,
+  prefix and suffix rows it fills from the Two Towers records: Two Towers stats mapped to ROTK
+  stats, both prefixes merged into one row, the icon and equip flags of a matching ROTK base item
+  (Two Towers' own 2H flag wins), and names through `text_overrides` (text ids 0x5000 + Two Towers
+  id). Stock code then handles icons, equipping, stats and names. Saving turns them back into
+  handles. Up to 62 legacy items can be loaded in one session.
+- **Tested (PC test build, 2026-10-28):** an imported Gandalf loads with every legacy item worn or
+  in the backpack, with icons, Two Towers names and stats (Shoes +1 Defense, Cape +1 Missile
+  Armor). Not yet tested: legacy items through a save, the ranger hollow, co-op.
+- **Mod ↔ PC port channel:** `PcHostInfo` in host RAM (version 4 adds the Two Towers data, the
+  legacy item tables and the scratch). The menu button's
   switch request and the import hand-off can use the same block.
 - **Game handoff precedent:** `src/expanded_edition.cpp` already hands a session to another build;
   the super game should run both carts in one exe instead.

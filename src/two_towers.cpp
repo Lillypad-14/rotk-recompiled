@@ -31,7 +31,14 @@ constexpr std::uint32_t kStringCount = 1610;
 constexpr std::uint32_t kHuffmanRoot = 0x100;
 // Two Towers' package for each ROTK language: EN, FR, DE, IT, ES (Two Towers adds Dutch as 1).
 constexpr std::array<std::uint32_t, 5> kPackageForLanguage = {0, 2, 3, 4, 5};
-constexpr std::uint32_t kHeaderSize = 0x20 + 4 * kPackageForLanguage.size();
+constexpr std::uint32_t kSaveSlotsField = 0x20 + 4 * kPackageForLanguage.size();
+constexpr std::uint32_t kHeaderSize = kSaveSlotsField + 8;
+// The Two Towers save: a 512-byte EEPROM image with each 8-byte block byte-reversed in the .sav
+// file, and four 0x78-byte character slots at blocks 4, 19, 34 and 49 that sum to 0 as halfwords.
+constexpr std::uint32_t kSaveSize = 512;
+constexpr std::uint32_t kSaveBlock = 8;
+constexpr std::uint32_t kSaveSlotSize = 0x78;
+constexpr std::uint32_t kSaveSlotBlocks[] = {4, 19, 34, 49};
 // Strings carried besides the item names: hero names, stat names and the skill page text.
 constexpr std::pair<std::uint32_t, std::uint32_t> kStringRanges[] = {{18, 23}, {271, 326}, {345, 414}};
 
@@ -55,6 +62,8 @@ bool isTwoTowers(const fs::path& path)
     return std::memcmp(header, "TWO TOWERS", 10) == 0 && std::memcmp(header + 0x0C, "ALPE", 4) == 0;
 }
 
+fs::path g_romPath;
+
 std::vector<std::uint8_t> findRom(const std::vector<std::string>& args)
 {
     std::vector<fs::path> candidates;
@@ -71,6 +80,7 @@ std::vector<std::uint8_t> findRom(const std::vector<std::string>& args)
         std::vector<std::uint8_t> rom = load(path);
         if (rom.size() == kRomSize && gba::sha1(rom.data(), rom.size()).hex() == kRomSha1) {
             std::fprintf(stderr, "[rotk] The Two Towers: %s\n", path.string().c_str());
+            g_romPath = path;
             return rom;
         }
     }
@@ -133,6 +143,35 @@ void putPointer(std::uint32_t offset, std::uint32_t target)
     g_pointers.push_back(offset);
 }
 
+// The Two Towers save's character slots, zeroed for an empty or damaged one.
+std::vector<std::uint8_t> loadSaveSlots()
+{
+    fs::path path = g_romPath;
+    path.replace_extension(".sav");
+    if (const char* given = std::getenv("ROTK_PC_TWO_TOWERS_SAV")) path = given;
+    const std::vector<std::uint8_t> file = load(path);
+    std::vector<std::uint8_t> slots(std::size(kSaveSlotBlocks) * kSaveSlotSize, 0);
+    if (file.size() != kSaveSize) return slots;
+    std::vector<std::uint8_t> image(file.size());
+    for (std::size_t i = 0; i < file.size(); ++i)
+        image[i] = file[(i & ~std::size_t{kSaveBlock - 1}) + (kSaveBlock - 1 - (i & (kSaveBlock - 1)))];
+    int used = 0;
+    for (std::size_t n = 0; n < std::size(kSaveSlotBlocks); ++n) {
+        const std::uint8_t* slot = image.data() + kSaveSlotBlocks[n] * kSaveBlock;
+        std::uint16_t sum = 0;
+        bool blank = true;
+        for (std::uint32_t i = 0; i < kSaveSlotSize; i += 2) {
+            sum = static_cast<std::uint16_t>(sum + (slot[i] | slot[i + 1] << 8));
+            blank = blank && slot[i] == 0 && slot[i + 1] == 0;
+        }
+        if (sum != 0 || blank) continue;
+        std::memcpy(slots.data() + n * kSaveSlotSize, slot, kSaveSlotSize);
+        ++used;
+    }
+    std::fprintf(stderr, "[rotk] The Two Towers save: %s, %d hero(es)\n", path.string().c_str(), used);
+    return slots;
+}
+
 void build(const std::vector<std::uint8_t>& rom)
 {
     g_block.assign(kHeaderSize, 0);
@@ -164,6 +203,9 @@ void build(const std::vector<std::uint8_t>& rom)
             if (placed[id]) putPointer(tableOffset + id * 4, placed[id]);
         putPointer(0x20 + static_cast<std::uint32_t>(language) * 4, tableOffset);
     }
+    const std::vector<std::uint8_t> slots = loadSaveSlots();
+    putPointer(kSaveSlotsField, append(slots.data(), slots.size()));
+    put32(kSaveSlotsField + 4, static_cast<std::uint32_t>(std::size(kSaveSlotBlocks)));
 }
 
 }  // namespace
