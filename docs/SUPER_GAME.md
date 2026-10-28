@@ -22,7 +22,7 @@ version for original hardware.
 
 | # | Phase | Notes |
 |---|---|---|
-| 0 | **Map Two Towers** with ROTK's names | `tools/ttt_match.py`, `tools/ttt_save.py` (player and save mapped, below) |
+| 0 | **Map Two Towers** with ROTK's names | `ttt_match.py`, `ttt_save.py` (player and save mapped, below) |
 | 1 | **Two Towers on PC** (recompile, launcher, the PC extras) | biggest risk: no decomp, expect crash-fix iterations |
 | 2 | **Menu button + seamless switch** | mod adds the button; the PC port swaps carts (both games in one exe) |
 | 3 | **Character import** | ROTK save format is known; needs the TTT player/save layout |
@@ -35,7 +35,11 @@ version for original hardware.
 Two Towers ROM: "TWO TOWERS", code ALPE, 16 MB, SHA-1 `82b3b4afb0ed0d3fca646aa266e0bfc5bffd49d9`,
 EEPROM save (`EEPROM_V122`), same Griptonite engine as ROTK.
 
-`python tools/ttt_match.py --ttt "<TTT ROM>"` (about 8 minutes) writes `.private/ttt/symbols.json`:
+The Two Towers tools live with the decompilation, in the mod repository's [`two-towers/`](https://github.com/Lillypad-14/ROTK-Expanded-experimental/tree/main/two-towers)
+(`game/two-towers/` here once the `game` submodule is past commit 820cbce). Run them from that
+repository's root with `rotk.gba` and `ttt.gba` beside them.
+
+`python two-towers/tools/ttt_match.py --ttt ttt.gba` (about 8 minutes) writes `build/ttt/symbols.json`:
 
 - **487 of 1054** named ROTK functions found in Two Towers: 210 by masked bytes, 233 aligned by
   instruction shape between matched neighbours (both games keep the same link order), 44 through
@@ -76,7 +80,7 @@ player_addCorruption, ...) and the save serializer:
 0x080356B8, `save_writeSlot` 0x080356F4. EEPROM 512 bytes, header "LORGBA03" (4 blocks), then
 **4 slots of 0x78 bytes** at blocks 4/19/34/49 (table at ROM 0x0805765C). Each slot ends in a
 negated halfword checksum (the slot sums to 0). The `.sav` stores each 8-byte block byte-reversed,
-as ROTK's does. `python tools/ttt_save.py "<TTT .sav>"` decodes it; the slot fields are listed there.
+as ROTK's does. `python two-towers/tools/ttt_save.py "<TTT .sav>"` decodes it; the slot fields are listed there.
 
 Confirmed against two real saves and the character screen (Gandalf, 2026-10-28): hero 3 is
 Gandalf; base attributes are stored strength, accuracy, health, defense, courage (ROTK's order);
@@ -91,7 +95,7 @@ level-up** (the screen's "Experience"), against a per-level table at ROM 0x08050
 
 - **Text:** the same Huffman packages as ROTK (table at 0x0832EBA4, `text_setLanguage`
   0x0803E9F8); rotkit's `textdb` decodes them. 1610 English strings, dumped to
-  `.private/ttt/text_en.tsv`.
+  a private `text_en.tsv` (not in either repository).
 - **Heroes:** 0 Frodo, 1 Legolas, 2 Aragorn, 3 Gandalf, 4 Eowyn, 5 Gimli (text 18..23). The
   level-up code stops at level 50.
 - **Skills:** 11 per hero; the save's `skillLevels` follow each hero's description block (text
@@ -159,7 +163,7 @@ suffix) needs 29 bits. So the ROTK item is a handle:
   a fresh ROTK character of the same hero (`player_initHeroStats`/`player_initHeroLoadout`),
   gives it the Two Towers items as legacy items, saves it through `save_serializePlayer` and then
   lays the Two Towers level, stats and points over the slot.
-- **Importer tool:** `tools/ttt_import.py` does the same offline: it lays a Two Towers slot over a
+- **Importer tool:** `two-towers/tools/ttt_import.py` does the same offline: it lays a Two Towers slot over a
   freshly created ROTK character of the same hero and writes a new .sav.
 - **Room:** the save has 8276 bytes free after region 6. 72 slots x 16 bytes of skill records
   plus a 1024-entry pool (4 KB) leaves about 3 KB spare.
@@ -170,7 +174,7 @@ suffix) needs 29 bits. So the ROTK item is a handle:
 ## Porting the Two Towers skills 1:1
 
 Goal: each legacy skill behaves as in The Two Towers (numbers, effects, timing, visuals), not as its
-closest ROTK skill. `tools/ttt_dis.py ADDRESS [LENGTH]` disassembles Two Towers code with the ROTK
+closest ROTK skill. `two-towers/tools/ttt_dis.py ADDRESS [LENGTH]` disassembles Two Towers code with the ROTK
 names the matcher found.
 
 How a Two Towers active runs:

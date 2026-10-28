@@ -112,7 +112,8 @@ launcher's Expanded checkbox (a BPS patch made from that ROM) and making a relea
 The mod and the decompilation it is built on live in `game/` (the
 [ROTK-Expanded-experimental](https://github.com/Lillypad-14/ROTK-Expanded-experimental) repository, branch
 `pc-edition`), with their own docs in `game/docs/`. The Two Towers work is mapped in
-[docs/SUPER_GAME.md](docs/SUPER_GAME.md).
+[docs/SUPER_GAME.md](docs/SUPER_GAME.md); its research tools are in the mod repository's
+[two-towers/](https://github.com/Lillypad-14/ROTK-Expanded-experimental/tree/main/two-towers).
 
 ## Checks
 
