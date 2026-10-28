@@ -34,6 +34,16 @@ The game opens a launcher first (GBARecomp's recomp-ui). Its **Mods** page lists
 of them off the game runs exactly like the original. Environment variables override the launcher for
 tests and scripts. Headless runs (`--frames`, `--no-window`, `--tcp`) skip the launcher.
 
+## Controls
+
+Each player plays on **Auto** (the keyboard and the first free controller), the keyboard, a chosen
+controller or nothing, and can switch at any time: on the launcher's front page (Player 1 / Player 2,
+then Configure) or in game (Esc, or the controller's Xbox / PS / Home button, then **Controls**). In
+game you can also press a key or button to take a device, and swap players. Every key and controller
+button is rebound by pressing it; a controller keeps its own layout whoever holds it, and buttons are
+named the way the pad prints them (Cross, LB, ZR...). A controller that disconnects hands its player
+the keyboard until it is back. Details: [docs/CONTROLS.md](docs/CONTROLS.md).
+
 ## Expanded and The Two Towers
 
 The launcher's front page has an **Expanded** checkbox: on, Play patches your unmodified `rotk.gba`

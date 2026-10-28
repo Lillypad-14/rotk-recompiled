@@ -1,7 +1,7 @@
 # Controls overhaul (plan)
 
 Goal: controller and keyboard mapping that needs no explanation, for one player or split-screen co-op,
-on a desk or a Steam Deck. Status (2026-10-28): phases 1-4 done; phase 5 (real hardware) to do.
+on a desk or a Steam Deck. Status (2026-10-28): phases 1-4 done and shipped in v0.2.0; phase 5 (real hardware) to do.
 
 Decisions:
 
