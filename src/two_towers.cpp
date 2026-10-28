@@ -479,6 +479,8 @@ constexpr SpriteSource kSprites[] = {
     {0x08050168u, 0x08CC6268u}, {0x080501C8u, 0x08CC6268u},
     // Gandalf's Magical Healing sparkle
     {0x080501D8u, 0x08CC6268u},
+    // Gandalf's Shield bubble: forming, up, dissolving
+    {0x080500C8u, 0x08CC6268u}, {0x080500D8u, 0x08CC6268u}, {0x080500E8u, 0x08CC6268u},
 };
 constexpr std::uint32_t kFrameHeadSize = 6;          // Two Towers: flags, pad, width, height, tile offset
 constexpr std::uint32_t kRotkFrameHeadSize = 8;      // ROTK adds the frame's tile bytes
