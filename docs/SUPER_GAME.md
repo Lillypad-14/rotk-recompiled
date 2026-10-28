@@ -208,17 +208,18 @@ suffix) needs 29 bits. So the ROTK item is a handle:
   slot's record (single player). Some have no ROTK mechanic and use the nearest stat (Meditation,
   Spirit of the Forge, Duck). Page 3 and active legacy skills are still to do. Their state can
   live in the host scratch like the legacy items', so the mod RAM does not have to move first.
-- **Page 3 design (next):** PC edition only. Legacy actives become active rows 13..19 (Gandalf has
-  7 actives, the most of any hero) in a larger `activeSkills` array: a new row capacity
-  constant, while `SKILL_EXPANSION_ACTIVE_ROW_COUNT` stays 13 because the save code loops and
-  validates quick-select rows with it. Rows 13+ need: their level from the legacy skill record
-  (`skillExpansion_activeLevel`), quick-select and cycle-cast acceptance, save validation that
-  keeps a quick-select row 13+ when the slot has a legacy record, and the tree turning from page 2
-  to page 3, swapping rows 13+ into rows 0..6 the way page 2 swaps 7..12. Legacy passives show on
-  page 3 as display rows; their stats already apply. Each Two Towers active casts its ROTK
-  counterpart where one exists (Gandalf: Shield, Summon Eagle = Summon Gwaihir, Fireworks =
-  Expanded's Fireworks), the rest get new callbacks. Two Towers skill icons are BG assets still to
-  decode.
+- **Page 3 (done for Gandalf, PC edition):** legacy actives are active rows 13..19
+  (`SKILL_EXPANSION_ACTIVE_ROW_CAPACITY` 20; saves and co-op keep `SKILL_EXPANSION_ACTIVE_ROW_COUNT`
+  13). Each runs its ROTK counterpart's stock callback with the Two Towers Spirit cost and level
+  (capped at five). The skill tree's third page, "The Two Towers", steps in from page 1 (left) or
+  page 2 (right): six actives on the active grid (swapped in like page 2), the passives and a
+  seventh active on the passive grid, Two Towers text as descriptions, nothing to buy. The record
+  follows the character on save and is cleared on delete. Two Towers skill icons: per hero 11 BG
+  assets at 0x0832EA64 packed with the C64 pucrunch (ARM decoder at 0x08000264, ported to C++ and
+  checked against it in unicorn); the art is mapped by brightness onto ROTK's icon shades.
+  Still to do: Fireworks and Thunderstrike cast stand-ins (Lightstrike, Blinding Aura); the other
+  heroes' actives have no mapping yet; quick-select rows 13+ are not kept by the Expanded save;
+  legacy skills are off in co-op.
 - **Mod ↔ PC port channel:** `PcHostInfo` in host RAM (version 4 adds the Two Towers data, the
   legacy item tables and the scratch). The menu button's
   switch request and the import hand-off can use the same block.
