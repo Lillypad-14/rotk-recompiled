@@ -263,6 +263,11 @@ int main(int, char**)
           "menu: player 2's A shows pad two's B");
     check(options.ui_get_text("rotk.controls.p2.pad.up", text, sizeof(text)) && !std::strcmp(text, "D-pad Up"),
           "menu: readable controller names");
+    const auto padTwo = gbarecomp::connected_controllers()[1];
+    std::printf("      pad two reports SDL type %d\n", padTwo.type);
+    check(options.ui_get_text("rotk.controls.p2.pad.l", text, sizeof(text)) &&
+              !std::strcmp(text, controls::pad_style(padTwo.type) == controls::PadStyle::Xbox ? "LB" : "Left bumper"),
+          "menu: names follow the controller's type");
 
     check(options.ui_set("rotk.controls.p1.device", 1) &&
               gbarecomp::player_controls().player[0].source == controls::Source::Keyboard &&

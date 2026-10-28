@@ -1,7 +1,7 @@
 # Controls overhaul (plan)
 
 Goal: controller and keyboard mapping that needs no explanation, for one player or split-screen co-op,
-on a desk or a Steam Deck. Status (2026-10-28): phases 1-3 (engine, launcher, in-game menu) done, 4-5 to do.
+on a desk or a Steam Deck. Status (2026-10-28): phases 1-4 done; phase 5 (real hardware) to do.
 
 Decisions:
 
@@ -150,6 +150,18 @@ screen yet.
   replug, swap, the three files, and every kind of Controls menu row through the menu's hooks.
 
 Not checked on screen: the menu's look, and the launcher page (phase 5).
+
+## Phase 4 (done)
+
+- `controls::pad_style` / `display_name`: buttons as the held controller prints them. Xbox (A, B,
+  View, Menu, LB, RT), PlayStation (Cross, Circle, Share, Options, L1, R2), Nintendo (A, B, -, +,
+  L, ZR) and generic names; the menu's controller pages use the player's controller's style.
+- Nintendo pads: SDL already reports face buttons by printed label by default
+  (`SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS` = 1), so SDL's A is the button marked A and the default
+  GBA A is that button. The host now sets the hint explicitly. Through Steam Input a pad is whatever
+  Steam presents (an Xbox pad unless Steam's Nintendo layout option is on).
+- Launcher controller column: readable generic names instead of `input.ini` source strings.
+- Stick dead zone: per controller, in the menu (phase 3); the launcher's slider stays off for GBA.
 
 ## Phases
 

@@ -23,7 +23,7 @@ index b8e19bd..e69408d 100644
  add_gbarecomp_runtime_stack_test(touch_input_tests tests/touch_input/test_main.cpp)
  add_gbarecomp_runtime_stack_test(multiplayer_session_tests tests/link/session_test.cpp)
 diff --git a/src/runtime/host_window.cpp b/src/runtime/host_window.cpp
-index cf48963..688486d 100644
+index cf48963..4bfa237 100644
 --- a/src/runtime/host_window.cpp
 +++ b/src/runtime/host_window.cpp
 @@ -19,6 +19,7 @@
@@ -456,7 +456,18 @@ index cf48963..688486d 100644
  }  // namespace
  
  HostWindow::HostWindow() = default;
-@@ -1711,7 +1968,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
+@@ -1653,6 +1910,10 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
+                          SDL_GetError());
+         }
+     }
++    // Face buttons by their printed label: on a Nintendo pad SDL's A is the
++    // button marked A, so the default GBA A is that one (player_controls.h).
++    // SDL's own default, stated so a changed default cannot move it.
++    SDL_SetHint(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS, "1");
+     const Uint32 controller_flags =
+         SDL_INIT_GAMECONTROLLER | SDL_INIT_SENSOR;
+     if ((SDL_WasInit(controller_flags) & controller_flags) !=
+@@ -1711,7 +1972,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
      // are ever delivered, so a backgrounded-then-killed app lost progress.
      SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "0");
  #endif
@@ -465,7 +476,7 @@ index cf48963..688486d 100644
      for (int h = 0; h < HK_COUNT; ++h)
          b->hotkeys[h] = parse_hotkey(kHotkeyDefaults[h]);
      // Linear vs nearest scaling is a texture-creation-time hint.
-@@ -1882,7 +2139,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
+@@ -1882,7 +2143,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
      }
  #endif
  
@@ -474,7 +485,7 @@ index cf48963..688486d 100644
      open_device_gyro(b);
  
      // Open the audio device at 65536 Hz mono 16-bit signed. The
-@@ -1964,6 +2221,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
+@@ -1964,6 +2225,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
      impl_ = b;
      open_ = true;
      g_haptic_window = this;
@@ -482,7 +493,7 @@ index cf48963..688486d 100644
      return true;
  }
  
-@@ -2288,10 +2546,11 @@ void HostWindow::close() {
+@@ -2288,10 +2550,11 @@ void HostWindow::close() {
      if (b->audio_rate_stream) SDL_FreeAudioStream(b->audio_rate_stream);
      if (b->bridge_ready) rab_free(&b->bridge);
      if (b->audio_mtx) SDL_DestroyMutex(b->audio_mtx);
@@ -495,7 +506,7 @@ index cf48963..688486d 100644
  #if defined(GBARECOMP_RUNTIME_UI)
      runtime_imgui_shutdown(b);
  #endif
-@@ -2584,16 +2843,9 @@ void HostWindow::load_input_config(const char* dir,
+@@ -2584,16 +2847,9 @@ void HostWindow::load_input_config(const char* dir,
          fast_forward_multiplier_default, 2, 10);
      const std::string base = std::string(dir) + "/";
  
@@ -515,7 +526,7 @@ index cf48963..688486d 100644
  
      // config.ini [KeyMap] (keycode names with Ctrl+/Alt+/Shift+ prefixes).
      ini_scan_section((base + "config.ini").c_str(), "KeyMap",
-@@ -2677,66 +2929,112 @@ void HostWindow::fit_window_to_surface() {
+@@ -2677,66 +2933,112 @@ void HostWindow::fit_window_to_surface() {
      SDL_SetWindowPosition(b->window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
  }
  
@@ -676,7 +687,7 @@ index cf48963..688486d 100644
  }
  
  void HostWindow::adjust_scale(int delta) {
-@@ -3024,7 +3322,12 @@ HostWindow::Events HostWindow::pump() {
+@@ -3024,7 +3326,12 @@ HostWindow::Events HostWindow::pump() {
      auto* b = static_cast<Backend*>(impl_);
  
      SDL_Event e;
@@ -689,7 +700,7 @@ index cf48963..688486d 100644
  #if defined(GBARECOMP_RUNTIME_UI)
          const bool finger_event =
              e.type == SDL_FINGERDOWN || e.type == SDL_FINGERMOTION ||
-@@ -3070,13 +3373,11 @@ HostWindow::Events HostWindow::pump() {
+@@ -3070,13 +3377,11 @@ HostWindow::Events HostWindow::pump() {
              ev.terminating = true;
              ev.quit = true;
          } else if (e.type == SDL_CONTROLLERDEVICEADDED) {
@@ -707,7 +718,7 @@ index cf48963..688486d 100644
          } else if (e.type == SDL_WINDOWEVENT &&
                     e.window.event == SDL_WINDOWEVENT_CLOSE) {
              ev.quit = true;
-@@ -3257,40 +3558,10 @@ HostWindow::Events HostWindow::pump() {
+@@ -3257,40 +3562,10 @@ HostWindow::Events HostWindow::pump() {
  #endif
      }
  
@@ -751,7 +762,7 @@ index cf48963..688486d 100644
      if (b->touch_controls) {
          const uint16_t touch_buttons = active_touch_buttons(b);
          keys &= static_cast<uint16_t>(~touch_buttons);
-@@ -3411,6 +3682,24 @@ bool HostWindow::set_surface_size(int /*base_w*/, int /*base_h*/) {
+@@ -3411,6 +3686,24 @@ bool HostWindow::set_surface_size(int /*base_w*/, int /*base_h*/) {
  void HostWindow::fit_window_to_surface() {}
  std::uint16_t HostWindow::player_two_buttons() { return 0; }
  void set_player_two_controls(const char* const*, const char* const*) {}
@@ -794,10 +805,10 @@ index 4171951..e5788a8 100644
      if (opts.has_solar_sensor) solar_in_launcher = push_solar_settings(ls, solar);
 diff --git a/src/runtime/player_controls.cpp b/src/runtime/player_controls.cpp
 new file mode 100644
-index 0000000..7303318
+index 0000000..a22bab6
 --- /dev/null
 +++ b/src/runtime/player_controls.cpp
-@@ -0,0 +1,404 @@
+@@ -0,0 +1,463 @@
 +#include "player_controls.h"
 +
 +#include <algorithm>
@@ -944,6 +955,65 @@ index 0000000..7303318
 +PlayerSetting* other(Settings& s, int player) { return &s.player[player ^ 1]; }
 +
 +}  // namespace
++
++PadStyle pad_style(int type) {
++    // SDL_GameControllerType values (SDL 2.0.12+).
++    switch (type) {
++    case 1: case 2: return PadStyle::Xbox;                         // Xbox 360, Xbox One / Series
++    case 3: case 4: case 7: return PadStyle::PlayStation;          // PS3, PS4, PS5
++    case 5: case 11: case 12: case 13: return PadStyle::Nintendo;  // Switch Pro, Joy-Cons
++    default: return PadStyle::Generic;
++    }
++}
++
++std::string display_name(const PadBind& bind, PadStyle style) {
++    // SDL_GameControllerButton order, one column per style: Generic, Xbox, PlayStation, Nintendo.
++    static const char* const kButtonNames[][4] = {
++        {"A", "A", "Cross", "A"},
++        {"B", "B", "Circle", "B"},
++        {"X", "X", "Square", "X"},
++        {"Y", "Y", "Triangle", "Y"},
++        {"Back", "View", "Share", "-"},
++        {"Guide", "Xbox", "PS", "Home"},
++        {"Start", "Menu", "Options", "+"},
++        {"Left stick press", "LS", "L3", "Left stick press"},
++        {"Right stick press", "RS", "R3", "Right stick press"},
++        {"Left bumper", "LB", "L1", "L"},
++        {"Right bumper", "RB", "R1", "R"},
++        {"D-pad Up", "D-pad Up", "D-pad Up", "D-pad Up"},
++        {"D-pad Down", "D-pad Down", "D-pad Down", "D-pad Down"},
++        {"D-pad Left", "D-pad Left", "D-pad Left", "D-pad Left"},
++        {"D-pad Right", "D-pad Right", "D-pad Right", "D-pad Right"},
++        {"Share", "Share", "Mic", "Capture"},
++        {"Paddle 1", "P1", "Paddle 1", "Paddle 1"},
++        {"Paddle 2", "P3", "Paddle 2", "Paddle 2"},
++        {"Paddle 3", "P2", "Paddle 3", "Paddle 3"},
++        {"Paddle 4", "P4", "Paddle 4", "Paddle 4"},
++        {"Touchpad", "Touchpad", "Touchpad", "Touchpad"},
++    };
++    static const char* const kTriggers[2][4] = {
++        {"Left trigger", "LT", "L2", "ZL"},
++        {"Right trigger", "RT", "R2", "ZR"},
++    };
++    static const char* const kSticks[4][2] = {
++        {"Left stick Left", "Left stick Right"},
++        {"Left stick Up", "Left stick Down"},
++        {"Right stick Left", "Right stick Right"},
++        {"Right stick Up", "Right stick Down"},
++    };
++    const int column = static_cast<int>(style);
++    if (bind.kind == PadBind::Button) {
++        const int count = static_cast<int>(sizeof(kButtonNames) / sizeof(kButtonNames[0]));
++        return bind.code >= 0 && bind.code < count ? kButtonNames[bind.code][column] : "Button " + std::to_string(bind.code);
++    }
++    if (bind.kind == PadBind::AxisNegative || bind.kind == PadBind::AxisPositive) {
++        const bool positive = bind.kind == PadBind::AxisPositive;
++        if (bind.code >= 0 && bind.code < 4) return kSticks[bind.code][positive ? 1 : 0];
++        if (bind.code == 4 || bind.code == 5) return kTriggers[bind.code - 4][column];
++        return "Axis " + std::to_string(bind.code) + (positive ? "+" : "-");
++    }
++    return "(none)";
++}
 +
 +PadBind parse_bind(const std::string& text, const Names& names) {
 +    PadBind bind;
@@ -1204,10 +1274,10 @@ index 0000000..7303318
 +}  // namespace gbarecomp::controls
 diff --git a/src/runtime/player_controls.h b/src/runtime/player_controls.h
 new file mode 100644
-index 0000000..94fcbae
+index 0000000..b906a95
 --- /dev/null
 +++ b/src/runtime/player_controls.h
-@@ -0,0 +1,144 @@
+@@ -0,0 +1,153 @@
 +// player_controls.h — both players' input devices and bindings, without SDL.
 +//
 +// Files (all in the exe directory, shared with recomp-ui's launcher):
@@ -1322,6 +1392,15 @@ index 0000000..94fcbae
 +
 +// The profile a controller uses: its own overrides over [mapping].
 +PadProfile profile_for(const Settings& settings, const std::string& guid);
++// How a controller names its buttons, from SDL_GameControllerType. The host
++// asks SDL for printed labels, so on Nintendo pads SDL's A is the button
++// marked A.
++enum class PadStyle { Generic, Xbox, PlayStation, Nintendo };
++PadStyle pad_style(int sdl_controller_type);
++// What a player reads on the controller: "Cross", "LB", "ZR", "D-pad Up",
++// "Left stick Left", "(none)".
++std::string display_name(const PadBind& bind, PadStyle style);
++
 +// "a", "dpup", "leftx-", "" for unbound (input.ini source strings).
 +std::string bind_name(const PadBind& bind, const Names& names);
 +PadBind parse_bind(const std::string& text, const Names& names);
@@ -1409,10 +1488,10 @@ index 93a42ae..73ad6af 100644
  }  // namespace gbarecomp
 diff --git a/tests/player_controls/test_main.cpp b/tests/player_controls/test_main.cpp
 new file mode 100644
-index 0000000..6601cbc
+index 0000000..c8bddb3
 --- /dev/null
 +++ b/tests/player_controls/test_main.cpp
-@@ -0,0 +1,236 @@
+@@ -0,0 +1,255 @@
 +// player_controls_tests — defaults, ini round trips (other lines kept), device
 +// assignment, claiming, swapping, conflict swaps and KEYINPUT resolution.
 +
@@ -1629,6 +1708,24 @@ index 0000000..6601cbc
 +    check(pad_buttons(p, pad) == (1u << 9), "trigger bound to L");
 +}
 +
++void test_names() {
++    const PadBind cross{PadBind::Button, 0};
++    const PadBind back{PadBind::Button, 4};
++    const PadBind right_trigger{PadBind::AxisPositive, 5};
++    const PadBind stick_up{PadBind::AxisNegative, 1};
++    check(pad_style(2) == PadStyle::Xbox && pad_style(7) == PadStyle::PlayStation &&
++              pad_style(5) == PadStyle::Nintendo && pad_style(0) == PadStyle::Generic,
++          "controller styles");
++    check(display_name(cross, PadStyle::PlayStation) == "Cross", "PlayStation A is Cross");
++    check(display_name(cross, PadStyle::Nintendo) == "A", "Nintendo A is A (printed labels)");
++    check(display_name(back, PadStyle::Xbox) == "View" && display_name(back, PadStyle::Nintendo) == "-",
++          "Back is View on Xbox, - on Nintendo");
++    check(display_name(right_trigger, PadStyle::Nintendo) == "ZR" && display_name(right_trigger, PadStyle::Xbox) == "RT",
++          "triggers");
++    check(display_name(stick_up, PadStyle::Generic) == "Left stick Up", "stick directions");
++    check(display_name(PadBind{}, PadStyle::Xbox) == "(none)", "unbound");
++}
++
 +}  // namespace
 +
 +int main() {
@@ -1641,6 +1738,7 @@ index 0000000..6601cbc
 +    test_claim_and_swap();
 +    test_conflicts();
 +    test_resolve();
++    test_names();
 +    std::filesystem::remove_all(dir);
 +    if (g_failures) {
 +        std::fprintf(stderr, "%d failure(s)\n", g_failures);

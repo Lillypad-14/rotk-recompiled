@@ -231,15 +231,18 @@ index 3d87393..6d6bbc9 100644
          snprintf(out, out_size, "?");
 diff --git a/src/consoles/gba/gba_pad_binds.c b/src/consoles/gba/gba_pad_binds.c
 new file mode 100644
-index 0000000..e50f108
+index 0000000..43790af
 --- /dev/null
 +++ b/src/consoles/gba/gba_pad_binds.c
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,86 @@
 +// consoles/gba/gba_pad_binds.c — the GBA shape of the shared per-GUID input.ini
 +// store. See gba_pad_binds.h.
 +
 +#include "gba_pad_binds.h"
 +#include "pad_binds.h"
++
++#include <stdio.h>
++#include <string.h>
 +
 +// kGbaPadButtons order: Up Down Left Right A B L R Start Select.
 +static const char* const kGbaPadKeyName[] = {
@@ -278,9 +281,31 @@ index 0000000..e50f108
 +    rui_pad_binds_init(&kGbaPadSpec, path);
 +}
 +
++// input.ini sources as players read them; the game's menu uses the same words
++// (gbarecomp player_controls.cpp display_name, generic column).
++static const char* const kGbaSourceNames[][2] = {
++    {"a", "A"}, {"b", "B"}, {"x", "X"}, {"y", "Y"}, {"back", "Back"}, {"guide", "Guide"},
++    {"start", "Start"}, {"leftstick", "Left stick press"}, {"rightstick", "Right stick press"},
++    {"leftshoulder", "Left bumper"}, {"rightshoulder", "Right bumper"},
++    {"dpup", "D-pad Up"}, {"dpdown", "D-pad Down"}, {"dpleft", "D-pad Left"}, {"dpright", "D-pad Right"},
++    {"misc1", "Share"}, {"paddle1", "Paddle 1"}, {"paddle2", "Paddle 2"}, {"paddle3", "Paddle 3"},
++    {"paddle4", "Paddle 4"}, {"touchpad", "Touchpad"},
++    {"lefttrigger+", "Left trigger"}, {"righttrigger+", "Right trigger"},
++    {"leftx-", "Left stick Left"}, {"leftx+", "Left stick Right"},
++    {"lefty-", "Left stick Up"}, {"lefty+", "Left stick Down"},
++    {"rightx-", "Right stick Left"}, {"rightx+", "Right stick Right"},
++    {"righty-", "Right stick Up"}, {"righty+", "Right stick Down"},
++};
++
 +void rui_gba_pad_binds_label(const char* path, const char* guid, int b,
 +                             char* out, int cap) {
 +    rui_pad_binds_label(&kGbaPadSpec, path, guid, b, out, cap);
++    if (!out || cap <= 0) return;
++    for (size_t i = 0; i < sizeof(kGbaSourceNames) / sizeof(kGbaSourceNames[0]); ++i) {
++        if (strcmp(out, kGbaSourceNames[i][0]) != 0) continue;
++        snprintf(out, (size_t)cap, "%s", kGbaSourceNames[i][1]);
++        return;
++    }
 +}
 +
 +void rui_gba_pad_binds_set(const char* path, const char* guid, int b,

@@ -96,26 +96,13 @@ std::string padGuid(int player, std::string* name = nullptr)
     return pads[index].guid;
 }
 
-// Readable names for input.ini sources ("dpup" -> "D-pad Up").
-std::string padName(const controls::PadBind& bind)
+// What the player reads on their controller ("Cross", "LB", "ZR"); generic names on the fallback page.
+std::string padName(int player, const controls::PadBind& bind)
 {
-    const std::string raw = controls::bind_name(bind, gbarecomp::player_control_names());
-    static const struct { const char* raw; const char* name; } kNames[] = {
-        {"a", "A"}, {"b", "B"}, {"x", "X"}, {"y", "Y"}, {"back", "Back / Select"}, {"start", "Start"},
-        {"guide", "Guide"}, {"leftstick", "Left stick press"}, {"rightstick", "Right stick press"},
-        {"leftshoulder", "Left bumper"}, {"rightshoulder", "Right bumper"}, {"dpup", "D-pad Up"},
-        {"dpdown", "D-pad Down"}, {"dpleft", "D-pad Left"}, {"dpright", "D-pad Right"},
-        {"misc1", "Share / Capture"}, {"paddle1", "Paddle 1"}, {"paddle2", "Paddle 2"},
-        {"paddle3", "Paddle 3"}, {"paddle4", "Paddle 4"}, {"touchpad", "Touchpad"},
-        {"lefttrigger+", "Left trigger"}, {"righttrigger+", "Right trigger"},
-        {"leftx-", "Left stick Left"}, {"leftx+", "Left stick Right"}, {"lefty-", "Left stick Up"},
-        {"lefty+", "Left stick Down"}, {"rightx-", "Right stick Left"}, {"rightx+", "Right stick Right"},
-        {"righty-", "Right stick Up"}, {"righty+", "Right stick Down"},
-    };
-    if (raw.empty()) return "(none)";
-    for (const auto& n : kNames)
-        if (raw == n.raw) return n.name;
-    return raw;
+    const int index = gbarecomp::player_controller(player);
+    const auto pads = gbarecomp::connected_controllers();
+    const int type = index >= 0 && index < static_cast<int>(pads.size()) ? pads[index].type : 0;
+    return controls::display_name(bind, controls::pad_style(type));
 }
 
 // Refreshes a player's device choices from what is connected now.
@@ -284,7 +271,7 @@ int menuText(const char* key, char* buf, std::size_t size)
                       guid.empty() ? "Editing the layout every controller without its own uses."
                                    : "Editing %s's layout.",
                       name.c_str());
-        std::snprintf(buf, size, "%s", padName(controls::profile_for(settings, guid).bind[bit]).c_str());
+        std::snprintf(buf, size, "%s", padName(player, controls::profile_for(settings, guid).bind[bit]).c_str());
     } else {
         const int code = settings.player[player].keys[bit];
         const char* name = code > 0 ? gbarecomp::player_control_names().scancode_name(code) : nullptr;
