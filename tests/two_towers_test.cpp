@@ -57,6 +57,19 @@ int main(int argc, char** argv)
     expect(icons != 0 && word(staffIcon) != 0 && word(staffIcon + 4) - word(staffIcon) < 0x4000 &&
                word(staffIcon + 8) > word(staffIcon + 4),
            "Short Staff's icon is in the block");
+    // Gandalf's Zap: hero 3, skill 6, 384 bytes of 4bpp art each.
+    const std::uint32_t zap = word(kAt + 0x40) + (3 * 11 + 6) * 384;
+    int artPixels = 0;
+    bool shadesOnly = true;
+    for (std::uint32_t i = 0; i < 384; ++i) {
+        const std::uint32_t pair = g_block[zap + i - kAt];
+        for (std::uint32_t pixel : {pair & 15u, pair >> 4}) {
+            artPixels += pixel != 0;
+            shadesOnly = shadesOnly && (pixel == 0 || (pixel >= 8 && pixel <= 13));
+        }
+    }
+    expect(word(kAt + 0x40) != 0 && artPixels > 50 && shadesOnly,
+           "Gandalf's Zap art: " + std::to_string(artPixels) + " pixels in shades 8..13");
     const std::uint32_t slots = word(kAt + 0x34);
     expect(word(kAt + 0x38) == 4 && slots != 0, "4 save slots");
     if (argc > 2) {

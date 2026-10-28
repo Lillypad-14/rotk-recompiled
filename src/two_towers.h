@@ -23,6 +23,8 @@ namespace rotk {
 //         (the .sav beside the ROM, or ROTK_PC_TWO_TOWERS_SAV), 0x38 their count
 //
 //   0x3C  a backpack icon SpriteAnimation (16 bytes) per base item, its data copied along
+//   0x40  skill icon art: per hero, its 11 skills' art as ROTK skill icon tiles (32x24, 4bpp,
+//         384 bytes each, the art in colors 8..13, the rest 0)
 //
 // Item records are Two Towers' own 16 bytes: u16 name string, s16 gem value, 5 x (u8 stat,
 // s8 value) with stat 0x40 for none. Strings are NUL-terminated font bytes.

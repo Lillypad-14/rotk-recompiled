@@ -34,7 +34,8 @@ constexpr std::uint32_t kHuffmanRoot = 0x100;
 constexpr std::array<std::uint32_t, 5> kPackageForLanguage = {0, 2, 3, 4, 5};
 constexpr std::uint32_t kSaveSlotsField = 0x20 + 4 * kPackageForLanguage.size();
 constexpr std::uint32_t kIconsField = kSaveSlotsField + 8;
-constexpr std::uint32_t kHeaderSize = kIconsField + 4;
+constexpr std::uint32_t kSkillArtField = kIconsField + 4;
+constexpr std::uint32_t kHeaderSize = kSkillArtField + 4;
 // Backpack icons: a 16-byte SpriteAnimation per base item (tiles, frame set, palette pointers and
 // a frame duration). Frame 0 is the 24x24 backpack icon: a gold bevel around a dark green fill.
 // A Two Towers frame is {u8 flags (OAM piece count in bits 0-4), u8, u8 width, u8 height,
@@ -301,6 +302,171 @@ Icon convertIcon(const std::vector<std::uint8_t>& rom, std::uint32_t record)
     return icon;
 }
 
+// Skill icons: per hero, 11 BG assets (flags 0x70: tiles packed with the C64 pucrunch, no
+// palette) of 4x4 tiles: a round frame (colors 11..15) around the art (1..10).
+constexpr std::uint32_t kSkillIcons = 0x0832EA64u;
+constexpr std::uint32_t kHeroCount = 6, kSkillCount = 11;
+// The 16 colors the skill screen draws them with.
+constexpr std::uint32_t kSkillIconPalette = 0x08A792E8u + 2;
+constexpr int kSkillIconSize = 32;
+// The art for ROTK's 32x24 skill icon, whose border is 1 pixel at the top and bottom and 2 at the
+// sides, in its art shades 8 (brightest) .. 13.
+constexpr int kSkillArtWidth = 32, kSkillArtHeight = 24;
+constexpr std::uint32_t kSkillArtBytes = kSkillArtWidth * kSkillArtHeight / 2;
+constexpr int kArtShadeFirst = 8, kArtShadeCount = 6;
+
+// The Two Towers' BG tile decoder (ARM at ROM 0x08000264, copied to IWRAM): the C64 pucrunch
+// unpacker. It builds an LZ source address byte by byte in its stack frame, as the 6502 did, and
+// stores halfwords: a copy reading the byte still waiting for its pair reads what memory held
+// (zero here) unless it starts on it.
+std::vector<std::uint8_t> unpackTiles(const std::vector<std::uint8_t>& rom, std::uint32_t address)
+{
+    constexpr std::uint32_t kDest = 0x06000000u;
+    std::vector<std::uint8_t> out;
+    std::uint8_t frame[68] = {};
+    std::uint32_t p = address - kRomBase + 6;
+    auto byte = [&]() -> std::uint8_t { return p < rom.size() ? rom[p++] : 0; };
+    std::memcpy(frame + 4, &kDest, 4);
+    frame[0] = byte();
+    p += 2;
+    frame[8] = byte();
+    frame[0xC] = static_cast<std::uint8_t>(8 - frame[8]);
+    frame[0x10] = byte();
+    frame[0x1C] = static_cast<std::uint8_t>(9 - frame[0x10]);
+    frame[0x14] = byte();
+    frame[0x18] = static_cast<std::uint8_t>(2 * frame[0x14] - 1);
+    frame[0x20] = byte();
+    p += 2;
+    const std::uint8_t tableSize = byte();
+    for (std::uint32_t i = 0; i < tableSize && 36 + i < sizeof frame; ++i) frame[36 + i] = byte();
+    std::uint32_t bits = 128;
+    auto bit = [&]() -> std::uint32_t {
+        bits <<= 1;
+        if ((bits & 0xFF) == 0) bits = byte() * 2u + 1u;
+        return (bits >> 8) & 1u;
+    };
+    auto read = [&](std::uint32_t value, std::uint32_t n) {
+        while (n--) value = value * 2 + bit();
+        return value;
+    };
+    auto gamma = [&]() {
+        std::uint32_t n = 1;
+        while (bit()) {
+            if (++n == frame[0x10]) break;
+        }
+        return read(1, n - 1);
+    };
+    while (out.size() < 0x4000) {
+        const std::uint8_t escape = frame[0];
+        const std::uint32_t head = read(0, frame[8]);
+        if (head != escape) {
+            out.push_back(static_cast<std::uint8_t>(read(head, frame[0xC])));
+            continue;
+        }
+        std::uint32_t g = gamma();
+        frame[4] = static_cast<std::uint8_t>(g);
+        std::uint8_t low;
+        if (g >> 1) {
+            const std::uint32_t g2 = gamma();
+            if (g2 == frame[0x18]) break;
+            frame[5] = static_cast<std::uint8_t>(read(g2 - 1, frame[0x20]));
+            low = static_cast<std::uint8_t>(read(frame[5], 8));
+        } else if (bit() == 0) {
+            frame[5] = 0;  // a short copy has one offset byte
+            low = static_cast<std::uint8_t>(read(0, 8));
+        } else if (bit() == 0) {
+            frame[0] = static_cast<std::uint8_t>(read(0, frame[8]));
+            out.push_back(static_cast<std::uint8_t>(read(escape, frame[0xC])));
+            continue;
+        } else {
+            g = gamma();
+            frame[4] = static_cast<std::uint8_t>(g);
+            std::uint32_t high = 0;
+            if (g >= frame[0x14]) {
+                frame[4] = static_cast<std::uint8_t>(read(g, frame[0x1C]));
+                high = gamma() - 1;
+            }
+            const std::uint32_t rank = gamma();
+            const std::uint8_t value =
+                rank < 32 ? frame[35 + rank] : static_cast<std::uint8_t>(read(rank, 3));
+            out.insert(out.end(), frame[4] + 1 + (high << 8), value);
+            continue;
+        }
+        const std::uint32_t length = frame[4] + 1u;
+        const std::uint32_t next = kDest + static_cast<std::uint32_t>(out.size());
+        const std::uint32_t sum = (next & 0xFF) + low;
+        const std::uint32_t borrow = ((sum >> 8) & 1u) ^ 1u;
+        frame[4] = static_cast<std::uint8_t>(sum);
+        const std::uint32_t mid = (next >> 8) - frame[5] - borrow;
+        frame[5] = static_cast<std::uint8_t>(mid);
+        frame[6] = static_cast<std::uint8_t>(mid >> 8);
+        std::uint32_t source;
+        std::memcpy(&source, frame + 4, 4);
+        source -= kDest;
+        if (source + 1 == out.size() && (out.size() & 1)) {
+            out.insert(out.end(), length, out.back());
+            continue;
+        }
+        for (std::uint32_t k = 0; k < length; ++k) {
+            const std::size_t at = source + k, stored = out.size() & ~std::size_t{1};
+            out.push_back(at < stored ? out[at] : 0);
+        }
+    }
+    return out;
+}
+
+// A Two Towers skill icon's art for ROTK's skill icon: frame and fill cleared, colors by brightness
+// in ROTK's art shades, centered in 32x24 4bpp tiles (4 by 3, row by row).
+std::vector<std::uint8_t> convertSkillArt(const std::vector<std::uint8_t>& rom, std::uint32_t asset)
+{
+    constexpr int kLast = kSkillIconSize - 1;
+    const std::vector<std::uint8_t> tiles = unpackTiles(rom, asset + 4);
+    std::uint8_t art[kSkillIconSize][kSkillIconSize] = {};
+    for (int y = 0; y < kSkillIconSize; ++y)
+        for (int x = 0; x < kSkillIconSize; ++x) {
+            const std::size_t at = ((y / 8) * 4 + x / 8) * 32 + (y % 8) * 4 + (x % 8) / 2;
+            if (at < tiles.size()) art[y][x] = (tiles[at] >> ((x & 1) * 4)) & 0xF;
+        }
+    // The frame colors and the fill the edge reaches are not art.
+    constexpr std::uint16_t kBackground = 1u << 0 | 1u << 11 | 1u << 12 | 1u << 13 | 1u << 14 | 1u << 15;
+    bool seen[kSkillIconSize][kSkillIconSize] = {};
+    std::vector<std::pair<int, int>> stack;
+    for (int i = 0; i < kSkillIconSize; ++i) stack.insert(stack.end(), {{0, i}, {kLast, i}, {i, 0}, {i, kLast}});
+    while (!stack.empty()) {
+        const auto [y, x] = stack.back();
+        stack.pop_back();
+        if (x < 0 || y < 0 || x > kLast || y > kLast || seen[y][x] || !(kBackground >> art[y][x] & 1)) continue;
+        seen[y][x] = true;
+        art[y][x] = 0;
+        stack.insert(stack.end(), {{y - 1, x}, {y + 1, x}, {y, x - 1}, {y, x + 1}});
+    }
+    std::uint8_t shade[16];
+    for (int i = 0; i < 16; ++i) {
+        const int color = read16(rom, kSkillIconPalette + i * 2);
+        const double luma = 0.3 * (color & 31) + 0.59 * (color >> 5 & 31) + 0.11 * (color >> 10 & 31);
+        shade[i] = static_cast<std::uint8_t>(
+            kArtShadeFirst + std::min(kArtShadeCount - 1, static_cast<int>((31 - luma) * kArtShadeCount / 32)));
+    }
+    int top = kSkillIconSize, bottom = -1, left = kSkillIconSize, right = -1;
+    for (int y = 0; y < kSkillIconSize; ++y)
+        for (int x = 0; x < kSkillIconSize; ++x)
+            if (art[y][x]) {
+                top = std::min(top, y), bottom = std::max(bottom, y);
+                left = std::min(left, x), right = std::max(right, x);
+            }
+    std::vector<std::uint8_t> out(kSkillArtBytes, 0);
+    if (bottom < 0) return out;
+    const int dy = kSkillArtHeight / 2 - (top + bottom + 1) / 2, dx = kSkillArtWidth / 2 - (left + right) / 2;
+    for (int y = top; y <= bottom; ++y)
+        for (int x = left; x <= right; ++x) {
+            const int ty = y + dy, tx = x + dx;
+            if (!art[y][x] || ty < 1 || ty > kSkillArtHeight - 2 || tx < 2 || tx > kSkillArtWidth - 3) continue;
+            out[((ty / 8) * (kSkillArtWidth / 8) + tx / 8) * 32 + (ty % 8) * 4 + (tx % 8) / 2] |=
+                static_cast<std::uint8_t>(shade[art[y][x]] << ((tx & 1) * 4));
+        }
+    return out;
+}
+
 // The Two Towers save's character slots, zeroed for an empty or damaged one.
 std::vector<std::uint8_t> loadSaveSlots()
 {
@@ -376,6 +542,15 @@ void build(const std::vector<std::uint8_t>& rom)
         putPointer(at + 4, append(icon.frames.data(), icon.frames.size()));
         putPointer(at + 8, append(icon.palette.data(), icon.palette.size()));
     }
+
+    std::vector<std::uint8_t> skillArt;
+    for (std::uint32_t hero = 0; hero < kHeroCount; ++hero)
+        for (std::uint32_t skill = 0; skill < kSkillCount; ++skill) {
+            const std::vector<std::uint8_t> art =
+                convertSkillArt(rom, read32(rom, kSkillIcons + (hero * kSkillCount + skill) * 4));
+            skillArt.insert(skillArt.end(), art.begin(), art.end());
+        }
+    putPointer(kSkillArtField, append(skillArt.data(), skillArt.size()));
 }
 
 }  // namespace
