@@ -10,10 +10,12 @@
 namespace rotk {
 namespace {
 
-// Player 2's split-screen controls: a keyboard key and a controller button per GBA button, set in
-// the launcher (options of the "local-coop" feature, mods/rotk.pc.manifest.toml.in) or in the
-// in-game menu's "Player 2 controls" section, which saves them the same way. The values are SDL key
-// and controller button names, applied with gbarecomp::set_player_two_controls.
+// Player 2's split-screen controls: a keyboard key and a controller button per GBA button, in the
+// in-game menu's "Player 2 controls" section. They live in the engine's player controls
+// (gbarecomp::player_controls: keybinds.ini [player2], and the input.ini profile of the controller
+// player 2 uses). The launcher's older options of the "local-coop" feature
+// (mods/rotk.pc.manifest.toml.in) are handed to gbarecomp::set_player_two_controls, which migrates
+// them once.
 
 constexpr const char* kPackageId = "rotk.pc";
 constexpr const char* kFeatureId = "local-coop";
@@ -95,17 +97,36 @@ const Button* rowButton(const char* key, bool& pad)
     return nullptr;
 }
 
+// Player 2's controller GUID, "" when they have none (its edits then go to the shared fallback).
+std::string playerTwoGuid()
+{
+    const int index = gbarecomp::player_controller(1);
+    const auto pads = gbarecomp::connected_controllers();
+    return index >= 0 && index < static_cast<int>(pads.size()) ? pads[index].guid : std::string();
+}
+
+std::string current(const Button& button, bool pad)
+{
+    namespace controls = gbarecomp::controls;
+    const controls::Settings settings = gbarecomp::player_controls();
+    const controls::Names& names = gbarecomp::player_control_names();
+    const int index = static_cast<int>(&button - kButtons);
+    if (pad) return controls::bind_name(controls::profile_for(settings, playerTwoGuid()).bind[index], names);
+    const char* name = settings.player[1].keys[index] > 0 ? names.scancode_name(settings.player[1].keys[index]) : nullptr;
+    return name ? name : "";
+}
+
 int menuGet(const char* key, int* out)
 {
     bool pad = false;
     const Button* button = rowButton(key, pad);
     if (!button) return 0;
-    const char* current = value(*button, pad);
+    const std::string chosen = current(*button, pad);
     const char* const* list = pad ? kPads : kKeys;
     const int count = pad ? kPadCount : kKeyCount;
     *out = 0;
     for (int i = 0; i < count; ++i)
-        if (!std::strcmp(list[i], current)) *out = i;
+        if (!strcasecmp(list[i], chosen.c_str())) *out = i;
     return 1;
 }
 
@@ -116,9 +137,15 @@ int menuSet(const char* key, int index)
     if (!button) return 0;
     const int count = pad ? kPadCount : kKeyCount;
     if (index < 0 || index >= count) return 1;
-    gba_mod_set_option_value(kPackageId, kFeatureId, optionId(*button, pad).c_str(),
-                             pad ? kPads[index] : kKeys[index]);
-    apply();
+    namespace controls = gbarecomp::controls;
+    const controls::Names& names = gbarecomp::player_control_names();
+    controls::Settings settings = gbarecomp::player_controls();
+    const int bit = static_cast<int>(button - kButtons);
+    if (pad)
+        controls::set_pad_bind(settings, playerTwoGuid(), bit, controls::parse_bind(kPads[index], names));
+    else
+        controls::set_key(settings.player[1], bit, names.scancode(kKeys[index]));
+    gbarecomp::set_player_controls(settings);
     return 1;
 }
 

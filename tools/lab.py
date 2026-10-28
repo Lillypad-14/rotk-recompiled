@@ -35,6 +35,7 @@ FRAMEWORK_PATCHES = [
     ROOT / "patches/direct-ram-guards.patch",
     ROOT / "patches/hd-icons.patch",
     ROOT / "patches/local-link.patch",
+    ROOT / "patches/controls.patch",
 ]
 
 # recomp-ui (launcher) patches, applied the same way to external/recomp-ui.

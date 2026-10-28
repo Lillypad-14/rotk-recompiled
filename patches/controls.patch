@@ -1,0 +1,1462 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index b8e19bd..e69408d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -403,6 +403,7 @@ add_library(gbarecomp_runtime STATIC
+     src/runtime/mod_function_hooks.cpp
+     src/runtime/host_platform.cpp
+     src/runtime/touch_input.cpp
++    src/runtime/player_controls.cpp
+     src/runtime/mobile_platform.cpp
+     src/runtime/color_lut.cpp
+     src/runtime/asset_picker.cpp
+@@ -1044,6 +1045,11 @@ add_executable(presentation_layout_tests tests/presentation_layout/test_main.cpp
+ target_include_directories(presentation_layout_tests PRIVATE src/runtime)
+ add_test(NAME presentation_layout_tests COMMAND presentation_layout_tests)
+ 
++# Player controls: devices, bindings, assignment and the shared ini files.
++add_executable(player_controls_tests tests/player_controls/test_main.cpp src/runtime/player_controls.cpp)
++target_include_directories(player_controls_tests PRIVATE src/runtime)
++add_test(NAME player_controls_tests COMMAND player_controls_tests)
++
+ # Touch input: gesture recognizer, hub rings/scripts, key synthesis, JSON.
+ add_gbarecomp_runtime_stack_test(touch_input_tests tests/touch_input/test_main.cpp)
+ add_gbarecomp_runtime_stack_test(multiplayer_session_tests tests/link/session_test.cpp)
+diff --git a/src/runtime/host_window.cpp b/src/runtime/host_window.cpp
+index cf48963..6d35d52 100644
+--- a/src/runtime/host_window.cpp
++++ b/src/runtime/host_window.cpp
+@@ -19,6 +19,7 @@
+ 
+ #include "color_lut.h"
+ #include "host_overlay.h"
++#include "player_controls.h"
+ #include "presentation_layout.h"
+ #include "touch_input.h"
+ #include "../gba/mod_audio.h"
+@@ -454,10 +455,18 @@ struct Backend {
+     bool linear_filter = false;
+     bool sharp_filter = false;
+ 
++    // ---- player controls (player_controls.h) -------------------------------
++    // Every connected controller in connection order, with its GUID; the
++    // `controller` above is player 1's (gyro, Assist), picked by `assigned`.
++    std::vector<SDL_GameController*> pads;
++    std::vector<std::string> pad_guids;
++    controls::Settings controls;
++    controls::Assignment assigned;
++    std::string controls_dir;           // set once load_input_config read the files
++    int claim_player = -1;              // the next key or button press picks this player's device
++    std::vector<std::pair<int, bool>> device_notices;  // player, controller found (true) or lost
++
+     // ---- rebindable input (see HostWindow::load_input_config) --------------
+-    // GBA KEYINPUT bit (0..9) per bound SDL scancode; seeded from the
+-    // built-in defaults, overridden by keybinds.ini [player1].
+-    SDL_Scancode bind_sc[10] = {};      // indexed by GBA KEYINPUT bit
+     HotkeyBind   hotkeys[HK_COUNT];     // [KeyMap] bindings
+     SDL_Scancode assist_key[2] = {
+         SDL_SCANCODE_1, SDL_SCANCODE_2
+@@ -541,51 +550,120 @@ bool ensure_sharp_texture(Backend* b, int factor) {
+     return true;
+ }
+ 
+-void close_game_controller(Backend* b) {
+-    if (!b || !b->controller) return;
++std::string controller_guid(SDL_GameController* pad) {
++    char buf[64] = {};
++    SDL_Joystick* joystick = pad ? SDL_GameControllerGetJoystick(pad) : nullptr;
++    if (joystick) SDL_JoystickGetGUIDString(SDL_JoystickGetGUID(joystick), buf, sizeof(buf));
++    for (char* c = buf; *c; ++c) *c = static_cast<char>(std::tolower(static_cast<unsigned char>(*c)));
++    return buf;
++}
++
++SDL_JoystickID controller_instance(SDL_GameController* pad) {
++    SDL_Joystick* joystick = pad ? SDL_GameControllerGetJoystick(pad) : nullptr;
++    return joystick ? SDL_JoystickInstanceID(joystick) : -1;
++}
++
++// Player 1's controller carries the gyro and the Assist buttons.
++void set_player_one_controller(Backend* b, SDL_GameController* pad) {
++    if (b->controller == pad) return;
+ #if SDL_VERSION_ATLEAST(2, 0, 14)
+-    if (b->controller_gyro)
+-        SDL_GameControllerSetSensorEnabled(
+-            b->controller, SDL_SENSOR_GYRO, SDL_FALSE);
++    if (b->controller && b->controller_gyro)
++        SDL_GameControllerSetSensorEnabled(b->controller, SDL_SENSOR_GYRO, SDL_FALSE);
+ #endif
+-    SDL_GameControllerClose(b->controller);
+-    b->controller = nullptr;
+-    b->controller_id = -1;
++    b->controller = pad;
++    b->controller_id = controller_instance(pad);
+     b->controller_gyro = false;
++#if SDL_VERSION_ATLEAST(2, 0, 14)
++    if (pad && SDL_GameControllerHasSensor(pad, SDL_SENSOR_GYRO) &&
++        SDL_GameControllerSetSensorEnabled(pad, SDL_SENSOR_GYRO, SDL_TRUE) == 0) {
++        b->controller_gyro = true;
++    }
++#endif
++}
++
++// Hands the connected controllers to the players (controls::assign) and notes
++// a player whose chosen controller went missing or came back.
++void reassign_controllers(Backend* b) {
++    std::vector<controls::PadInfo> info;
++    for (std::size_t i = 0; i < b->pads.size(); ++i)
++        info.push_back({static_cast<int>(controller_instance(b->pads[i])), b->pad_guids[i]});
++    const controls::Assignment before = b->assigned;
++    b->assigned = controls::assign(b->controls, info);
++    for (int p = 0; p < 2; ++p) {
++        if (before.waiting[p] != b->assigned.waiting[p])
++            b->device_notices.emplace_back(p, !b->assigned.waiting[p]);
++    }
++    const int first = b->assigned.pad[0];
++    set_player_one_controller(b, first >= 0 ? b->pads[first] : nullptr);
+ }
+ 
+ bool open_game_controller(Backend* b, int device_index) {
+-    if (!b || b->controller || device_index < 0 ||
+-        !SDL_IsGameController(device_index))
++    if (!b || device_index < 0 || !SDL_IsGameController(device_index))
+         return false;
+-
++    const SDL_JoystickID id = SDL_JoystickGetDeviceInstanceID(device_index);
++    for (SDL_GameController* pad : b->pads)
++        if (controller_instance(pad) == id) return false;
+     SDL_GameController* controller = SDL_GameControllerOpen(device_index);
+     if (!controller) return false;
+-    b->controller = controller;
+-    SDL_Joystick* joystick = SDL_GameControllerGetJoystick(controller);
+-    b->controller_id = joystick ? SDL_JoystickInstanceID(joystick) : -1;
+-#if SDL_VERSION_ATLEAST(2, 0, 14)
+-    if (SDL_GameControllerHasSensor(controller, SDL_SENSOR_GYRO) &&
+-        SDL_GameControllerSetSensorEnabled(
+-            controller, SDL_SENSOR_GYRO, SDL_TRUE) == 0) {
+-        b->controller_gyro = true;
+-    }
+-#endif
++    const std::string guid = controller_guid(controller);
++    b->pads.push_back(controller);
++    b->pad_guids.push_back(guid);
++    const char* name = SDL_GameControllerName(controller);
++    if (name && !b->controls.pad_names.count(guid)) b->controls.pad_names[guid] = name;
+     std::fprintf(stderr,
+-                 "host_window: controller=%s id=%d gyro=%s\n",
+-                 SDL_GameControllerName(controller)
+-                     ? SDL_GameControllerName(controller) : "unknown",
+-                 static_cast<int>(b->controller_id),
+-                 b->controller_gyro ? "enabled" : "unavailable");
++                 "host_window: controller=%s id=%d guid=%s\n",
++                 name ? name : "unknown", static_cast<int>(controller_instance(controller)),
++                 guid.c_str());
+     std::fflush(stderr);
+     return true;
+ }
+ 
+-void open_first_game_controller(Backend* b) {
+-    if (!b || b->controller) return;
+-    for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+-        if (open_game_controller(b, i)) return;
++void close_game_controller(Backend* b, SDL_JoystickID id) {
++    for (std::size_t i = 0; i < b->pads.size(); ++i) {
++        if (controller_instance(b->pads[i]) != id) continue;
++        if (b->controller == b->pads[i]) set_player_one_controller(b, nullptr);
++        SDL_GameControllerClose(b->pads[i]);
++        b->pads.erase(b->pads.begin() + static_cast<std::ptrdiff_t>(i));
++        b->pad_guids.erase(b->pad_guids.begin() + static_cast<std::ptrdiff_t>(i));
++        return;
++    }
++}
++
++void close_all_game_controllers(Backend* b) {
++    if (!b) return;
++    set_player_one_controller(b, nullptr);
++    for (SDL_GameController* pad : b->pads) SDL_GameControllerClose(pad);
++    b->pads.clear();
++    b->pad_guids.clear();
++}
++
++void open_all_game_controllers(Backend* b) {
++    if (!b) return;
++    for (int i = 0; i < SDL_NumJoysticks(); ++i) open_game_controller(b, i);
++    reassign_controllers(b);
++}
++
++// A player's pressed GBA buttons (active-high): their keys while they read the
++// keyboard, and their controller through its input.ini profile.
++std::uint16_t player_held(Backend* b, int player) {
++    std::uint16_t held = 0;
++    if (b->assigned.keyboard[player]) {
++        int count = 0;
++        const Uint8* keyboard = SDL_GetKeyboardState(&count);
++        held |= controls::key_buttons(b->controls.player[player].keys, keyboard, count);
++    }
++    const int index = b->assigned.pad[player];
++    if (index >= 0 && index < static_cast<int>(b->pads.size()) &&
++        SDL_GameControllerGetAttached(b->pads[index])) {
++        SDL_GameController* pad = b->pads[index];
++        controls::PadState state;
++        for (int i = 0; i < SDL_CONTROLLER_BUTTON_MAX && i < controls::kPadButtons; ++i)
++            state.button[i] = SDL_GameControllerGetButton(pad, static_cast<SDL_GameControllerButton>(i)) != 0;
++        for (int i = 0; i < SDL_CONTROLLER_AXIS_MAX && i < controls::kPadAxes; ++i)
++            state.axis[i] = SDL_GameControllerGetAxis(pad, static_cast<SDL_GameControllerAxis>(i));
++        held |= controls::pad_buttons(controls::profile_for(b->controls, b->pad_guids[index]), state);
+     }
++    return held;
+ }
+ 
+ void open_device_gyro(Backend* b) {
+@@ -1142,33 +1220,6 @@ void save_touch_config(const Backend* b) {
+     }
+ }
+ 
+-// GBA KEYINPUT bit order: 0=A 1=B 2=Sel 3=Sta 4=Right 5=Left 6=Up 7=Down 8=R 9=L.
+-// Defaults MATCH recomp-ui's generic keybinds defaults (keybinds.c) so the
+-// launcher's rebind page and the game agree even before keybinds.ini exists:
+-// A=X, B=Z, L=C, R=V, Start=Return, Select=RShift, D-pad=arrows.
+-// (This supersedes the pre-launcher hardcoded Z/X/A/S layout — one defaults
+-// source across the recomp ecosystem; rebind in the launcher to taste.)
+-const SDL_Scancode kDefaultBinds[10] = {
+-    SDL_SCANCODE_X,       // A
+-    SDL_SCANCODE_Z,       // B
+-    SDL_SCANCODE_RSHIFT,  // Select
+-    SDL_SCANCODE_RETURN,  // Start
+-    SDL_SCANCODE_RIGHT,   // Right
+-    SDL_SCANCODE_LEFT,    // Left
+-    SDL_SCANCODE_UP,      // Up
+-    SDL_SCANCODE_DOWN,    // Down
+-    SDL_SCANCODE_V,       // R
+-    SDL_SCANCODE_C,       // L
+-};
+-
+-// keybinds.ini [player1] key name -> GBA KEYINPUT bit. x/y/l2/r2/l3/r3 from
+-// the generic 16-slot format are ignored (no GBA equivalent).
+-const struct { const char* name; int bit; } kBindKeys[] = {
+-    { "a", 0 }, { "b", 1 }, { "select", 2 }, { "start", 3 },
+-    { "right", 4 }, { "left", 5 }, { "up", 6 }, { "down", 7 },
+-    { "r", 8 }, { "l", 9 },
+-};
+-
+ // config.ini [KeyMap] key names, in HostHotkey order, with the same defaults
+ // recomp-ui's hotkey panel displays for the GBA catalog.
+ const char* const kHotkeyNames[HK_COUNT] = {
+@@ -1620,6 +1671,77 @@ bool runtime_ui_event(RecompRuntimeUi* ui, const SDL_Event& e) {
+ }
+ #endif
+ 
++// SDL's names for player_controls.h (keys use scancode_from_name's aliases).
++const controls::Names& sdl_control_names() {
++    static const controls::Names names = {
++        [](const char* n) { return static_cast<int>(scancode_from_name(n)); },
++        [](int sc) { return SDL_GetScancodeName(static_cast<SDL_Scancode>(sc)); },
++        [](const char* n) { return static_cast<int>(SDL_GameControllerGetButtonFromString(n)); },
++        [](int button) { return SDL_GameControllerGetStringForButton(static_cast<SDL_GameControllerButton>(button)); },
++        [](const char* n) { return static_cast<int>(SDL_GameControllerGetAxisFromString(n)); },
++        [](int axis) { return SDL_GameControllerGetStringForAxis(static_cast<SDL_GameControllerAxis>(axis)); },
++    };
++    return names;
++}
++
++// The open window's controls, for the free functions in runtime.h.
++Backend* g_controls_backend = nullptr;
++
++// Player 2's controls from the older per-option settings
++// (set_player_two_controls), waiting for the files to be read.
++bool g_legacy_two = false;
++std::string g_legacy_two_keys[controls::kButtons];
++std::string g_legacy_two_pads[controls::kButtons];
++
++void save_player_controls(Backend* b) {
++    if (b->controls_dir.empty()) return;
++    if (!controls::save(b->controls_dir, b->controls, sdl_control_names()))
++        std::fprintf(stderr, "host_window: could not save the controls in %s\n", b->controls_dir.c_str());
++    reassign_controllers(b);
++}
++
++// ControlsVersion 2: player 2's older settings applied (or the player already
++// changed controls since). Their keys replace keybinds.ini [player2]; a
++// controller button they changed becomes the [mapping] fallback, the only
++// per-player controller layout there was.
++void apply_legacy_player_two(Backend* b) {
++    if (!g_legacy_two || b->controls_dir.empty() || b->controls.version >= 2) return;
++    const controls::Names& names = sdl_control_names();
++    const controls::Settings built_in = controls::defaults(names);
++    for (int i = 0; i < controls::kButtons; ++i) {
++        const int sc = names.scancode(g_legacy_two_keys[i].c_str());
++        if (sc > 0) b->controls.player[1].keys[i] = sc;
++        const controls::PadBind bind = controls::parse_bind(g_legacy_two_pads[i], names);
++        if (bind.kind != controls::PadBind::Unbound &&
++            (bind.kind != built_in.global.bind[i].kind || bind.code != built_in.global.bind[i].code)) {
++            b->controls.global.bind[i] = bind;
++        }
++    }
++    b->controls.version = 2;
++    save_player_controls(b);
++}
++
++void load_player_controls(Backend* b, const char* dir) {
++    b->controls = controls::load(dir, sdl_control_names());
++    b->controls_dir = dir;
++    for (std::size_t i = 0; i < b->pads.size(); ++i) {
++        const char* name = SDL_GameControllerName(b->pads[i]);
++        if (name && !b->controls.pad_names.count(b->pad_guids[i])) b->controls.pad_names[b->pad_guids[i]] = name;
++    }
++    // ControlsVersion 1: player 2's keys start from their own defaults. The
++    // launcher seeds keybinds.ini [player2] with player 1's keys, which were
++    // never read before, and would move both players at once.
++    if (b->controls.version < 1) {
++        const controls::Settings built_in = controls::defaults(sdl_control_names());
++        std::copy(std::begin(built_in.player[1].keys), std::end(built_in.player[1].keys),
++                  b->controls.player[1].keys);
++        b->controls.version = 1;
++        save_player_controls(b);
++    }
++    apply_legacy_player_two(b);
++    reassign_controllers(b);
++}
++
+ }  // namespace
+ 
+ HostWindow::HostWindow() = default;
+@@ -1711,7 +1833,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
+     // are ever delivered, so a backgrounded-then-killed app lost progress.
+     SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "0");
+ #endif
+-    std::memcpy(b->bind_sc, kDefaultBinds, sizeof(kDefaultBinds));
++    b->controls = controls::defaults(sdl_control_names());
+     for (int h = 0; h < HK_COUNT; ++h)
+         b->hotkeys[h] = parse_hotkey(kHotkeyDefaults[h]);
+     // Linear vs nearest scaling is a texture-creation-time hint.
+@@ -1882,7 +2004,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
+     }
+ #endif
+ 
+-    open_first_game_controller(b);
++    open_all_game_controllers(b);
+     open_device_gyro(b);
+ 
+     // Open the audio device at 65536 Hz mono 16-bit signed. The
+@@ -1964,6 +2086,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
+     impl_ = b;
+     open_ = true;
+     g_haptic_window = this;
++    g_controls_backend = b;
+     return true;
+ }
+ 
+@@ -2288,10 +2411,11 @@ void HostWindow::close() {
+     if (b->audio_rate_stream) SDL_FreeAudioStream(b->audio_rate_stream);
+     if (b->bridge_ready) rab_free(&b->bridge);
+     if (b->audio_mtx) SDL_DestroyMutex(b->audio_mtx);
+-    close_game_controller(b);
++    close_all_game_controllers(b);
+     if (b->device_gyro) SDL_SensorClose(b->device_gyro);
+     if (b->haptic) SDL_HapticClose(b->haptic);
+     if (g_haptic_window == this) g_haptic_window = nullptr;
++    if (g_controls_backend == b) g_controls_backend = nullptr;
+ #if defined(GBARECOMP_RUNTIME_UI)
+     runtime_imgui_shutdown(b);
+ #endif
+@@ -2584,16 +2708,9 @@ void HostWindow::load_input_config(const char* dir,
+         fast_forward_multiplier_default, 2, 10);
+     const std::string base = std::string(dir) + "/";
+ 
+-    // keybinds.ini [player1] (recomp-ui generic format, scancode names).
+-    ini_scan_section((base + "keybinds.ini").c_str(), "player1",
+-                     [b](const char* key, const char* val) {
+-        for (const auto& bk : kBindKeys) {
+-            if (SDL_strcasecmp(key, bk.name) != 0) continue;
+-            SDL_Scancode sc = scancode_from_name(val);
+-            b->bind_sc[bk.bit] = sc;   // "None"/unknown => unbound (UNKNOWN)
+-            return;
+-        }
+-    });
++    // Both players' devices and bindings: config.ini [Controller],
++    // keybinds.ini and input.ini (player_controls.h).
++    load_player_controls(b, dir);
+ 
+     // config.ini [KeyMap] (keycode names with Ctrl+/Alt+/Shift+ prefixes).
+     ini_scan_section((base + "config.ini").c_str(), "KeyMap",
+@@ -2677,66 +2794,87 @@ void HostWindow::fit_window_to_surface() {
+     SDL_SetWindowPosition(b->window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+ }
+ 
+-namespace {
+-SDL_GameController* g_player_two_pad = nullptr;
+-// Player 2's controls, per GBA button in KEYINPUT bit order (A B Select Start Right Left Up Down R L).
+-SDL_Scancode g_player_two_keys[10] = {
+-    SDL_SCANCODE_J, SDL_SCANCODE_K, SDL_SCANCODE_G, SDL_SCANCODE_SPACE, SDL_SCANCODE_D,
+-    SDL_SCANCODE_A, SDL_SCANCODE_W, SDL_SCANCODE_S, SDL_SCANCODE_I, SDL_SCANCODE_U};
+-SDL_GameControllerButton g_player_two_buttons[10] = {
+-    SDL_CONTROLLER_BUTTON_A, SDL_CONTROLLER_BUTTON_B, SDL_CONTROLLER_BUTTON_BACK,
+-    SDL_CONTROLLER_BUTTON_START, SDL_CONTROLLER_BUTTON_DPAD_RIGHT, SDL_CONTROLLER_BUTTON_DPAD_LEFT,
+-    SDL_CONTROLLER_BUTTON_DPAD_UP, SDL_CONTROLLER_BUTTON_DPAD_DOWN,
+-    SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, SDL_CONTROLLER_BUTTON_LEFTSHOULDER};
++void set_player_two_controls(const char* const keys[10], const char* const buttons[10]) {
++    for (int i = 0; i < controls::kButtons; ++i) {
++        g_legacy_two_keys[i] = keys && keys[i] ? keys[i] : "";
++        g_legacy_two_pads[i] = buttons && buttons[i] ? buttons[i] : "";
++    }
++    g_legacy_two = true;
++    if (g_controls_backend) apply_legacy_player_two(g_controls_backend);
+ }
+ 
+-void set_player_two_controls(const char* const keys[10], const char* const buttons[10]) {
+-    for (int i = 0; i < 10; ++i) {
+-        if (keys && keys[i]) {
+-            const SDL_Scancode key = SDL_GetScancodeFromName(keys[i]);
+-            if (key != SDL_SCANCODE_UNKNOWN) g_player_two_keys[i] = key;
+-        }
+-        if (buttons && buttons[i]) {
+-            const SDL_GameControllerButton button = SDL_GameControllerGetButtonFromString(buttons[i]);
+-            if (button != SDL_CONTROLLER_BUTTON_INVALID) g_player_two_buttons[i] = button;
+-        }
++controls::Settings player_controls() {
++    return g_controls_backend ? g_controls_backend->controls : controls::defaults(sdl_control_names());
++}
++
++void set_player_controls(const controls::Settings& settings) {
++    Backend* b = g_controls_backend;
++    if (!b) return;
++    b->controls = settings;
++    b->controls.version = std::max(b->controls.version, 2);
++    save_player_controls(b);
++}
++
++const controls::Names& player_control_names() { return sdl_control_names(); }
++
++std::vector<controls::ConnectedController> connected_controllers() {
++    std::vector<controls::ConnectedController> out;
++    Backend* b = g_controls_backend;
++    if (!b) return out;
++    for (std::size_t i = 0; i < b->pads.size(); ++i) {
++        controls::ConnectedController c;
++        c.guid = b->pad_guids[i];
++        const char* name = SDL_GameControllerName(b->pads[i]);
++        c.name = name ? name : "Controller";
++        c.type = static_cast<int>(SDL_GameControllerGetType(b->pads[i]));
++        for (int p = 0; p < 2; ++p)
++            if (b->assigned.pad[p] == static_cast<int>(i)) c.player = p;
++        out.push_back(c);
+     }
++    return out;
++}
++
++int player_controller(int player) {
++    Backend* b = g_controls_backend;
++    if (!b || player < 0 || player > 1) return -1;
++    return b->assigned.pad[player];
++}
++
++bool player_waiting_for_controller(int player) {
++    Backend* b = g_controls_backend;
++    return b && player >= 0 && player < 2 && b->assigned.waiting[player];
++}
++
++void begin_device_claim(int player) {
++    if (g_controls_backend) g_controls_backend->claim_player = player >= 0 && player < 2 ? player : -1;
++}
++
++int device_claim_player() { return g_controls_backend ? g_controls_backend->claim_player : -1; }
++
++bool take_device_notice(int* player, bool* connected) {
++    Backend* b = g_controls_backend;
++    if (!b || b->device_notices.empty()) return false;
++    if (player) *player = b->device_notices.front().first;
++    if (connected) *connected = b->device_notices.front().second;
++    b->device_notices.erase(b->device_notices.begin());
++    return true;
+ }
+ 
+ void HostWindow::rumble(int player, std::uint16_t low, std::uint16_t high, std::uint32_t ms) {
+-    if (!open_ || !impl_) return;
+-    SDL_GameController* pad = player == 0 ? static_cast<Backend*>(impl_)->controller : g_player_two_pad;
++    if (!open_ || !impl_ || player < 0 || player > 1) return;
++    auto* b = static_cast<Backend*>(impl_);
++    const int index = b->assigned.pad[player];
+ #if SDL_VERSION_ATLEAST(2, 0, 9)
+-    if (pad) SDL_GameControllerRumble(pad, low, high, ms);
++    if (index >= 0 && index < static_cast<int>(b->pads.size()))
++        SDL_GameControllerRumble(b->pads[index], low, high, ms);
++#else
++    (void)index; (void)low; (void)high; (void)ms;
+ #endif
+ }
+ 
+ std::uint16_t HostWindow::player_two_buttons() {
+     if (!open_ || !impl_) return 0;
+-    auto* b = static_cast<Backend*>(impl_);
+-    SDL_GameController*& pad = g_player_two_pad;
+-    if (pad && !SDL_GameControllerGetAttached(pad)) { SDL_GameControllerClose(pad); pad = nullptr; }
+-    if (!pad) {
+-        for (int i = 0; i < SDL_NumJoysticks() && !pad; ++i) {
+-            if (!SDL_IsGameController(i) || SDL_JoystickGetDeviceInstanceID(i) == b->controller_id) continue;
+-            pad = SDL_GameControllerOpen(i);
+-        }
+-    }
+-    std::uint16_t held = 0;
+-    const Uint8* keys = SDL_GetKeyboardState(nullptr);
+-    for (int i = 0; i < 10; ++i)
+-        if (keys[g_player_two_keys[i]]) held |= 1u << i;
+-    if (!pad) return held;
+-    for (int i = 0; i < 10; ++i)
+-        if (SDL_GameControllerGetButton(pad, g_player_two_buttons[i])) held |= 1u << i;
+-    constexpr int kDeadZone = 16000;
+-    const int x = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX);
+-    const int y = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY);
+-    if (x > kDeadZone) held |= 1u << 4;
+-    if (x < -kDeadZone) held |= 1u << 5;
+-    if (y < -kDeadZone) held |= 1u << 6;
+-    if (y > kDeadZone) held |= 1u << 7;
+-    return held;
++    return player_held(static_cast<Backend*>(impl_), 1);
+ }
+ 
+ void HostWindow::adjust_scale(int delta) {
+@@ -3070,13 +3208,25 @@ HostWindow::Events HostWindow::pump() {
+             ev.terminating = true;
+             ev.quit = true;
+         } else if (e.type == SDL_CONTROLLERDEVICEADDED) {
+-            if (!b->controller) open_game_controller(b, e.cdevice.which);
++            if (open_game_controller(b, e.cdevice.which)) reassign_controllers(b);
+         } else if (e.type == SDL_CONTROLLERDEVICEREMOVED) {
+-            if (b->controller &&
+-                e.cdevice.which == b->controller_id) {
+-                close_game_controller(b);
+-                open_first_game_controller(b);
++            close_game_controller(b, e.cdevice.which);
++            reassign_controllers(b);
++        } else if (b->claim_player >= 0 && e.type == SDL_CONTROLLERBUTTONDOWN) {
++            // Press to assign: this controller becomes the claiming player's.
++            for (std::size_t i = 0; i < b->pads.size(); ++i) {
++                if (controller_instance(b->pads[i]) != e.cbutton.which) continue;
++                controls::claim_pad(b->controls, b->claim_player, b->pad_guids[i]);
++                b->claim_player = -1;
++                save_player_controls(b);
++                break;
+             }
++        } else if (b->claim_player >= 0 && e.type == SDL_KEYDOWN && !e.key.repeat) {
++            // A key claims the keyboard; Escape cancels.
++            const bool cancel = e.key.keysym.scancode == SDL_SCANCODE_ESCAPE;
++            if (!cancel) controls::claim_keyboard(b->controls, b->claim_player);
++            b->claim_player = -1;
++            if (!cancel) save_player_controls(b);
+         } else if (e.type == SDL_WINDOWEVENT &&
+                    e.window.event == SDL_WINDOWEVENT_CLOSE) {
+             ev.quit = true;
+@@ -3257,40 +3407,10 @@ HostWindow::Events HostWindow::pump() {
+ #endif
+     }
+ 
+-    // Build the GBA KEYINPUT value from current keyboard state via the
+-    // rebindable table (keybinds.ini; defaults in kDefaultBinds).
++    // Player 1's GBA KEYINPUT: their keys and controller (player_controls.h).
+     const Uint8* ks = SDL_GetKeyboardState(nullptr);
+-    uint16_t keys = 0x03FFu;  // all released
+-    for (int bit = 0; bit < 10; ++bit) {
+-        SDL_Scancode sc = b->bind_sc[bit];
+-        if (sc != SDL_SCANCODE_UNKNOWN && ks[sc])
+-            keys &= static_cast<uint16_t>(~(1u << bit));
+-    }
+-
+-    // SDL's standard controller vocabulary maps naturally to the ten GBA
+-    // inputs. Keyboard and controller are additive so either can be used at
+-    // any time, including while testing motion.
+-    if (b->controller && SDL_GameControllerGetAttached(b->controller)) {
+-        const struct {
+-            int bit;
+-            SDL_GameControllerButton button;
+-        } pad_map[] = {
+-            {0, SDL_CONTROLLER_BUTTON_A},
+-            {1, SDL_CONTROLLER_BUTTON_B},
+-            {2, SDL_CONTROLLER_BUTTON_BACK},
+-            {3, SDL_CONTROLLER_BUTTON_START},
+-            {4, SDL_CONTROLLER_BUTTON_DPAD_RIGHT},
+-            {5, SDL_CONTROLLER_BUTTON_DPAD_LEFT},
+-            {6, SDL_CONTROLLER_BUTTON_DPAD_UP},
+-            {7, SDL_CONTROLLER_BUTTON_DPAD_DOWN},
+-            {8, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER},
+-            {9, SDL_CONTROLLER_BUTTON_LEFTSHOULDER},
+-        };
+-        for (const auto& binding : pad_map) {
+-            if (SDL_GameControllerGetButton(b->controller, binding.button))
+-                keys &= static_cast<uint16_t>(~(1u << binding.bit));
+-        }
+-    }
++    uint16_t keys = static_cast<uint16_t>(~player_held(b, 0) & 0x03FFu);
++
+     if (b->touch_controls) {
+         const uint16_t touch_buttons = active_touch_buttons(b);
+         keys &= static_cast<uint16_t>(~touch_buttons);
+@@ -3411,6 +3531,22 @@ bool HostWindow::set_surface_size(int /*base_w*/, int /*base_h*/) {
+ void HostWindow::fit_window_to_surface() {}
+ std::uint16_t HostWindow::player_two_buttons() { return 0; }
+ void set_player_two_controls(const char* const*, const char* const*) {}
++controls::Settings player_controls() { return {}; }
++void set_player_controls(const controls::Settings&) {}
++const controls::Names& player_control_names() {
++    static const controls::Names names = {
++        [](const char*) { return -1; }, [](int) -> const char* { return nullptr; },
++        [](const char*) { return -1; }, [](int) -> const char* { return nullptr; },
++        [](const char*) { return -1; }, [](int) -> const char* { return nullptr; },
++    };
++    return names;
++}
++std::vector<controls::ConnectedController> connected_controllers() { return {}; }
++int player_controller(int) { return -1; }
++bool player_waiting_for_controller(int) { return false; }
++void begin_device_claim(int) {}
++int device_claim_player() { return -1; }
++bool take_device_notice(int*, bool*) { return false; }
+ void HostWindow::rumble(int, std::uint16_t, std::uint16_t, std::uint32_t) {}
+ 
+ bool HostWindow::drawable_size(int* /*width*/, int* /*height*/) const {
+diff --git a/src/runtime/player_controls.cpp b/src/runtime/player_controls.cpp
+new file mode 100644
+index 0000000..066d15a
+--- /dev/null
++++ b/src/runtime/player_controls.cpp
+@@ -0,0 +1,403 @@
++#include "player_controls.h"
++
++#include <algorithm>
++#include <cctype>
++#include <cstdio>
++#include <cstdlib>
++#include <fstream>
++#include <utility>
++
++namespace gbarecomp::controls {
++
++const char* const kButtonKeys[kButtons] = {
++    "a", "b", "select", "start", "right", "left", "up", "down", "r", "l"};
++const char* const kButtonLabels[kButtons] = {
++    "A", "B", "Select", "Start", "Right", "Left", "Up", "Down", "R", "L"};
++
++namespace {
++
++// Keyboard defaults. Player 1 matches recomp-ui's keybinds defaults; player 2
++// is the split-screen layout players already know (WASD, J/K, G, Space, U/I).
++const char* const kPlayerOneKeys[kButtons] = {
++    "X", "Z", "Right Shift", "Return", "Right", "Left", "Up", "Down", "V", "C"};
++const char* const kPlayerTwoKeys[kButtons] = {
++    "J", "K", "G", "Space", "D", "A", "W", "S", "I", "U"};
++const char* const kPadDefaults[kButtons] = {
++    "a", "b", "back", "start", "dpright", "dpleft", "dpup", "dpdown",
++    "rightshoulder", "leftshoulder"};
++
++std::string lower(std::string s) {
++    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
++    return s;
++}
++
++std::string trim(const std::string& s) {
++    std::size_t a = 0, b = s.size();
++    while (a < b && std::isspace(static_cast<unsigned char>(s[a]))) ++a;
++    while (b > a && std::isspace(static_cast<unsigned char>(s[b - 1]))) --b;
++    return s.substr(a, b - a);
++}
++
++int button_index(const std::string& key) {
++    const std::string k = lower(key);
++    for (int i = 0; i < kButtons; ++i)
++        if (k == kButtonKeys[i]) return i;
++    return -1;
++}
++
++std::vector<std::string> read_lines(const std::string& path) {
++    std::vector<std::string> lines;
++    std::ifstream f(path);
++    for (std::string line; std::getline(f, line);) {
++        if (!line.empty() && line.back() == '\r') line.pop_back();
++        lines.push_back(line);
++    }
++    return lines;
++}
++
++// Calls fn(section, key, value) for every key line; section is lowercase.
++template <typename Fn>
++void scan(const std::string& path, Fn fn) {
++    std::string section;
++    for (const std::string& raw : read_lines(path)) {
++        const std::string line = trim(raw);
++        if (line.empty() || line[0] == '#' || line[0] == ';') continue;
++        if (line[0] == '[') {
++            const std::size_t end = line.find(']');
++            section = lower(line.substr(1, end == std::string::npos ? std::string::npos : end - 1));
++            continue;
++        }
++        const std::size_t eq = line.find('=');
++        if (eq == std::string::npos) continue;
++        fn(section, trim(line.substr(0, eq)), trim(line.substr(eq + 1)));
++    }
++}
++
++using Values = std::vector<std::pair<std::string, std::string>>;
++
++// Sets `values` in [section] of the file: matching keys are replaced in place,
++// missing ones are appended to the section (created at the end if absent), and
++// `remove` keys are deleted. Everything else, comments included, is kept.
++bool write_section(const std::string& path, const std::string& section, const Values& values,
++                   const std::vector<std::string>& remove = {}) {
++    std::vector<std::string> lines = read_lines(path);
++    std::vector<bool> done(values.size(), false);
++    const std::string want = lower(section);
++    int start = -1, end = static_cast<int>(lines.size());
++    for (int i = 0; i < static_cast<int>(lines.size()); ++i) {
++        const std::string line = trim(lines[i]);
++        if (line.empty() || line[0] != '[') continue;
++        const std::size_t close = line.find(']');
++        const std::string name = lower(line.substr(1, close == std::string::npos ? std::string::npos : close - 1));
++        if (start >= 0) { end = i; break; }
++        if (name == want) start = i;
++    }
++    if (start >= 0) {
++        for (int i = start + 1; i < end; ++i) {
++            const std::string line = trim(lines[i]);
++            const std::size_t eq = line.find('=');
++            if (line.empty() || line[0] == '#' || line[0] == ';' || eq == std::string::npos) continue;
++            const std::string key = lower(trim(line.substr(0, eq)));
++            for (const std::string& r : remove)
++                if (lower(r) == key) lines[i] = "";
++            for (std::size_t v = 0; v < values.size(); ++v) {
++                if (done[v] || lower(values[v].first) != key) continue;
++                lines[i] = values[v].first + " = " + values[v].second;
++                done[v] = true;
++            }
++        }
++        // Append after the section's last non-blank line.
++        int at = end;
++        while (at > start + 1 && trim(lines[at - 1]).empty()) --at;
++        std::vector<std::string> add;
++        for (std::size_t v = 0; v < values.size(); ++v)
++            if (!done[v]) add.push_back(values[v].first + " = " + values[v].second);
++        lines.insert(lines.begin() + at, add.begin(), add.end());
++        lines.erase(std::remove(lines.begin(), lines.end(), std::string("")), lines.end());
++    } else {
++        if (!lines.empty() && !trim(lines.back()).empty()) lines.push_back("");
++        lines.push_back("[" + section + "]");
++        for (const auto& [key, value] : values) lines.push_back(key + " = " + value);
++    }
++    const std::string tmp = path + ".tmp";
++    {
++        std::ofstream f(tmp, std::ios::trunc | std::ios::binary);
++        if (!f) return false;
++        for (const std::string& line : lines) f << line << "\n";
++        if (!f) return false;
++    }
++    std::remove(path.c_str());
++    return std::rename(tmp.c_str(), path.c_str()) == 0;
++}
++
++std::string key_name(int scancode, const Names& names) {
++    const char* n = scancode > 0 ? names.scancode_name(scancode) : nullptr;
++    return n && n[0] ? n : "None";
++}
++
++int key_code(const std::string& name, const Names& names) {
++    if (name.empty() || lower(name) == "none") return 0;
++    const int sc = names.scancode(name.c_str());
++    return sc > 0 ? sc : 0;
++}
++
++PlayerSetting* other(Settings& s, int player) { return &s.player[player ^ 1]; }
++
++}  // namespace
++
++PadBind parse_bind(const std::string& text, const Names& names) {
++    PadBind bind;
++    const std::string t = lower(trim(text));
++    if (t.empty() || t == "none") return bind;
++    if (t.back() == '+' || t.back() == '-') {
++        const int axis = names.axis(t.substr(0, t.size() - 1).c_str());
++        if (axis < 0 || axis >= kPadAxes) return bind;
++        bind.kind = t.back() == '-' ? PadBind::AxisNegative : PadBind::AxisPositive;
++        bind.code = axis;
++        return bind;
++    }
++    const int button = names.button(t.c_str());
++    if (button < 0 || button >= kPadButtons) return bind;
++    bind.kind = PadBind::Button;
++    bind.code = button;
++    return bind;
++}
++
++std::string bind_name(const PadBind& bind, const Names& names) {
++    if (bind.kind == PadBind::Button) {
++        const char* n = names.button_name(bind.code);
++        return n ? n : "";
++    }
++    if (bind.kind == PadBind::AxisNegative || bind.kind == PadBind::AxisPositive) {
++        const char* n = names.axis_name(bind.code);
++        return std::string(n ? n : "axis") + (bind.kind == PadBind::AxisNegative ? "-" : "+");
++    }
++    return "";
++}
++
++Settings defaults(const Names& names) {
++    Settings s;
++    for (int i = 0; i < kButtons; ++i) {
++        s.player[0].keys[i] = key_code(kPlayerOneKeys[i], names);
++        s.player[1].keys[i] = key_code(kPlayerTwoKeys[i], names);
++        s.global.bind[i] = parse_bind(kPadDefaults[i], names);
++        s.global.set[i] = true;
++    }
++    s.global.deadzone_set = true;
++    return s;
++}
++
++Settings load(const std::string& dir, const Names& names) {
++    Settings s = defaults(names);
++    const std::string base = dir.empty() ? std::string() : dir + "/";
++    scan(base + "config.ini", [&](const std::string& section, const std::string& key, const std::string& value) {
++        if (section != "controller") return;
++        const std::string k = lower(key);
++        for (int p = 0; p < 2; ++p) {
++            const std::string n = std::to_string(p + 1);
++            if (k == "sourcep" + n) {
++                const int v = std::atoi(value.c_str());
++                if (v >= 0 && v <= 3) s.player[p].source = static_cast<Source>(v);
++            } else if (k == "guidp" + n) {
++                s.player[p].guid = lower(value);
++            }
++        }
++        if (k == "controlsversion") s.version = std::atoi(value.c_str());
++    });
++    scan(base + "keybinds.ini", [&](const std::string& section, const std::string& key, const std::string& value) {
++        const int p = section == "player1" ? 0 : section == "player2" ? 1 : -1;
++        const int b = button_index(key);
++        if (p < 0 || b < 0) return;
++        s.player[p].keys[b] = key_code(value, names);
++    });
++    scan(base + "input.ini", [&](const std::string& section, const std::string& key, const std::string& value) {
++        if (section == "gamepads") {
++            s.pad_names[lower(key)] = value;
++            return;
++        }
++        PadProfile* profile = nullptr;
++        if (section == "mapping") profile = &s.global;
++        else if (section.rfind("mapping.", 0) == 0 && section.size() > 8) profile = &s.pads[section.substr(8)];
++        if (!profile) return;
++        if (lower(key) == "deadzone") {
++            profile->deadzone_pct = std::clamp(std::atoi(value.c_str()), 0, 100);
++            profile->deadzone_set = true;
++            return;
++        }
++        const int b = button_index(key);
++        if (b < 0) return;
++        profile->bind[b] = parse_bind(value, names);
++        profile->set[b] = true;
++    });
++    return s;
++}
++
++bool save(const std::string& dir, const Settings& s, const Names& names) {
++    const std::string base = dir.empty() ? std::string() : dir + "/";
++    // Auto is written as no SourceP<n> at all: the launcher reads 0..2 only.
++    Values controller;
++    std::vector<std::string> removed;
++    for (int p = 0; p < 2; ++p) {
++        const std::string n = std::to_string(p + 1);
++        if (s.player[p].source == Source::Auto) {
++            removed.push_back("SourceP" + n);
++        } else {
++            controller.emplace_back("SourceP" + n, std::to_string(static_cast<int>(s.player[p].source)));
++        }
++        controller.emplace_back("GuidP" + n, s.player[p].guid);
++    }
++    controller.emplace_back("ControlsVersion", std::to_string(s.version));
++    bool ok = write_section(base + "config.ini", "Controller", controller, removed);
++    for (int p = 0; p < 2; ++p) {
++        Values keys;
++        for (int i = 0; i < kButtons; ++i) keys.emplace_back(kButtonKeys[i], key_name(s.player[p].keys[i], names));
++        ok = write_section(base + "keybinds.ini", p ? "player2" : "player1", keys) && ok;
++    }
++    Values global;
++    for (int i = 0; i < kButtons; ++i)
++        global.emplace_back(kButtonKeys[i], s.global.set[i] ? bind_name(s.global.bind[i], names) : kPadDefaults[i]);
++    ok = write_section(base + "input.ini", "mapping", global) && ok;
++    for (const auto& [guid, profile] : s.pads) {
++        Values values;
++        if (profile.deadzone_set) values.emplace_back("deadzone", std::to_string(profile.deadzone_pct));
++        for (int i = 0; i < kButtons; ++i)
++            if (profile.set[i]) values.emplace_back(kButtonKeys[i], bind_name(profile.bind[i], names));
++        if (!values.empty()) ok = write_section(base + "input.ini", "mapping." + guid, values) && ok;
++    }
++    Values known;
++    for (const auto& [guid, name] : s.pad_names) known.emplace_back(guid, name);
++    if (!known.empty()) ok = write_section(base + "input.ini", "gamepads", known) && ok;
++    return ok;
++}
++
++PadProfile profile_for(const Settings& s, const std::string& guid) {
++    PadProfile out = s.global;
++    const auto it = s.pads.find(lower(guid));
++    if (it == s.pads.end()) return out;
++    for (int i = 0; i < kButtons; ++i)
++        if (it->second.set[i]) out.bind[i] = it->second.bind[i];
++    if (it->second.deadzone_set) out.deadzone_pct = it->second.deadzone_pct;
++    return out;
++}
++
++std::uint16_t key_buttons(const int keys[kButtons], const std::uint8_t* keyboard, int key_count) {
++    std::uint16_t held = 0;
++    if (!keyboard) return 0;
++    for (int i = 0; i < kButtons; ++i)
++        if (keys[i] > 0 && keys[i] < key_count && keyboard[keys[i]]) held |= 1u << i;
++    return held;
++}
++
++std::uint16_t pad_buttons(const PadProfile& profile, const PadState& state) {
++    const int threshold = std::clamp(profile.deadzone_pct, 5, 95) * 32767 / 100;
++    std::uint16_t held = 0;
++    for (int i = 0; i < kButtons; ++i) {
++        const PadBind& b = profile.bind[i];
++        if (b.kind == PadBind::Button && b.code < kPadButtons && state.button[b.code]) held |= 1u << i;
++        if (b.kind == PadBind::AxisNegative && b.code < kPadAxes && state.axis[b.code] < -threshold) held |= 1u << i;
++        if (b.kind == PadBind::AxisPositive && b.code < kPadAxes && state.axis[b.code] > threshold) held |= 1u << i;
++    }
++    // The left stick always moves.
++    if (state.axis[kLeftX] > threshold) held |= 1u << 4;
++    if (state.axis[kLeftX] < -threshold) held |= 1u << 5;
++    if (state.axis[kLeftY] < -threshold) held |= 1u << 6;
++    if (state.axis[kLeftY] > threshold) held |= 1u << 7;
++    return held;
++}
++
++Assignment assign(const Settings& s, const std::vector<PadInfo>& pads) {
++    Assignment a;
++    std::vector<bool> taken(pads.size(), false);
++    auto take = [&](int p, const std::string& guid) {
++        for (std::size_t i = 0; i < pads.size(); ++i) {
++            if (taken[i] || (!guid.empty() && lower(pads[i].guid) != guid)) continue;
++            taken[i] = true;
++            a.pad[p] = static_cast<int>(i);
++            return;
++        }
++    };
++    for (int p = 0; p < 2; ++p)
++        if (s.player[p].source == Source::Gamepad && !s.player[p].guid.empty()) take(p, s.player[p].guid);
++    for (int p = 0; p < 2; ++p)
++        if (s.player[p].source == Source::Gamepad && s.player[p].guid.empty()) take(p, "");
++    for (int p = 0; p < 2; ++p)
++        if (s.player[p].source == Source::Auto) take(p, "");
++    for (int p = 0; p < 2; ++p) {
++        const Source src = s.player[p].source;
++        a.waiting[p] = src == Source::Gamepad && a.pad[p] < 0;
++        a.keyboard[p] = src == Source::Keyboard || src == Source::Auto || a.waiting[p];
++    }
++    return a;
++}
++
++void claim_pad(Settings& s, int player, const std::string& guid) {
++    const std::string g = lower(guid);
++    PlayerSetting& me = s.player[player];
++    PlayerSetting* them = other(s, player);
++    if (them->source == Source::Gamepad && them->guid == g) {
++        them->source = me.source;
++        them->guid = me.guid;
++    }
++    me.source = Source::Gamepad;
++    me.guid = g;
++}
++
++void claim_keyboard(Settings& s, int player) {
++    s.player[player].source = Source::Keyboard;
++    s.player[player].guid.clear();
++}
++
++void swap_players(Settings& s) { std::swap(s.player[0], s.player[1]); }
++
++int set_key(PlayerSetting& player, int button, int scancode) {
++    if (button < 0 || button >= kButtons) return -1;
++    int swapped = -1;
++    for (int i = 0; i < kButtons; ++i) {
++        if (i != button && scancode > 0 && player.keys[i] == scancode) {
++            player.keys[i] = player.keys[button];
++            swapped = i;
++        }
++    }
++    player.keys[button] = scancode;
++    return swapped;
++}
++
++int set_pad_bind(Settings& s, const std::string& guid, int button, const PadBind& bind) {
++    if (button < 0 || button >= kButtons) return -1;
++    const std::string g = lower(guid);
++    const PadProfile current = profile_for(s, g);
++    PadProfile& target = g.empty() ? s.global : s.pads[g];
++    int swapped = -1;
++    for (int i = 0; i < kButtons; ++i) {
++        if (i == button || bind.kind == PadBind::Unbound) continue;
++        if (current.bind[i].kind == bind.kind && current.bind[i].code == bind.code) {
++            target.bind[i] = current.bind[button];
++            target.set[i] = true;
++            swapped = i;
++        }
++    }
++    target.bind[button] = bind;
++    target.set[button] = true;
++    return swapped;
++}
++
++void reset_keys(Settings& s, int player, const Names& names) {
++    const Settings d = defaults(names);
++    std::copy(std::begin(d.player[player].keys), std::end(d.player[player].keys), s.player[player].keys);
++}
++
++void reset_pad(Settings& s, const std::string& guid, const Names& names) {
++    const std::string g = lower(guid);
++    if (g.empty()) {
++        const int deadzone = s.global.deadzone_pct;
++        s.global = defaults(names).global;
++        s.global.deadzone_pct = deadzone;
++        return;
++    }
++    const auto it = s.pads.find(g);
++    if (it == s.pads.end()) return;
++    for (int i = 0; i < kButtons; ++i) it->second.set[i] = false;
++    it->second.deadzone_set = false;
++}
++
++}  // namespace gbarecomp::controls
+diff --git a/src/runtime/player_controls.h b/src/runtime/player_controls.h
+new file mode 100644
+index 0000000..d7aac50
+--- /dev/null
++++ b/src/runtime/player_controls.h
+@@ -0,0 +1,144 @@
++// player_controls.h — both players' input devices and bindings, without SDL.
++//
++// Files (all in the exe directory, shared with recomp-ui's launcher):
++//   * config.ini [Controller]: SourceP1/SourceP2 (0 None, 1 Keyboard, 2 Gamepad;
++//     absent = Auto, keyboard plus the first free controller; 3 also reads as
++//     Auto, but save() leaves the key out because the launcher reads 0..2) and
++//     GuidP1/GuidP2 (a Gamepad player's controller; empty = the first free one).
++//     ControlsVersion marks a completed migration from older settings.
++//   * keybinds.ini [player1]/[player2]: keyboard keys per GBA button (SDL
++//     scancode names), recomp-ui's generic format.
++//   * input.ini: controller bindings, recomp-ui's pad_binds format. [mapping] is
++//     the fallback for every controller, [mapping.<guid>] one controller's
++//     overrides plus its stick dead zone; [gamepads] names the known ones.
++//     Bindings belong to the controller, not the player, so a controller keeps
++//     its layout when it changes hands.
++//
++// A player reads the keyboard only when their source is Keyboard or Auto, or
++// while their Gamepad is missing (then `waiting` is set so the game can say so).
++// The left stick always moves, past the controller's dead zone.
++//
++// SDL names are resolved through Names so this file builds and tests headless;
++// host_window.cpp supplies SDL's lookups.
++
++#pragma once
++
++#include <cstdint>
++#include <map>
++#include <string>
++#include <vector>
++
++namespace gbarecomp::controls {
++
++constexpr int kButtons = 10;   // GBA KEYINPUT bit order: A B Select Start Right Left Up Down R L
++constexpr int kPadButtons = 32;
++constexpr int kPadAxes = 8;
++constexpr int kLeftX = 0;      // SDL_CONTROLLER_AXIS_LEFTX / LEFTY
++constexpr int kLeftY = 1;
++
++enum class Source : int { None = 0, Keyboard = 1, Gamepad = 2, Auto = 3 };
++
++// keybinds.ini / input.ini key per GBA button, in KEYINPUT bit order.
++extern const char* const kButtonKeys[kButtons];
++extern const char* const kButtonLabels[kButtons];
++
++struct PadBind {
++    enum Kind : std::uint8_t { Unbound, Button, AxisNegative, AxisPositive };
++    Kind kind = Unbound;
++    int code = 0;   // SDL_GameControllerButton or SDL_GameControllerAxis
++};
++
++struct PadProfile {
++    PadBind bind[kButtons];
++    bool set[kButtons] = {};   // per-controller profiles override only what they set
++    int deadzone_pct = 50;
++    bool deadzone_set = false;
++};
++
++struct PlayerSetting {
++    Source source = Source::Auto;
++    std::string guid;
++    int keys[kButtons] = {};   // SDL scancodes, 0 = unbound
++};
++
++struct Settings {
++    PlayerSetting player[2];
++    PadProfile global;                               // [mapping]
++    std::map<std::string, PadProfile> pads;          // [mapping.<guid>]
++    std::map<std::string, std::string> pad_names;    // [gamepads]
++    int version = 0;                                 // [Controller] ControlsVersion
++};
++
++// SDL lookups (names are case-insensitive; unknown returns -1, "None" 0 for keys).
++struct Names {
++    int (*scancode)(const char* name);
++    const char* (*scancode_name)(int scancode);
++    int (*button)(const char* name);
++    const char* (*button_name)(int button);
++    int (*axis)(const char* name);
++    const char* (*axis_name)(int axis);
++};
++
++// One controller's live state, filled by the host from SDL.
++struct PadState {
++    bool button[kPadButtons] = {};
++    std::int16_t axis[kPadAxes] = {};
++};
++
++struct PadInfo {
++    int id = -1;          // SDL_JoystickID
++    std::string guid;     // lowercase SDL GUID string
++};
++
++// A connected controller as the host reports it (runtime.h connected_controllers).
++struct ConnectedController {
++    std::string guid;
++    std::string name;
++    int type = 0;      // SDL_GameControllerType (Xbox, PlayStation, Nintendo, ...)
++    int player = -1;   // the player using it, -1 = free
++};
++
++struct Assignment {
++    int pad[2] = {-1, -1};          // index into the pads list, -1 = none
++    bool keyboard[2] = {};          // reads its keyboard keys
++    bool waiting[2] = {};           // wants a controller, none free: keyboard fallback
++};
++
++Settings defaults(const Names& names);
++// Missing files keep the defaults. Unknown names leave a binding unbound.
++Settings load(const std::string& dir, const Names& names);
++// Rewrites only the keys this module owns; every other line is kept.
++bool save(const std::string& dir, const Settings& settings, const Names& names);
++
++// The profile a controller uses: its own overrides over [mapping].
++PadProfile profile_for(const Settings& settings, const std::string& guid);
++// "a", "dpup", "leftx-", "" for unbound (input.ini source strings).
++std::string bind_name(const PadBind& bind, const Names& names);
++PadBind parse_bind(const std::string& text, const Names& names);
++
++// Pressed GBA buttons (active-high bits).
++std::uint16_t key_buttons(const int keys[kButtons], const std::uint8_t* keyboard, int key_count);
++std::uint16_t pad_buttons(const PadProfile& profile, const PadState& state);
++
++// Which controller each player gets. Players with a named controller claim it
++// first, then Gamepad players, then Auto players, each taking the first free
++// controller in connection order.
++Assignment assign(const Settings& settings, const std::vector<PadInfo>& pads);
++
++// The device a player just pressed something on becomes theirs. If the other
++// player had that controller, the two players trade devices.
++void claim_pad(Settings& settings, int player, const std::string& guid);
++void claim_keyboard(Settings& settings, int player);
++// Players trade devices and keyboard keys.
++void swap_players(Settings& settings);
++// Sets a key; a key another button of the same player used moves to this
++// button's old key, so nothing is left unbound by accident. Returns the button
++// that was swapped, or -1.
++int set_key(PlayerSetting& player, int button, int scancode);
++// The same for one controller's profile (written to [mapping.<guid>], or
++// [mapping] when guid is empty).
++int set_pad_bind(Settings& settings, const std::string& guid, int button, const PadBind& bind);
++void reset_keys(Settings& settings, int player, const Names& names);
++void reset_pad(Settings& settings, const std::string& guid, const Names& names);
++
++}  // namespace gbarecomp::controls
+diff --git a/src/runtime/runtime.h b/src/runtime/runtime.h
+index 93a42ae..fde1d38 100644
+--- a/src/runtime/runtime.h
++++ b/src/runtime/runtime.h
+@@ -10,6 +10,10 @@
+ #include <cstddef>
+ #include <cstdint>
+ #include <memory>
++#include <string>
++#include <vector>
++
++#include "player_controls.h"
+ 
+ namespace gba { class GbaBus; }
+ 
+@@ -415,6 +419,31 @@ void runtime_rumble(int player, std::uint16_t low, std::uint16_t high, std::uint
+ // Start Right Left Up Down R L): SDL key names (SDL_GetScancodeFromName) and SDL game controller
+ // button names (SDL_GameControllerGetButtonFromString). A null array or entry, or an unknown name,
+ // keeps that control. The left stick always moves too.
++// Superseded by the player controls below: these values are migrated once into
++// keybinds.ini [player2] (and a changed controller button into input.ini
++// [mapping]), unless the player has already changed controls there.
+ void set_player_two_controls(const char* const keys[10], const char* const buttons[10]);
+ 
++// ---- Player controls (player_controls.h) ----------------------------------
++// Both players' devices and bindings on the game's window. set_player_controls
++// saves them to the exe directory (config.ini [Controller], keybinds.ini,
++// input.ini) and hands out the controllers again at once. Without a window
++// these return defaults and do nothing.
++controls::Settings player_controls();
++void set_player_controls(const controls::Settings& settings);
++const controls::Names& player_control_names();
++
++// Connected controllers in connection order (player_controller's indices).
++std::vector<controls::ConnectedController> connected_controllers();
++int player_controller(int player);              // index, -1 = none
++// A Gamepad player whose controller is missing (they read the keyboard meanwhile).
++bool player_waiting_for_controller(int player);
++// Press to assign: the next key or controller button press becomes `player`'s
++// device (Escape cancels). -1 cancels.
++void begin_device_claim(int player);
++int device_claim_player();
++// One device change per call: `player`'s controller came back (connected) or
++// went missing.
++bool take_device_notice(int* player, bool* connected);
++
+ }  // namespace gbarecomp
+diff --git a/tests/player_controls/test_main.cpp b/tests/player_controls/test_main.cpp
+new file mode 100644
+index 0000000..6601cbc
+--- /dev/null
++++ b/tests/player_controls/test_main.cpp
+@@ -0,0 +1,236 @@
++// player_controls_tests — defaults, ini round trips (other lines kept), device
++// assignment, claiming, swapping, conflict swaps and KEYINPUT resolution.
++
++#include "player_controls.h"
++
++#include <cstdio>
++#include <cstring>
++#include <filesystem>
++#include <fstream>
++#include <sstream>
++#include <string>
++#include <vector>
++
++using namespace gbarecomp::controls;
++
++namespace {
++
++int g_failures = 0;
++
++void check(bool ok, const char* what) {
++    if (!ok) {
++        std::fprintf(stderr, "FAIL: %s\n", what);
++        ++g_failures;
++    }
++}
++
++// A small stand-in for SDL's name tables, with SDL's numbering where it matters.
++struct Name { const char* name; int code; };
++const Name kKeys[] = {
++    {"A", 4}, {"C", 6}, {"D", 7}, {"G", 10}, {"I", 12}, {"J", 13}, {"K", 14}, {"S", 22}, {"U", 24},
++    {"V", 25}, {"W", 26}, {"X", 27}, {"Z", 29}, {"Return", 40}, {"Space", 44}, {"Right", 79},
++    {"Left", 80}, {"Down", 81}, {"Up", 82}, {"Right Shift", 229}, {"Q", 20}};
++const Name kPadButtonNames[] = {
++    {"a", 0}, {"b", 1}, {"x", 2}, {"y", 3}, {"back", 4}, {"start", 6}, {"leftshoulder", 9},
++    {"rightshoulder", 10}, {"dpup", 11}, {"dpdown", 12}, {"dpleft", 13}, {"dpright", 14}};
++const Name kAxisNames[] = {{"leftx", 0}, {"lefty", 1}, {"rightx", 2}, {"righty", 3},
++                           {"lefttrigger", 4}, {"righttrigger", 5}};
++
++template <std::size_t N>
++int lookup(const Name (&table)[N], const char* name) {
++    for (const Name& n : table)
++        if (!strcasecmp(n.name, name)) return n.code;
++    return -1;
++}
++template <std::size_t N>
++const char* reverse(const Name (&table)[N], int code) {
++    for (const Name& n : table)
++        if (n.code == code) return n.name;
++    return nullptr;
++}
++
++const Names kNames = {
++    [](const char* n) { return lookup(kKeys, n); },
++    [](int c) { return reverse(kKeys, c); },
++    [](const char* n) { return lookup(kPadButtonNames, n); },
++    [](int c) { return reverse(kPadButtonNames, c); },
++    [](const char* n) { return lookup(kAxisNames, n); },
++    [](int c) { return reverse(kAxisNames, c); },
++};
++
++std::string read(const std::filesystem::path& path) {
++    std::ifstream f(path);
++    std::stringstream s;
++    s << f.rdbuf();
++    return s.str();
++}
++
++void write(const std::filesystem::path& path, const std::string& text) {
++    std::ofstream f(path, std::ios::trunc | std::ios::binary);
++    f << text;
++}
++
++void test_defaults() {
++    const Settings s = defaults(kNames);
++    check(s.player[0].source == Source::Auto && s.player[1].source == Source::Auto, "both players default to Auto");
++    check(s.player[0].keys[0] == 27 && s.player[0].keys[1] == 29, "player 1 A/B are X/Z");
++    check(s.player[1].keys[0] == 13 && s.player[1].keys[6] == 26, "player 2 A is J, Up is W");
++    check(s.global.bind[0].kind == PadBind::Button && s.global.bind[0].code == 0, "pad A on button a");
++    check(s.global.bind[2].code == 4 && s.global.bind[9].code == 9, "pad Select on back, L on leftshoulder");
++}
++
++void test_round_trip(const std::filesystem::path& dir) {
++    // Existing files with lines that are not ours: they must survive a save.
++    write(dir / "config.ini", "[Launcher]\nassist_tools = 1\n\n[KeyMap]\nPause = P\n");
++    write(dir / "keybinds.ini", "# comment kept\n[player1]\na = X\nx = S\n\n[player2]\na = X\nb = Z\n");
++    write(dir / "input.ini",
++          "[gamepads]\n030000005e040000e002000000007200 = Xbox Controller\n\n[mapping]\na = b\n\n"
++          "[mapping.030000005e040000e002000000007200]\ndeadzone = 30\nl = lefttrigger+\n");
++    Settings s = load(dir.string(), kNames);
++    check(s.player[1].keys[0] == 27 && s.player[1].keys[1] == 29, "player 2 keys read from keybinds.ini");
++    check(s.player[1].keys[6] == 26, "player 2 keys missing from the file keep their defaults");
++    check(s.global.bind[0].code == 1, "[mapping] overrides the default");
++    const std::string xbox = "030000005e040000e002000000007200";
++    const PadProfile p = profile_for(s, xbox);
++    check(p.deadzone_pct == 30, "per-controller dead zone");
++    check(p.bind[9].kind == PadBind::AxisPositive && p.bind[9].code == 4, "per-controller trigger bind");
++    check(p.bind[0].code == 1, "per-controller profile falls back to [mapping]");
++    check(s.pad_names[xbox] == "Xbox Controller", "[gamepads] names read");
++
++    s.player[1].source = Source::Gamepad;
++    s.player[1].guid = xbox;
++    s.version = 1;
++    set_key(s.player[0], 0, 4);   // player 1 A = "A"
++    check(save(dir.string(), s, kNames), "save succeeds");
++    const std::string config = read(dir / "config.ini");
++    check(config.find("assist_tools = 1") != std::string::npos, "config.ini [Launcher] kept");
++    check(config.find("Pause = P") != std::string::npos, "config.ini [KeyMap] kept");
++    check(config.find("SourceP2 = 2") != std::string::npos, "SourceP2 written");
++    check(config.find("GuidP2 = " + xbox) != std::string::npos, "GuidP2 written");
++    const std::string keys = read(dir / "keybinds.ini");
++    check(keys.find("# comment kept") != std::string::npos, "keybinds.ini comment kept");
++    check(keys.find("x = S") != std::string::npos, "keybinds.ini keys we do not own kept");
++    check(config.find("SourceP1") == std::string::npos, "Auto is written as no SourceP1");
++    const Settings again = load(dir.string(), kNames);
++    check(again.player[1].source == Source::Gamepad && again.player[1].guid == xbox, "player 2 device round trip");
++    check(again.player[0].keys[0] == 4, "player 1 key round trip");
++    check(again.version == 1, "ControlsVersion round trip");
++    check(profile_for(again, xbox).deadzone_pct == 30, "dead zone round trip");
++    check(profile_for(again, xbox).bind[9].kind == PadBind::AxisPositive, "trigger bind round trip");
++
++    // Back to Auto: the stale SourceP2 line goes away.
++    Settings back = again;
++    back.player[1].source = Source::Auto;
++    back.player[1].guid.clear();
++    check(save(dir.string(), back, kNames), "second save succeeds");
++    check(read(dir / "config.ini").find("SourceP2") == std::string::npos, "returning to Auto removes SourceP2");
++    check(load(dir.string(), kNames).player[1].source == Source::Auto, "Auto round trip");
++}
++
++void test_assign() {
++    Settings s = defaults(kNames);
++    const std::vector<PadInfo> pads = {{10, "aaa"}, {11, "bbb"}};
++    Assignment a = assign(s, pads);
++    check(a.pad[0] == 0 && a.pad[1] == 1, "Auto: first controller to player 1, next to player 2");
++    check(a.keyboard[0] && a.keyboard[1], "Auto players also read their keys");
++
++    s.player[1].source = Source::Gamepad;
++    s.player[1].guid = "aaa";
++    a = assign(s, pads);
++    check(a.pad[1] == 0 && a.pad[0] == 1, "a named controller is claimed before Auto players pick");
++    check(!a.keyboard[1], "a Gamepad player with a controller ignores the keyboard");
++
++    a = assign(s, {{11, "bbb"}});
++    check(a.pad[1] == -1 && a.waiting[1] && a.keyboard[1], "missing controller: waiting, keyboard fallback");
++    check(a.pad[0] == 0, "player 1 still gets the free controller");
++
++    s.player[0].source = Source::Keyboard;
++    a = assign(s, pads);
++    check(a.pad[0] == -1 && a.keyboard[0], "Keyboard player gets no controller");
++
++    s.player[0].source = Source::None;
++    a = assign(s, pads);
++    check(a.pad[0] == -1 && !a.keyboard[0], "None reads nothing");
++}
++
++void test_claim_and_swap() {
++    Settings s = defaults(kNames);
++    claim_pad(s, 0, "AAA");
++    check(s.player[0].source == Source::Gamepad && s.player[0].guid == "aaa", "claim sets Gamepad + lowercase GUID");
++    claim_pad(s, 1, "aaa");
++    check(s.player[1].guid == "aaa", "player 2 takes the controller");
++    check(s.player[0].source == Source::Auto && s.player[0].guid.empty(), "player 1 gets player 2's old device");
++
++    claim_keyboard(s, 0);
++    check(s.player[0].source == Source::Keyboard, "claim keyboard");
++    const int p1a = s.player[0].keys[0];
++    swap_players(s);
++    check(s.player[1].source == Source::Keyboard && s.player[1].keys[0] == p1a, "swap moves device and keys");
++    check(s.player[0].guid == "aaa", "swap moves the controller");
++}
++
++void test_conflicts() {
++    Settings s = defaults(kNames);
++    // Player 1: bind A to Z, which B uses. B takes A's old key (X).
++    const int swapped = set_key(s.player[0], 0, 29);
++    check(swapped == 1, "conflicting key reported");
++    check(s.player[0].keys[0] == 29 && s.player[0].keys[1] == 27, "conflicting keys swap");
++
++    PadBind b{PadBind::Button, 1};
++    const int pad_swapped = set_pad_bind(s, "aaa", 0, b);
++    const PadProfile p = profile_for(s, "aaa");
++    check(pad_swapped == 1, "conflicting pad bind reported");
++    check(p.bind[0].code == 1 && p.bind[1].code == 0, "pad binds swap within one controller");
++    check(profile_for(s, "bbb").bind[0].code == 0, "other controllers keep their layout");
++    reset_pad(s, "aaa", kNames);
++    check(profile_for(s, "aaa").bind[0].code == 0, "reset restores the fallback");
++    reset_keys(s, 0, kNames);
++    check(s.player[0].keys[0] == 27, "reset restores default keys");
++}
++
++void test_resolve() {
++    Settings s = defaults(kNames);
++    std::uint8_t keyboard[512] = {};
++    keyboard[27] = 1;   // X
++    keyboard[26] = 1;   // W
++    check(key_buttons(s.player[0].keys, keyboard, 512) == 0x1, "player 1 X = A");
++    check(key_buttons(s.player[1].keys, keyboard, 512) == (1u << 6), "player 2 W = Up");
++
++    PadState pad;
++    pad.button[0] = true;    // a
++    pad.button[13] = true;   // dpleft
++    PadProfile p = profile_for(s, "");
++    check(pad_buttons(p, pad) == ((1u << 0) | (1u << 5)), "pad buttons");
++    pad = PadState{};
++    pad.axis[kLeftX] = 20000;
++    check(pad_buttons(p, pad) == (1u << 4), "stick past the dead zone moves right");
++    pad.axis[kLeftX] = 10000;
++    check(pad_buttons(p, pad) == 0, "stick inside the dead zone does nothing");
++    p.deadzone_pct = 25;
++    check(pad_buttons(p, pad) == (1u << 4), "smaller dead zone");
++    p.bind[9] = PadBind{PadBind::AxisPositive, 4};
++    pad = PadState{};
++    pad.axis[4] = 30000;
++    check(pad_buttons(p, pad) == (1u << 9), "trigger bound to L");
++}
++
++}  // namespace
++
++int main() {
++    const std::filesystem::path dir = std::filesystem::temp_directory_path() / "gbarecomp_player_controls_test";
++    std::filesystem::remove_all(dir);
++    std::filesystem::create_directories(dir);
++    test_defaults();
++    test_round_trip(dir);
++    test_assign();
++    test_claim_and_swap();
++    test_conflicts();
++    test_resolve();
++    std::filesystem::remove_all(dir);
++    if (g_failures) {
++        std::fprintf(stderr, "%d failure(s)\n", g_failures);
++        return 1;
++    }
++    std::printf("player_controls_tests: ok\n");
++    return 0;
++}
