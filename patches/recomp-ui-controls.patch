@@ -64,7 +64,7 @@ index 9828773..f52bae9 100644
          recomp_runtime_ui_current_text(ui, item, buf, sizeof(buf));
          std::snprintf(out, out_size, "%s", buf[0] ? buf : "(not set)");
 diff --git a/src/common/launcher_binds.c b/src/common/launcher_binds.c
-index 2e2bf4b..b5865d7 100644
+index 2e2bf4b..2756c31 100644
 --- a/src/common/launcher_binds.c
 +++ b/src/common/launcher_binds.c
 @@ -13,6 +13,7 @@
@@ -128,16 +128,21 @@ index 2e2bf4b..b5865d7 100644
      if (is_snes_profile(m)) {
          char controls[LNG_SNES_PAD_BUTTON_COUNT][48];
          snes_gamepad_read_controls(player - 1, controls);
-@@ -921,6 +961,8 @@ void launcher_binds_load(LauncherModel* m, const char* config_path_in, const cha
+@@ -920,7 +960,12 @@ void launcher_binds_load(LauncherModel* m, const char* config_path_in, const cha
+     } else if (is_gb_profile(m)) {
          rui_gb_binds_init(gb_binds_file_path());   // load/generate keybinds.ini [controls] (gb-recompiled format)
      } else {
-         recompui_keybinds_init(NULL);              // load/generate keybinds.ini (exe-anchored)
+-        recompui_keybinds_init(NULL);              // load/generate keybinds.ini (exe-anchored)
++        // The host's keybinds.ini (beside the exe), the one the game reads. NULL
++        // would mean the working directory, a different file whenever the game
++        // is started from elsewhere (a play folder, a shortcut).
++        recompui_keybinds_init(keybinds_file_path());
 +        if (is_gba_profile(m))
 +            rui_gba_pad_binds_init(gba_input_ini_path());   // controller layouts (input.ini, per GUID)
      }
  loaded:
      launcher_binds_refresh(m);
-@@ -1085,6 +1127,17 @@ void launcher_binds_set_pad_button(LauncherModel* m, int player, int b,
+@@ -1085,6 +1130,17 @@ void launcher_binds_set_pad_button(LauncherModel* m, int player, int b,
          (void)snes_gamepad_set_button(m, player - 1, b, kind, code, axis_dir);
          return;
      }
@@ -155,7 +160,7 @@ index 2e2bf4b..b5865d7 100644
      // Genesis: has_pad_binds console (key + pad pair per logical button).
      if (!is_genesis_profile(m)) return;
      if (player > 2) return;
-@@ -1501,6 +1554,24 @@ void launcher_binds_reset_player(LauncherModel* m, int player) {
+@@ -1501,6 +1557,24 @@ void launcher_binds_reset_player(LauncherModel* m, int player) {
          reload_player_display(m, player);
          return;
      }

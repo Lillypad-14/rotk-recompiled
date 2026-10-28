@@ -23,7 +23,7 @@ index b8e19bd..e69408d 100644
  add_gbarecomp_runtime_stack_test(touch_input_tests tests/touch_input/test_main.cpp)
  add_gbarecomp_runtime_stack_test(multiplayer_session_tests tests/link/session_test.cpp)
 diff --git a/src/runtime/host_window.cpp b/src/runtime/host_window.cpp
-index cf48963..4bfa237 100644
+index cf48963..647d675 100644
 --- a/src/runtime/host_window.cpp
 +++ b/src/runtime/host_window.cpp
 @@ -19,6 +19,7 @@
@@ -65,7 +65,7 @@ index cf48963..4bfa237 100644
      HotkeyBind   hotkeys[HK_COUNT];     // [KeyMap] bindings
      SDL_Scancode assist_key[2] = {
          SDL_SCANCODE_1, SDL_SCANCODE_2
-@@ -541,53 +559,133 @@ bool ensure_sharp_texture(Backend* b, int factor) {
+@@ -541,51 +559,131 @@ bool ensure_sharp_texture(Backend* b, int factor) {
      return true;
  }
  
@@ -186,9 +186,9 @@ index cf48963..4bfa237 100644
 +        b->pads.erase(b->pads.begin() + static_cast<std::ptrdiff_t>(i));
 +        b->pad_guids.erase(b->pad_guids.begin() + static_cast<std::ptrdiff_t>(i));
 +        return;
-     }
- }
- 
++    }
++}
++
 +void close_all_game_controllers(Backend* b) {
 +    if (!b) return;
 +    set_player_one_controller(b, nullptr);
@@ -222,13 +222,11 @@ index cf48963..4bfa237 100644
 +        for (int i = 0; i < SDL_CONTROLLER_AXIS_MAX && i < controls::kPadAxes; ++i)
 +            state.axis[i] = SDL_GameControllerGetAxis(pad, static_cast<SDL_GameControllerAxis>(i));
 +        held |= controls::pad_buttons(controls::profile_for(b->controls, b->pad_guids[index]), state);
-+    }
+     }
 +    return held;
-+}
-+
+ }
+ 
  void open_device_gyro(Backend* b) {
-     if (!b || b->device_gyro) return;
- #if SDL_VERSION_ATLEAST(2, 0, 9)
 @@ -1142,33 +1240,6 @@ void save_touch_config(const Backend* b) {
      }
  }
@@ -263,7 +261,7 @@ index cf48963..4bfa237 100644
  // config.ini [KeyMap] key names, in HostHotkey order, with the same defaults
  // recomp-ui's hotkey panel displays for the GBA catalog.
  const char* const kHotkeyNames[HK_COUNT] = {
-@@ -1620,6 +1691,192 @@ bool runtime_ui_event(RecompRuntimeUi* ui, const SDL_Event& e) {
+@@ -1620,6 +1691,183 @@ bool runtime_ui_event(RecompRuntimeUi* ui, const SDL_Event& e) {
  }
  #endif
  
@@ -439,16 +437,7 @@ index cf48963..4bfa237 100644
 +        const char* name = SDL_GameControllerName(b->pads[i]);
 +        if (name && !b->controls.pad_names.count(b->pad_guids[i])) b->controls.pad_names[b->pad_guids[i]] = name;
 +    }
-+    // ControlsVersion 1: player 2's keys start from their own defaults. The
-+    // launcher seeds keybinds.ini [player2] with player 1's keys, which were
-+    // never read before, and would move both players at once.
-+    if (b->controls.version < 1) {
-+        const controls::Settings built_in = controls::defaults(sdl_control_names());
-+        std::copy(std::begin(built_in.player[1].keys), std::end(built_in.player[1].keys),
-+                  b->controls.player[1].keys);
-+        b->controls.version = 1;
-+        save_player_controls(b);
-+    }
++    if (controls::upgrade(b->controls, sdl_control_names())) save_player_controls(b);
 +    apply_legacy_player_two(b);
 +    reassign_controllers(b);
 +}
@@ -456,7 +445,7 @@ index cf48963..4bfa237 100644
  }  // namespace
  
  HostWindow::HostWindow() = default;
-@@ -1653,6 +1910,10 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
+@@ -1653,6 +1901,10 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
                           SDL_GetError());
          }
      }
@@ -467,7 +456,7 @@ index cf48963..4bfa237 100644
      const Uint32 controller_flags =
          SDL_INIT_GAMECONTROLLER | SDL_INIT_SENSOR;
      if ((SDL_WasInit(controller_flags) & controller_flags) !=
-@@ -1711,7 +1972,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
+@@ -1711,7 +1963,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
      // are ever delivered, so a backgrounded-then-killed app lost progress.
      SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "0");
  #endif
@@ -476,7 +465,7 @@ index cf48963..4bfa237 100644
      for (int h = 0; h < HK_COUNT; ++h)
          b->hotkeys[h] = parse_hotkey(kHotkeyDefaults[h]);
      // Linear vs nearest scaling is a texture-creation-time hint.
-@@ -1882,7 +2143,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
+@@ -1882,7 +2134,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
      }
  #endif
  
@@ -485,7 +474,7 @@ index cf48963..4bfa237 100644
      open_device_gyro(b);
  
      // Open the audio device at 65536 Hz mono 16-bit signed. The
-@@ -1964,6 +2225,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
+@@ -1964,6 +2216,7 @@ bool HostWindow::open(int scale, int base_w, int base_h, const char* title,
      impl_ = b;
      open_ = true;
      g_haptic_window = this;
@@ -493,7 +482,7 @@ index cf48963..4bfa237 100644
      return true;
  }
  
-@@ -2288,10 +2550,11 @@ void HostWindow::close() {
+@@ -2288,10 +2541,11 @@ void HostWindow::close() {
      if (b->audio_rate_stream) SDL_FreeAudioStream(b->audio_rate_stream);
      if (b->bridge_ready) rab_free(&b->bridge);
      if (b->audio_mtx) SDL_DestroyMutex(b->audio_mtx);
@@ -506,7 +495,7 @@ index cf48963..4bfa237 100644
  #if defined(GBARECOMP_RUNTIME_UI)
      runtime_imgui_shutdown(b);
  #endif
-@@ -2584,16 +2847,9 @@ void HostWindow::load_input_config(const char* dir,
+@@ -2584,16 +2838,9 @@ void HostWindow::load_input_config(const char* dir,
          fast_forward_multiplier_default, 2, 10);
      const std::string base = std::string(dir) + "/";
  
@@ -526,7 +515,7 @@ index cf48963..4bfa237 100644
  
      // config.ini [KeyMap] (keycode names with Ctrl+/Alt+/Shift+ prefixes).
      ini_scan_section((base + "config.ini").c_str(), "KeyMap",
-@@ -2677,66 +2933,112 @@ void HostWindow::fit_window_to_surface() {
+@@ -2677,66 +2924,112 @@ void HostWindow::fit_window_to_surface() {
      SDL_SetWindowPosition(b->window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
  }
  
@@ -687,7 +676,7 @@ index cf48963..4bfa237 100644
  }
  
  void HostWindow::adjust_scale(int delta) {
-@@ -3024,7 +3326,12 @@ HostWindow::Events HostWindow::pump() {
+@@ -3024,7 +3317,12 @@ HostWindow::Events HostWindow::pump() {
      auto* b = static_cast<Backend*>(impl_);
  
      SDL_Event e;
@@ -700,7 +689,7 @@ index cf48963..4bfa237 100644
  #if defined(GBARECOMP_RUNTIME_UI)
          const bool finger_event =
              e.type == SDL_FINGERDOWN || e.type == SDL_FINGERMOTION ||
-@@ -3070,13 +3377,11 @@ HostWindow::Events HostWindow::pump() {
+@@ -3070,13 +3368,11 @@ HostWindow::Events HostWindow::pump() {
              ev.terminating = true;
              ev.quit = true;
          } else if (e.type == SDL_CONTROLLERDEVICEADDED) {
@@ -718,7 +707,7 @@ index cf48963..4bfa237 100644
          } else if (e.type == SDL_WINDOWEVENT &&
                     e.window.event == SDL_WINDOWEVENT_CLOSE) {
              ev.quit = true;
-@@ -3257,40 +3562,10 @@ HostWindow::Events HostWindow::pump() {
+@@ -3257,40 +3553,10 @@ HostWindow::Events HostWindow::pump() {
  #endif
      }
  
@@ -762,7 +751,7 @@ index cf48963..4bfa237 100644
      if (b->touch_controls) {
          const uint16_t touch_buttons = active_touch_buttons(b);
          keys &= static_cast<uint16_t>(~touch_buttons);
-@@ -3411,6 +3686,24 @@ bool HostWindow::set_surface_size(int /*base_w*/, int /*base_h*/) {
+@@ -3411,6 +3677,24 @@ bool HostWindow::set_surface_size(int /*base_w*/, int /*base_h*/) {
  void HostWindow::fit_window_to_surface() {}
  std::uint16_t HostWindow::player_two_buttons() { return 0; }
  void set_player_two_controls(const char* const*, const char* const*) {}
@@ -788,10 +777,25 @@ index cf48963..4bfa237 100644
  
  bool HostWindow::drawable_size(int* /*width*/, int* /*height*/) const {
 diff --git a/src/runtime/launcher_seam.h b/src/runtime/launcher_seam.h
-index 4171951..e5788a8 100644
+index 4171951..6462189 100644
 --- a/src/runtime/launcher_seam.h
 +++ b/src/runtime/launcher_seam.h
-@@ -787,7 +787,10 @@ inline int gbarecomp_launcher_preboot(std::vector<std::string>& args,
+@@ -676,6 +676,14 @@ inline int gbarecomp_launcher_preboot(std::vector<std::string>& args,
+         state_path(opts.launcher_config_filename, "config.ini");
+     const std::string keybinds_path =
+         state_path(opts.launcher_keybinds_filename, "keybinds.ini");
++    // The launcher shows keybinds.ini as it is: give player 2 their own keys
++    // first if the game has not done so yet (player_controls.h upgrade).
++    {
++        const auto& names = gbarecomp::player_control_names();
++        const std::string keys_dir = std::filesystem::path(keybinds_path).parent_path().string();
++        gbarecomp::controls::Settings settings = gbarecomp::controls::load(keys_dir, names);
++        if (gbarecomp::controls::upgrade(settings, names)) gbarecomp::controls::save(keys_dir, settings, names);
++    }
+ 
+ #if defined(GBARECOMP_ENABLE_MODS)
+     const RecompLauncherCModProvider* mod_provider = nullptr;
+@@ -787,7 +795,10 @@ inline int gbarecomp_launcher_preboot(std::vector<std::string>& args,
      ls.enable_audio  = 1;
      ls.audio_freq    = 32768;             // GBA mixer base rate (display only)
      ls.volume        = cfg.volume;
@@ -803,12 +807,22 @@ index 4171951..e5788a8 100644
      ls.skip_launcher = cfg.skip_launcher;
      bool solar_in_launcher = false;
      if (opts.has_solar_sensor) solar_in_launcher = push_solar_settings(ls, solar);
+@@ -824,6 +835,9 @@ inline int gbarecomp_launcher_preboot(std::vector<std::string>& args,
+     RecompLauncherCGameInfo gi;
+     std::memset(&gi, 0, sizeof(gi));
+     launcher_profile_apply("gba", &gi);   // GBA identity + capability defaults
++    // Local link play is a second player on this machine: the Controller
++    // page offers both players' devices and bindings (player_controls.h).
++    if (opts.local_link) gi.num_players = 2;
+     gi.name = opts.builtin_game_name ? opts.builtin_game_name : "GBA cartridge";
+     gi.edition_label = opts.launcher_edition_label;
+     gi.edition_note = opts.launcher_edition_note;
 diff --git a/src/runtime/player_controls.cpp b/src/runtime/player_controls.cpp
 new file mode 100644
-index 0000000..a22bab6
+index 0000000..2204f42
 --- /dev/null
 +++ b/src/runtime/player_controls.cpp
-@@ -0,0 +1,463 @@
+@@ -0,0 +1,471 @@
 +#include "player_controls.h"
 +
 +#include <algorithm>
@@ -1141,6 +1155,14 @@ index 0000000..a22bab6
 +    return ok;
 +}
 +
++bool upgrade(Settings& s, const Names& names) {
++    if (s.version >= 1) return false;
++    const Settings d = defaults(names);
++    std::copy(std::begin(d.player[1].keys), std::end(d.player[1].keys), s.player[1].keys);
++    s.version = 1;
++    return true;
++}
++
 +PadProfile profile_for(const Settings& s, const std::string& guid) {
 +    PadProfile out = s.global;
 +    const auto it = s.pads.find(lower(guid));
@@ -1274,10 +1296,10 @@ index 0000000..a22bab6
 +}  // namespace gbarecomp::controls
 diff --git a/src/runtime/player_controls.h b/src/runtime/player_controls.h
 new file mode 100644
-index 0000000..b906a95
+index 0000000..14ff2ae
 --- /dev/null
 +++ b/src/runtime/player_controls.h
-@@ -0,0 +1,153 @@
+@@ -0,0 +1,159 @@
 +// player_controls.h — both players' input devices and bindings, without SDL.
 +//
 +// Files (all in the exe directory, shared with recomp-ui's launcher):
@@ -1389,6 +1411,12 @@ index 0000000..b906a95
 +Settings load(const std::string& dir, const Names& names);
 +// Rewrites only the keys this module owns; every other line is kept.
 +bool save(const std::string& dir, const Settings& settings, const Names& names);
++// ControlsVersion 1: player 2's keys start from their own defaults. The
++// launcher seeds keybinds.ini [player2] with player 1's keys, which nothing
++// read before and which would move both players at once. Returns true when it
++// changed something (save it). Run before the launcher shows the keys, and
++// again by the host in case the launcher never ran.
++bool upgrade(Settings& settings, const Names& names);
 +
 +// The profile a controller uses: its own overrides over [mapping].
 +PadProfile profile_for(const Settings& settings, const std::string& guid);
@@ -1488,10 +1516,10 @@ index 93a42ae..73ad6af 100644
  }  // namespace gbarecomp
 diff --git a/tests/player_controls/test_main.cpp b/tests/player_controls/test_main.cpp
 new file mode 100644
-index 0000000..c8bddb3
+index 0000000..7f8c288
 --- /dev/null
 +++ b/tests/player_controls/test_main.cpp
-@@ -0,0 +1,255 @@
+@@ -0,0 +1,264 @@
 +// player_controls_tests — defaults, ini round trips (other lines kept), device
 +// assignment, claiming, swapping, conflict swaps and KEYINPUT resolution.
 +
@@ -1708,6 +1736,14 @@ index 0000000..c8bddb3
 +    check(pad_buttons(p, pad) == (1u << 9), "trigger bound to L");
 +}
 +
++void test_upgrade() {
++    Settings s = defaults(kNames);
++    s.player[1].keys[0] = 27;   // the launcher's copy of player 1's X
++    check(upgrade(s, kNames) && s.version == 1 && s.player[1].keys[0] == 13, "upgrade gives player 2 J");
++    s.player[1].keys[0] = 20;
++    check(!upgrade(s, kNames) && s.player[1].keys[0] == 20, "upgrade runs once");
++}
++
 +void test_names() {
 +    const PadBind cross{PadBind::Button, 0};
 +    const PadBind back{PadBind::Button, 4};
@@ -1739,6 +1775,7 @@ index 0000000..c8bddb3
 +    test_conflicts();
 +    test_resolve();
 +    test_names();
++    test_upgrade();
 +    std::filesystem::remove_all(dir);
 +    if (g_failures) {
 +        std::fprintf(stderr, "%d failure(s)\n", g_failures);
