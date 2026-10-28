@@ -14,6 +14,7 @@
 #include "bug_report.h"
 #include "color_vision.h"
 #include "combat_info.h"
+#include "duel_hud.h"
 #include "expanded_edition.h"
 #include "hd_icons.h"
 #include "minimap.h"
@@ -87,6 +88,7 @@ enum PcInfoField : std::uint32_t {
     kInfoHeapBase = 0x18,
     kInfoHeapEnd = 0x1C,
     kInfoStressSpawn = 0x20,
+    kInfoDuel = 0x24,  // written by the mod (Versus duel scoreboard, duel_hud.cpp)
 };
 
 // ROM literal-pool words that hold the base of a per-actor queue. The same addresses in the stock
@@ -209,7 +211,7 @@ void writeInfoBlock()
     const PcLayout& pc = layout();
     const std::uint32_t info = gba::kHostRamBase;
     static bool stressArmed = false;
-    bus_write_u32(info + kInfoVersion, 2u);
+    bus_write_u32(info + kInfoVersion, 3u);
     bus_write_u32(info + kInfoMainActors, pc.mainActors);
     bus_write_u32(info + kInfoOverlayActors, pc.overlayActors);
     bus_write_u32(info + kInfoMainPool, pc.mainPool);
@@ -222,6 +224,7 @@ void writeInfoBlock()
         bus_write_u32(info + kInfoStressSpawn,
                       static_cast<std::uint32_t>(envNumber("ROTK_PC_STRESS_SPAWN", 0)));
     }
+    bus_write_u32(info + kInfoDuel, 0u);
     bus_write_u32(info + kInfoMagic, kPcInfoMagic);
 }
 
@@ -630,10 +633,12 @@ void pcFeaturesStartCoop()
     smoothStartCoop();
     transparencyStartCoop();
     rotk::hdAudioStartCoop();
+    rotk::duelHudSetCoop(true);
 }
 
 void pcFeaturesEndCoop()
 {
+    rotk::duelHudSetCoop(false);
     for (const char* id : {kPushOamHookId, kHideOamHookId, kEndFrameHookId, kHeapHookId, kPoolHookId, kSortHookId})
         gba_mod_set_function_hook_runs_suspended(id, 0);
     widescreenEndCoop();
@@ -663,6 +668,7 @@ void pcFeaturesSelectConsole(int console)
 void presentDecorate(const gbarecomp::PresentFrame* frame)
 {
     rotk::combatInfoDecorate(frame);
+    rotk::duelHudDecorate(frame);
     rotk::minimapDecorate(frame);
     rotk::colorVisionDecorate(frame);
     rotk::rumbleObserve(frame);
@@ -670,7 +676,7 @@ void presentDecorate(const gbarecomp::PresentFrame* frame)
 
 bool presentDecorateActive()
 {
-    return rotk::combatInfoActive() || rotk::minimapActive() || rotk::colorVisionActive() || rotk::rumbleActive();
+    return rotk::combatInfoActive() || rotk::duelHudActive() || rotk::minimapActive() || rotk::colorVisionActive() || rotk::rumbleActive();
 }
 
 int main(int argc, char** argv)

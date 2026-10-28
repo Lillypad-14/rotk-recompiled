@@ -21,6 +21,8 @@ def replay(recording: Path, args: argparse.Namespace) -> dict:
     name = recording.name.split(".coop-")[-1]
     command = [sys.executable, str(ROOT / "tools/check_coop.py"), str(recording), "--frames", str(args.frames),
                "--name", f"regress-{name}", "--exe", str(args.exe), "--timeout", str(args.timeout)]
+    if args.config:
+        command += ["--config", str(args.config)]
     output = subprocess.run(command, capture_output=True, text=True).stdout
     try:
         result = json.loads(output[output.index("{"):])
@@ -37,6 +39,7 @@ def main() -> None:
     parser.add_argument("--recordings", type=Path, default=ROOT / ".private/expanded/play")
     parser.add_argument("--frames", type=int, default=6000, help="Frames after both consoles link")
     parser.add_argument("--timeout", type=int, default=600)
+    parser.add_argument("--config", type=Path, help="Game config for the exe (check_coop.py's default otherwise)")
     args = parser.parse_args()
     recordings = sorted(path.with_name(path.name[:-len(".inputs.txt")])
                         for path in args.recordings.glob("*.coop-*.inputs.txt"))
