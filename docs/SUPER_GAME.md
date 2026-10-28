@@ -198,11 +198,19 @@ its sound matched. About 36 actives and 30 passives.
 
 Ported (rotk `hacks/patches/legacy_skills/legacy_skills.c`, art via `kSprites` in
 `src/two_towers.cpp`): Gandalf's Zap, Magical Healing, Shield, Sunburst (no rays yet: ROTK sprites
-do not rotate). Fireworks is in, untested: in a test the rocket went to state 4 (gone) after a few
-ticks without hitting, maybe a wall; check whether The Two Towers' rocket also stops at walls.
+do not rotate). Fireworks flies its 30 ticks in open ground and is gone without a blast at a wall
+(the map edge, x 17, in the earlier test); The Two Towers' rocket also has tile collision. A hit on
+a foe is not verified yet: in the stress-spawn test the aimed rocket (and Zap) flew past the foes.
 Still stand-ins: Summon Eagle (0x08017AD4 + 0x080180CC), Thunderstrike (0x0801E658). Then
 Gandalf's passives exact (Flame of Anor's revive burst is Sunburst's second branch, skill 3 level),
 then the other heroes. Sounds and cast poses are ROTK stand-ins throughout.
+
+Buying (rotk 63e69d4): the page shows for the six Two Towers heroes, imported or not. A buys a
+rank with the shared skill point by The Two Towers' rules (its table at 0x08057780: 0x88 bytes
+per hero, u16 text id, then 8 bytes per skill: tile x, y, two unknown bytes, the first rank's
+player level, the prerequisite skill or 0xFF; checked at 0x08039720): requirements gate the
+first rank only, max rank 20. Imported levels are the start. Casts read the full level.
+Single player only. Sam, Smeagol, the Ringwraith and Saruman get no page.
 
 Lessons:
 - Spawn effects with `fx_unknown08043d74` (ROTK's projectile spawner) and override; play Two
@@ -215,7 +223,8 @@ Lessons:
 - Effects tick at 30 Hz; Two Towers counts the same ticks.
 - Two Towers sprite frames: 6-byte head, hotspots, 8-byte trigger boxes, 12-byte pieces; some
   animations are 8-byte records (tiles, frames) bound without a duration.
-- Testing: `ROTK_PC_STRESS_SPAWN=N` spawns foes; the save `allskills.sav` (scratch) has all of
+- Testing: `ROTK_PC_STRESS_SPAWN=N` spawns foes; the debug cheats byte is save offset 0x2DAD (3 =
+  max level and infinite skill points); legacy records start at 0x5FAC; the save `allskills.sav` (scratch) has all of
   Gandalf's actives at level 2; actor pool and player state are read from `final.gbas` (host RAM
   at the "RPC1" tag, IWRAM player at offset 0x400FC + 0x3C00).
 
