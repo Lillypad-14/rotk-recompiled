@@ -17,8 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # Executable, game config and save file name per recompiled ROM (tools/lab.py TARGETS).
 TARGETS = {
-    "stock": ("build/host/RotkPcLab", ".private/game.toml", "save.eeprom"),
-    "expanded": ("build/host-expanded/RotkPcLabExpanded", ".private/expanded/game.toml", "save.sram"),
+    "stock": ("build/host/ROTK-Recompiled", ".private/game.toml", "save.eeprom"),
+    "expanded": ("build/host-expanded/ROTK-Recompiled-Expanded", ".private/expanded/game.toml", "save.sram"),
 }
 
 

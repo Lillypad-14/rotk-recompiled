@@ -22,7 +22,7 @@ LINK_LOG = re.compile(r"co-op test: frame (\d+) console (\d+) scene (\d+) link (
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("recording", type=Path, help="Recording prefix, without .inputs.txt or -1.sram")
-    parser.add_argument("--exe", type=Path, default=ROOT / "build/host-expanded/RotkPcLabExpanded.exe")
+    parser.add_argument("--exe", type=Path, default=ROOT / "build/host-expanded/ROTK-Recompiled-Expanded.exe")
     parser.add_argument("--mods-state", type=Path, default=ROOT / "build/host-expanded/mods/state.toml")
     parser.add_argument("--frames", type=int, default=6000, help="Frames after both consoles link")
     parser.add_argument("--timeout", type=int, default=300)

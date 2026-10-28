@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("recording", type=Path, nargs="?", help="Recording prefix, without .inputs.txt")
-    parser.add_argument("--exe", type=Path, default=ROOT / "build/host-expanded/RotkPcLabExpanded.exe")
+    parser.add_argument("--exe", type=Path, default=ROOT / "build/host-expanded/ROTK-Recompiled-Expanded.exe")
     parser.add_argument("--frames", type=int, default=0, help="Linked frames to show (default: the whole recording)")
     args = parser.parse_args()
     recording = args.recording

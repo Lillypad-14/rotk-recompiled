@@ -64,11 +64,11 @@ class Target:
 
 
 TARGETS = {
-    "stock": Target("stock", "ROTK PC Lab", ROOT / ".private", ROOT / "build/generated",
-                    ROOT / "build/host", "RotkPcLab", "eeprom", 19852),
-    "expanded": Target("expanded", "ROTK PC Lab Expanded", ROOT / ".private/expanded",
+    "stock": Target("stock", "ROTK Recompiled", ROOT / ".private", ROOT / "build/generated",
+                    ROOT / "build/host", "ROTK-Recompiled", "eeprom", 19852),
+    "expanded": Target("expanded", "ROTK Recompiled Expanded", ROOT / ".private/expanded",
                        ROOT / "build/expanded/generated", ROOT / "build/host-expanded",
-                       "RotkPcLabExpanded", "sram", 19853),
+                       "ROTK-Recompiled-Expanded", "sram", 19853),
 }
 
 

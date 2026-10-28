@@ -9,12 +9,12 @@ $ErrorActionPreference = 'Stop'
 if ($CpuOverclock -gt 0) { $env:GBARECOMP_CPU_OVERCLOCK = "$CpuOverclock" }
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 if ($Target -eq 'expanded') {
-    $binary = Join-Path $projectRoot 'build/host-expanded/RotkPcLabExpanded.exe'
+    $binary = Join-Path $projectRoot 'build/host-expanded/ROTK-Recompiled-Expanded.exe'
     $config = Join-Path $projectRoot '.private/expanded/game.toml'
     $playDirectory = Join-Path $projectRoot '.private/expanded/play'
     $save = 'rotk.sram'
 } else {
-    $binary = Join-Path $projectRoot 'build/host/RotkPcLab.exe'
+    $binary = Join-Path $projectRoot 'build/host/ROTK-Recompiled.exe'
     $config = Join-Path $projectRoot '.private/game.toml'
     $playDirectory = Join-Path $projectRoot '.private/play'
     $save = 'rotk.eeprom'
@@ -26,7 +26,7 @@ New-Item -ItemType Directory -Force -Path $playDirectory | Out-Null
 Push-Location $playDirectory
 try {
     & $binary --config $config --window --save-path "$playDirectory/$save" --state-dir "$playDirectory/states"
-    if ($LASTEXITCODE -ne 0) { throw "ROTK PC Lab exited with code $LASTEXITCODE" }
+    if ($LASTEXITCODE -ne 0) { throw "ROTK Recompiled exited with code $LASTEXITCODE" }
 } finally {
     Pop-Location
 }

@@ -35,7 +35,7 @@ def replay(recording: Path, args: argparse.Namespace) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--exe", type=Path, default=ROOT / "build/host-expanded/RotkPcLabExpanded.exe")
+    parser.add_argument("--exe", type=Path, default=ROOT / "build/host-expanded/ROTK-Recompiled-Expanded.exe")
     parser.add_argument("--recordings", type=Path, default=ROOT / ".private/expanded/play")
     parser.add_argument("--frames", type=int, default=6000, help="Frames after both consoles link")
     parser.add_argument("--timeout", type=int, default=600)

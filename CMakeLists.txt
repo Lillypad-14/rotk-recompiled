@@ -8,8 +8,8 @@ set(GBARECOMP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/external/gbarecomp" CACHE PATH "
 set(ROTK_CART_DIR "${CMAKE_CURRENT_SOURCE_DIR}/build/generated/cart" CACHE PATH "Private generated cartridge code")
 set(GBARECOMP_GENERATED_BIOS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/build/generated/bios" CACHE PATH "Private generated BIOS code")
 # Target identity, set by tools/lab.py per recompiled ROM (stock or Expanded).
-set(ROTK_EXECUTABLE "RotkPcLab" CACHE STRING "Game executable name")
-set(ROTK_GAME_NAME "ROTK PC Lab" CACHE STRING "Window title and game name")
+set(ROTK_EXECUTABLE "ROTK-Recompiled" CACHE STRING "Game executable name")
+set(ROTK_GAME_NAME "ROTK Recompiled" CACHE STRING "Window title and game name")
 set(ROTK_ROM_SHA1 "ec3d126d37ea6e2ad7030d8a99cf87c6e46c03fd" CACHE STRING "Expected ROM SHA-1")
 set(ROTK_ROM_CRC32 "0x7590ebfa" CACHE STRING "Expected ROM CRC32")
 set(ROTK_DEBUG_PORT "19852" CACHE STRING "TCP debug port")

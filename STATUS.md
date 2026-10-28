@@ -64,7 +64,7 @@ frames is not measured.
 The PC version is the Expanded mod; the GBA build is no longer a target. `python tools/lab.py prepare --target expanded`
 recompiles `rotk/build/rotk_hack.gba` (32 MiB) with the stock roots plus the 918 FUNC symbols of
 `rotk/build/hack.elf` and the reviewed entries in `config/rotk-expanded.extra.toml`. `build --target expanded` makes
-`build/host-expanded/RotkPcLabExpanded.exe` (SRAM save, debug port 19853). `PlayExpanded.cmd` plays it.
+`build/host-expanded/ROTK-Recompiled-Expanded.exe` (SRAM save, debug port 19853). `PlayExpanded.cmd` plays it.
 
 | Check | Result |
 | --- | --- |

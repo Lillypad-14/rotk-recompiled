@@ -12,7 +12,7 @@ the game runs from your own ROM and GBA BIOS dump.
 
 1. Download `ROTK-Recompiled-<version>-windows.zip` from the
    [releases](https://github.com/Lillypad-14/rotk-recompiled/releases) and unzip it anywhere.
-2. Run `RotkPcLab.exe` and pick your ROM (*The Return of the King*, GBA, USA/Europe, SHA-1
+2. Run `ROTK-Recompiled.exe` and pick your ROM (*The Return of the King*, GBA, USA/Europe, SHA-1
    `ec3d126d37ea6e2ad7030d8a99cf87c6e46c03fd`) and your GBA BIOS dump (SHA-1
    `300c20df6731a33952ded8c436f7f186d25d3492`).
 3. Tick **Expanded** for the Expanded mod, or leave it off for the original game, and press Play.
