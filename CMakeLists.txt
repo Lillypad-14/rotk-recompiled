@@ -56,6 +56,12 @@ add_executable(${ROTK_EXECUTABLE} src/main.cpp src/widescreen.cpp src/hd_audio.c
     src/sample_packs.cpp src/minimap.cpp src/profiler.cpp src/player2_controls.cpp src/bps_patch.cpp
     src/expanded_edition.cpp src/two_towers.cpp src/legacy_item_tables.cpp $<TARGET_OBJECTS:RotkCart>)
 target_include_directories(${ROTK_EXECUTABLE} PRIVATE ${ROTK_HOST_INCLUDES})
+# Release downloads: a Windows GUI program, so no console window opens beside the game. Off for
+# development, where the console carries the logs and scripts wait for the exit code.
+option(ROTK_GUI_SUBSYSTEM "Build the game as a Windows GUI program (no console window)" OFF)
+if(WIN32 AND ROTK_GUI_SUBSYSTEM)
+    target_link_options(${ROTK_EXECUTABLE} PRIVATE -mwindows)
+endif()
 # stb_image decodes the HD art packs.
 target_include_directories(${ROTK_EXECUTABLE} PRIVATE "${RECOMP_UI_ROOT}/src/third_party")
 target_link_gbarecomp_runtime_stack(${ROTK_EXECUTABLE})
