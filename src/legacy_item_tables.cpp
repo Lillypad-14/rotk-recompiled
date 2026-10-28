@@ -13,8 +13,10 @@ constexpr std::uint32_t kItemTypeInfos = 0x08068F50u;
 constexpr std::uint32_t kItemTypeCount = 15;
 constexpr std::uint32_t kItemTypeInfoSize = 40;
 constexpr std::uint32_t kRows = 256;
-constexpr std::uint32_t kCopiedRows = 0xA0;
+// Rows past the stock ones that patches add (Ringwraith gear reaches 0xAF) are copied too.
+constexpr std::uint32_t kCopiedRows = 0xC0;
 constexpr std::uint32_t kAlign = 16;
+constexpr std::uint32_t kScratchSize = 4096;
 
 // ItemTypeInfo pointer fields to copy and their row sizes. The prefix and suffix range tables
 // stay in ROM: they bound loot rolls, which never pick a legacy row.
@@ -56,8 +58,8 @@ void zeroWords(std::uint32_t to, std::uint32_t bytes)
 
 std::uint32_t legacyItemTablesSize()
 {
-    // At most one table per type and field, plus the ItemTypeInfos copy.
-    std::uint32_t size = alignUp(kItemTypeCount * kItemTypeInfoSize);
+    // The mod's scratch, the ItemTypeInfos copy and at most one table per type and field.
+    std::uint32_t size = kScratchSize + alignUp(kItemTypeCount * kItemTypeInfoSize);
     for (const Field& field : kFields) size += kItemTypeCount * alignUp(kRows * field.rowSize);
     return size;
 }
@@ -66,8 +68,9 @@ void legacyItemTablesWrite(std::uint32_t address)
 {
     legacyItemTablesReset();
     g_reading = true;
-    g_infos = address;
-    std::uint32_t cursor = alignUp(address + kItemTypeCount * kItemTypeInfoSize);
+    zeroWords(address, kScratchSize);
+    g_infos = address + kScratchSize;
+    std::uint32_t cursor = alignUp(g_infos + kItemTypeCount * kItemTypeInfoSize);
     copyWords(g_infos, kItemTypeInfos, kItemTypeCount * kItemTypeInfoSize);
     std::unordered_map<std::uint32_t, std::uint32_t> copies;
     for (std::uint32_t type = 0; type < kItemTypeCount; ++type) {
@@ -94,7 +97,12 @@ void legacyItemTablesWrite(std::uint32_t address)
 
 bool legacyItemTablesPresent(std::uint32_t address)
 {
-    return g_infos == address && bus_read_u32(address) != 0;
+    return g_infos == address + kScratchSize && bus_read_u32(g_infos) != 0;
+}
+
+std::uint32_t legacyItemTablesInfos(std::uint32_t address)
+{
+    return address + kScratchSize;
 }
 
 void legacyItemTablesReset()

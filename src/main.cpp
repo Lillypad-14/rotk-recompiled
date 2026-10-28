@@ -95,6 +95,7 @@ enum PcInfoField : std::uint32_t {
     kInfoDuel = 0x24,  // written by the mod (Versus duel scoreboard, duel_hud.cpp)
     kInfoTwoTowers = 0x28,
     kInfoItemTypeInfos = 0x2C,  // the legacy item tables' ItemTypeInfos copy
+    kInfoLegacyScratch = 0x30,  // 4 KB of host RAM for the mod's legacy item bookkeeping
 };
 
 // ROM literal-pool words that hold the base of a per-actor queue. The same addresses in the stock
@@ -244,7 +245,8 @@ void writeInfoBlock()
     if (pc.twoTowers && !rotk::twoTowersPresent(pc.twoTowers)) rotk::twoTowersWrite(pc.twoTowers);
     if (pc.itemTables && !rotk::legacyItemTablesPresent(pc.itemTables)) rotk::legacyItemTablesWrite(pc.itemTables);
     bus_write_u32(info + kInfoTwoTowers, pc.twoTowers);
-    bus_write_u32(info + kInfoItemTypeInfos, pc.itemTables);
+    bus_write_u32(info + kInfoItemTypeInfos, pc.itemTables ? rotk::legacyItemTablesInfos(pc.itemTables) : 0u);
+    bus_write_u32(info + kInfoLegacyScratch, pc.itemTables);
     bus_write_u32(info + kInfoMagic, kPcInfoMagic);
 }
 
