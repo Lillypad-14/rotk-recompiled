@@ -208,6 +208,17 @@ suffix) needs 29 bits. So the ROTK item is a handle:
   slot's record (single player). Some have no ROTK mechanic and use the nearest stat (Meditation,
   Spirit of the Forge, Duck). Page 3 and active legacy skills are still to do. Their state can
   live in the host scratch like the legacy items', so the mod RAM does not have to move first.
+- **Page 3 design (next):** PC edition only. Legacy actives become active rows 13..19 (Gandalf has
+  7 actives, the most of any hero) in a larger `activeSkills` array: a new row capacity
+  constant, while `SKILL_EXPANSION_ACTIVE_ROW_COUNT` stays 13 because the save code loops and
+  validates quick-select rows with it. Rows 13+ need: their level from the legacy skill record
+  (`skillExpansion_activeLevel`), quick-select and cycle-cast acceptance, save validation that
+  keeps a quick-select row 13+ when the slot has a legacy record, and the tree turning from page 2
+  to page 3, swapping rows 13+ into rows 0..6 the way page 2 swaps 7..12. Legacy passives show on
+  page 3 as display rows; their stats already apply. Each Two Towers active casts its ROTK
+  counterpart where one exists (Gandalf: Shield, Summon Eagle = Summon Gwaihir, Fireworks =
+  Expanded's Fireworks), the rest get new callbacks. Two Towers skill icons are BG assets still to
+  decode.
 - **Mod ↔ PC port channel:** `PcHostInfo` in host RAM (version 4 adds the Two Towers data, the
   legacy item tables and the scratch). The menu button's
   switch request and the import hand-off can use the same block.
