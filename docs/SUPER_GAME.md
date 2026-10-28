@@ -194,6 +194,31 @@ Per skill the port needs the whole chain read (cast, effect, the effect actor's 
 damage), the effect rebuilt from ROTK engine calls, its sprite converted like the item icons, and
 its sound matched. About 36 actives and 30 passives.
 
+### Skill port status (2026-10-28)
+
+Ported (rotk `hacks/patches/legacy_skills/legacy_skills.c`, art via `kSprites` in
+`src/two_towers.cpp`): Gandalf's Zap, Magical Healing, Shield, Sunburst (no rays yet: ROTK sprites
+do not rotate). Fireworks is in, untested: in a test the rocket went to state 4 (gone) after a few
+ticks without hitting, maybe a wall; check whether The Two Towers' rocket also stops at walls.
+Still stand-ins: Summon Eagle (0x08017AD4 + 0x080180CC), Thunderstrike (0x0801E658). Then
+Gandalf's passives exact (Flame of Anor's revive burst is Sunburst's second branch, skill 3 level),
+then the other heroes. Sounds and cast poses are ROTK stand-ins throughout.
+
+Lessons:
+- Spawn effects with `fx_unknown08043d74` (ROTK's projectile spawner) and override; play Two
+  Towers art with `setSprite`, which clears the spawner's animation script (else the animation
+  never ends).
+- Do not set `renderFollowTarget` on a fresh effect (render sort hangs); copy `coords` instead.
+- Do not borrow Herbal Healing's row (cast hangs).
+- Two Towers actor offsets differ from ROTK's (state 0x67 vs 0x62, timer 0x58 vs 0x50, facing 0xFA
+  vs 0xF8, radius 0x75 vs 0x72); flags, stun state 0x1A, hit mask 0x10040400 match.
+- Effects tick at 30 Hz; Two Towers counts the same ticks.
+- Two Towers sprite frames: 6-byte head, hotspots, 8-byte trigger boxes, 12-byte pieces; some
+  animations are 8-byte records (tiles, frames) bound without a duration.
+- Testing: `ROTK_PC_STRESS_SPAWN=N` spawns foes; the save `allskills.sav` (scratch) has all of
+  Gandalf's actives at level 2; actor pool and player state are read from `final.gbas` (host RAM
+  at the "RPC1" tag, IWRAM player at offset 0x400FC + 0x3C00).
+
 ## Technical notes
 
 - **Mod RAM:** the mod's globals live in a fixed 2.7 KB EWRAM slice (`hacks/layout.cfg`

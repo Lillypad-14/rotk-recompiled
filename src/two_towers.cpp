@@ -469,9 +469,11 @@ std::vector<std::uint8_t> convertSkillArt(const std::vector<std::uint8_t>& rom, 
 }
 
 // Two Towers sprite animations the legacy skills draw, converted to ROTK's format, with the palette
-// each is drawn with (Two Towers loads it separately), 0 for none.
+// each is drawn with (Two Towers loads it separately), 0 for none. Some are 8-byte records (tiles
+// and frames) that Two Towers binds without a frame duration; those give one.
 struct SpriteSource {
     std::uint32_t animation, palette;
+    std::uint8_t duration = 0;  // 0: the record's own
 };
 constexpr SpriteSource kSprites[] = {
     // Gandalf's Zap: the bolt by facing (down, down-side, side, up-side), and its impact
@@ -483,6 +485,9 @@ constexpr SpriteSource kSprites[] = {
     {0x080500C8u, 0x08CC6268u}, {0x080500D8u, 0x08CC6268u}, {0x080500E8u, 0x08CC6268u},
     // Gandalf's Sunburst
     {0x080500F8u, 0x08CC3F34u},
+    // Gandalf's Fireworks: the rocket by facing (down .. up) and its explosion
+    {0x08328208u, 0x08CC1338u, 1}, {0x08328210u, 0x08CC1338u, 1}, {0x08328218u, 0x08CC1338u, 1},
+    {0x08328220u, 0x08CC1338u, 1}, {0x08328228u, 0x08CC1338u, 1}, {0x08328230u, 0x08CC1338u, 1},
 };
 constexpr std::uint32_t kFrameHeadSize = 6;          // Two Towers: flags, pad, width, height, tile offset
 constexpr std::uint32_t kRotkFrameHeadSize = 8;      // ROTK adds the frame's tile bytes
@@ -499,11 +504,11 @@ struct Sprite {
     std::uint8_t duration = 0;
 };
 
-Sprite convertSprite(const std::vector<std::uint8_t>& rom, std::uint32_t animation)
+Sprite convertSprite(const std::vector<std::uint8_t>& rom, std::uint32_t animation, std::uint8_t duration)
 {
     Sprite sprite;
     const std::uint32_t tileBase = read32(rom, animation), frameSet = read32(rom, animation + 4);
-    sprite.duration = rom[animation + 12 - kRomBase];
+    sprite.duration = duration ? duration : rom[animation + 12 - kRomBase];
     const std::uint16_t frameCount = read16(rom, frameSet + 6);
     const std::uint8_t hotspots = rom[frameSet + 10 - kRomBase], boxes = rom[frameSet + 11 - kRomBase];
     sprite.frames.assign(rom.begin() + (frameSet - kRomBase), rom.begin() + (frameSet - kRomBase) + kFrameSetHeaderSize);
@@ -641,7 +646,7 @@ void build(const std::vector<std::uint8_t>& rom)
     putPointer(kSpritesField, sprites);
     put32(kSpritesField + 4, static_cast<std::uint32_t>(std::size(kSprites)));
     for (std::size_t i = 0; i < std::size(kSprites); ++i) {
-        const Sprite sprite = convertSprite(rom, kSprites[i].animation);
+        const Sprite sprite = convertSprite(rom, kSprites[i].animation, kSprites[i].duration);
         const std::uint32_t tiles = append(sprite.tiles.data(), sprite.tiles.size());
         const std::uint32_t frames = append(sprite.frames.data(), sprite.frames.size());
         const std::uint8_t record[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, sprite.duration, 0, 0, 0};
