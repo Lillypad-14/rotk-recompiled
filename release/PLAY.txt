@@ -1,0 +1,37 @@
+ROTK Recompiled {version} (preview)
+================================
+
+A native PC version of The Lord of the Rings: The Return of the King (GBA),
+with the ROTK Expanded mod built in.
+
+You need your own files (none are included):
+  - The Return of the King, GBA, USA/Europe ROM (SHA-1 ec3d126d37ea6e2ad7030d8a99cf87c6e46c03fd)
+  - A GBA BIOS dump (SHA-1 300c20df6731a33952ded8c436f7f186d25d3492)
+  - Optional: The Two Towers (GBA, USA/Europe) ROM, and its .sav for your heroes
+
+How to play
+  1. Unzip this folder anywhere you can write to. Updating an older download?
+     Delete RotkPcLab.exe and RotkPcLabExpanded.exe if they are there (the old names).
+  2. Run ROTK-Recompiled.exe. The launcher opens. (ROTK-Recompiled-Expanded.exe
+     is started by it when Expanded is ticked; you don't run it yourself.)
+  3. On the front page, press Browse For ROM and pick your ROTK ROM, then
+     Browse For BIOS and pick your GBA BIOS. Play unlocks once both verify.
+  4. Tick "Expanded" on the front page for the Expanded mod, or leave it off
+     for the original game, and press Play. The first Expanded start makes a
+     patched copy of your ROM beside it (your original is never changed).
+
+The Two Towers (Expanded only)
+  Put your Two Towers ROM (and its .sav) in the same folder as your ROTK ROM.
+  - Import a hero: Load Game menu, press L on an empty slot.
+  - Skill page 3: Two Towers skills for Frodo, Legolas, Aragorn, Gandalf,
+    Eowyn and Gimli, bought with skill points. Work in progress.
+  - Mod Options > Two Towers > Legacy Skills turns them off.
+
+Settings: the launcher's Mods page (HD audio, HD icons, smooth motion,
+widescreen, split-screen co-op and more).
+
+This is a preview: expect bugs. Reports and source:
+https://github.com/Lillypad-14/rotk-recompiled
+
+Licences: see the licenses folder. Built with GBARecomp, which is
+noncommercial only, so this download may only be shared for free.

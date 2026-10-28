@@ -31,7 +31,9 @@ no ROM, BIOS or game art; the player picks their own ROM and BIOS in the launche
 
 ## Package
 
-The zip holds one folder, `ROTK-Recompiled/`, with:
+`python tools/make_release.py v0.1.0` does all of this and writes the zip to `.private/release/`;
+it refuses console builds and checks the bundled headers. The zip holds one folder,
+`ROTK-Recompiled/`, with:
 
 | From | Files |
 | --- | --- |
@@ -51,7 +53,9 @@ Never package `build/host`'s `mods/state.toml`, `config.ini`, `rom.cfg`, `bios.c
 
 ## Test before publishing
 
-Unzip into an empty folder and run both executables there with only a ROM and a BIOS:
+Unzip into an empty folder and run both executables there with only a ROM and a BIOS. Set
+`GBARECOMP_HEAL_BACKEND=auto-no-gcc` so self-heal uses only the bundled headers, as on a player's
+PC, and check the log has no "compile FAILED" lines:
 
 ```powershell
 .\ROTK-Recompiled.exe --no-launcher --rom <rom> --bios <bios> --no-window --frames 600

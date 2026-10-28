@@ -94,6 +94,29 @@ int fail(const std::string& message)
     return 1;
 }
 
+// The Expanded build remembers the ROM it played (the Expanded copy) as the last pick, in the rom.cfg
+// both builds share beside the executables, so the launcher would open on a ROM it doesn't recognize
+// as the original. Point the pick back at the original beside the copy.
+void restoreOriginalRomPick()
+{
+    const fs::path cache = executableDirectory() / "rom.cfg";
+    std::string line;
+    {
+        std::ifstream in(cache);
+        std::getline(in, line);
+    }
+    while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+    const std::string suffix = "-expanded";
+    const fs::path rom(line);
+    const std::string stem = rom.stem().string();
+    if (stem.size() <= suffix.size() || stem.compare(stem.size() - suffix.size(), suffix.size(), suffix) != 0) return;
+    const fs::path original = rom.parent_path() / (stem.substr(0, stem.size() - suffix.size()) + rom.extension().string());
+    std::error_code error;
+    if (!fs::is_regular_file(original, error)) return;
+    std::ofstream(cache, std::ios::trunc) << original.string() << "\n";
+    std::fprintf(stderr, "[rotk] Expanded: the launcher's ROM is the original again (%s)\n", original.string().c_str());
+}
+
 }  // namespace
 
 std::filesystem::path executableFolder()
@@ -115,6 +138,7 @@ void expandedEditionRegister(gbarecomp::RunOptions& options)
         "patched into a copy beside it the first time, and Expanded keeps its own save.";
     options.launcher_edition_chosen = chosen;
     options.launcher_edition_sha1 = ROTK_EDITION_SHA1;
+    restoreOriginalRomPick();
 #else
     (void)options;
 #endif
