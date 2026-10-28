@@ -1,5 +1,6 @@
 #include "two_towers.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -35,10 +36,21 @@ constexpr std::uint32_t kSaveSlotsField = 0x20 + 4 * kPackageForLanguage.size();
 constexpr std::uint32_t kIconsField = kSaveSlotsField + 8;
 constexpr std::uint32_t kHeaderSize = kIconsField + 4;
 // Backpack icons: a 16-byte SpriteAnimation per base item (tiles, frame set, palette pointers and
-// a frame duration). Each icon's data is contiguous: tiles, frame set, then a 32-byte palette.
+// a frame duration). Frame 0 is the 24x24 backpack icon: a gold bevel around a dark green fill.
+// A Two Towers frame is {u8 flags (OAM piece count in bits 0-4), u8, u8 width, u8 height,
+// u16 tile stream offset}, then per piece {s16 x, s16 y, u8 size, u8 shape, u8 width, u8 height,
+// u32 tile byte offset}.
 constexpr std::uint32_t kBaseIcons = 0x080519F0u;
 constexpr std::uint32_t kIconRecordSize = 16;
-constexpr std::uint32_t kPaletteSize = 32;
+constexpr std::uint32_t kFrameSetHeaderSize = 12;
+constexpr std::uint32_t kFramePieceSize = 12;
+constexpr int kTwoTowersIcon = 24;
+// ROTK's backpack icon: 32x24, one frame of a 32x8 and a 32x16 OBJ, a white frame 29x23 with a
+// black line inside its top and left edges, and a transparent background.
+constexpr int kIconWidth = 32, kIconHeight = 24;
+constexpr int kFrameRight = 28, kFrameBottom = 22;
+constexpr int kIconShiftX = 3;  // centers the Two Towers art inside the ROTK frame
+constexpr std::uint16_t kWhite = 0x7FFF, kBlack = 0x0000;
 // The Two Towers save: a 512-byte EEPROM image with each 8-byte block byte-reversed in the .sav
 // file, and four 0x78-byte character slots at blocks 4, 19, 34 and 49 that sum to 0 as halfwords.
 constexpr std::uint32_t kSaveSize = 512;
@@ -149,6 +161,146 @@ void putPointer(std::uint32_t offset, std::uint32_t target)
     g_pointers.push_back(offset);
 }
 
+// A Two Towers sprite tile stream. The commands match ROTK's decompress_lz77 but carry no length
+// bias: 00 n:6 literal n bytes, 01 n:6 byte run of n, 1 d:7 d:3 n:5 copy n bytes from d back, with
+// n = 0 a run of d + 64 of the next byte. A copy from before the start reads zeros.
+std::vector<std::uint8_t> decompressTiles(const std::vector<std::uint8_t>& rom, std::uint32_t address)
+{
+    std::vector<std::uint8_t> out;
+    std::uint32_t p = address - kRomBase;
+    while (p < rom.size() && out.size() < 0x4000) {
+        const std::uint8_t command = rom[p++];
+        if (command == 0) break;
+        if (command < 0x40) {
+            out.insert(out.end(), rom.begin() + p, rom.begin() + p + command);
+            p += command;
+        } else if (command < 0x80) {
+            out.insert(out.end(), command & 0x3F, rom[p++]);
+        } else {
+            const std::uint8_t operand = rom[p++];
+            const std::uint32_t distance = (command & 0x7F) << 3 | operand >> 5, count = operand & 0x1F;
+            if (count == 0) {
+                out.insert(out.end(), distance + 64, rom[p++]);
+            } else {
+                for (std::uint32_t i = 0; i < count; ++i)
+                    out.push_back(distance && distance <= out.size() ? out[out.size() - distance] : 0);
+            }
+        }
+    }
+    return out;
+}
+
+// A base item's Two Towers backpack icon redrawn as ROTK's: frame set, 4bpp tiles and palette,
+// or empty when the record has none.
+struct Icon {
+    std::vector<std::uint8_t> frames, tiles, palette;
+};
+
+Icon convertIcon(const std::vector<std::uint8_t>& rom, std::uint32_t record)
+{
+    const std::uint32_t tileStream = read32(rom, record), frameSet = read32(rom, record + 4);
+    const std::uint32_t paletteAddress = read32(rom, record + 8);
+    auto inRom = [](std::uint32_t address) { return address >= kRomBase && address < kRomBase + kRomSize - 0x100; };
+    if (!inRom(tileStream) || !inRom(frameSet) || !inRom(paletteAddress)) return {};
+    const std::uint32_t frame = frameSet + kFrameSetHeaderSize + read16(rom, frameSet + kFrameSetHeaderSize);
+    const std::vector<std::uint8_t> source = decompressTiles(rom, tileStream + read16(rom, frame + 4));
+
+    std::uint8_t art[kTwoTowersIcon][kTwoTowersIcon] = {};
+    for (std::uint32_t k = 0; k < (rom[frame - kRomBase] & 0x1Fu); ++k) {
+        const std::uint32_t piece = frame + 6 + k * kFramePieceSize;
+        const int x = static_cast<std::int16_t>(read16(rom, piece)), y = static_cast<std::int16_t>(read16(rom, piece + 2));
+        const int width = rom[piece + 6 - kRomBase], height = rom[piece + 7 - kRomBase];
+        const std::uint32_t bytes = read32(rom, piece + 8);
+        for (int py = 0; py < height; ++py)
+            for (int px = 0; px < width; ++px) {
+                const std::size_t at = bytes + ((py / 8) * (width / 8) + px / 8) * 32 + (py % 8) * 4 + (px % 8) / 2;
+                const int ax = x + px, ay = y + py;
+                if (at < source.size() && ax >= 0 && ay >= 0 && ax < kTwoTowersIcon && ay < kTwoTowersIcon)
+                    art[ay][ax] = (source[at] >> ((px & 1) * 4)) & 0xF;
+            }
+    }
+
+    Icon icon;
+    icon.palette.resize(32);
+    std::memcpy(icon.palette.data(), rom.data() + (paletteAddress - kRomBase), 32);
+    auto color = [&](int slot) { return icon.palette[slot * 2] | icon.palette[slot * 2 + 1] << 8; };
+
+    // Clear the bevel and the fill. The fill is the most common color inside the bevel. Clear
+    // what the outer ring reaches through the ring's colors and the fill, then any fill left
+    // between the item's parts (inside a necklace's loop).
+    constexpr int kLast = kTwoTowersIcon - 1, kInner = 2;
+    std::uint16_t ring = 0;
+    int counts[16] = {};
+    for (int i = 0; i < kTwoTowersIcon; ++i)
+        ring |= 1u << art[0][i] | 1u << art[kLast][i] | 1u << art[i][0] | 1u << art[i][kLast];
+    for (int i = kInner; i <= kLast - kInner; ++i)
+        for (int edge : {kInner, kLast - kInner}) ++counts[art[i][edge]], ++counts[art[edge][i]];
+    const int fill = static_cast<int>(std::max_element(std::begin(counts), std::end(counts)) - std::begin(counts));
+    auto isFill = [&](int slot) { return color(slot) == color(fill); };
+    bool seen[kTwoTowersIcon][kTwoTowersIcon] = {};
+    std::vector<std::pair<int, int>> stack;
+    for (int i = 0; i < kTwoTowersIcon; ++i)
+        stack.insert(stack.end(), {{0, i}, {kLast, i}, {i, 0}, {i, kLast}});
+    while (!stack.empty()) {
+        const auto [y, x] = stack.back();
+        stack.pop_back();
+        if (x < 0 || y < 0 || x > kLast || y > kLast || seen[y][x]) continue;
+        if (!(ring >> art[y][x] & 1) && !isFill(art[y][x])) continue;
+        seen[y][x] = true;
+        art[y][x] = 0;
+        stack.insert(stack.end(), {{y - 1, x}, {y + 1, x}, {y, x - 1}, {y, x + 1}});
+    }
+    for (auto& row : art)
+        for (std::uint8_t& pixel : row)
+            if (pixel && isFill(pixel)) pixel = 0;
+    std::uint16_t used = 1;
+    for (const auto& row : art)
+        for (std::uint8_t pixel : row) used |= 1u << pixel;
+    // White and black go in slots the item does not use, else in its closest colors.
+    auto slotFor = [&](std::uint16_t wanted) {
+        for (int slot = 1; slot < 16; ++slot)
+            if (!(used >> slot & 1)) {
+                used |= 1u << slot;
+                icon.palette[slot * 2] = wanted & 0xFF;
+                icon.palette[slot * 2 + 1] = wanted >> 8;
+                return slot;
+            }
+        int best = 1, bestDistance = 1 << 30;
+        for (int slot = 1; slot < 16; ++slot) {
+            int distance = 0;
+            for (int shift : {0, 5, 10}) distance += std::abs((color(slot) >> shift & 31) - (wanted >> shift & 31));
+            if (distance < bestDistance) best = slot, bestDistance = distance;
+        }
+        return best;
+    };
+    const int white = slotFor(kWhite), black = slotFor(kBlack);
+
+    std::uint8_t pixels[kIconHeight][kIconWidth] = {};
+    for (int x = 1; x < kFrameRight; ++x) pixels[0][x] = pixels[kFrameBottom][x] = white;
+    for (int y = 1; y < kFrameBottom; ++y) pixels[y][0] = pixels[y][kFrameRight] = white;
+    for (int x = 1; x < kFrameRight; ++x) pixels[1][x] = black;
+    for (int y = 1; y < kFrameBottom; ++y) pixels[y][1] = black;
+    for (int y = 0; y < kTwoTowersIcon; ++y)
+        for (int x = 0; x < kTwoTowersIcon; ++x)
+            if (art[y][x] && y < kIconHeight) pixels[y][x + kIconShiftX] = art[y][x];
+
+    // Tiles row-major over the 4x3 tile grid: the 32x8 OBJ's 4 tiles, then the 32x16 OBJ's 8.
+    icon.tiles.assign(kIconWidth * kIconHeight / 2, 0);
+    for (int y = 0; y < kIconHeight; ++y)
+        for (int x = 0; x < kIconWidth; ++x)
+            icon.tiles[((y / 8) * (kIconWidth / 8) + x / 8) * 32 + (y % 8) * 4 + (x % 8) / 2] |=
+                static_cast<std::uint8_t>(pixels[y][x] << ((x & 1) * 4));
+
+    // One uncompressed frame, header then frame offset 2, laid out as ROTK's own icons.
+    const std::uint16_t tileBytes = static_cast<std::uint16_t>(icon.tiles.size());
+    icon.frames = {kIconWidth, kIconHeight, 0, 0, 0, 0, 1, 0,
+                   static_cast<std::uint8_t>(tileBytes), static_cast<std::uint8_t>(tileBytes >> 8), 0, 0, 2, 0,
+                   2, 0, kIconWidth, kIconHeight, 0, 0,
+                   static_cast<std::uint8_t>(tileBytes), static_cast<std::uint8_t>(tileBytes >> 8),
+                   0x00, 0x00, 0x14, 0x00, 0x00, 0x10, 0x18, 0x01};
+    return icon;
+}
+
 // The Two Towers save's character slots, zeroed for an empty or damaged one.
 std::vector<std::uint8_t> loadSaveSlots()
 {
@@ -217,16 +369,12 @@ void build(const std::vector<std::uint8_t>& rom)
     const std::uint32_t icons = append(records.data(), records.size());
     putPointer(kIconsField, icons);
     for (std::uint32_t i = 0; i < kBaseCount; ++i) {
-        const std::uint32_t record = kBaseIcons + i * kIconRecordSize;
-        const std::uint32_t tiles = read32(rom, record), frames = read32(rom, record + 4);
-        const std::uint32_t palette = read32(rom, record + 8);
-        if (!(tiles < frames && frames < palette && palette - tiles < 0x4000)) continue;
-        const std::uint32_t data = append(rom.data() + (tiles - kRomBase), palette + kPaletteSize - tiles);
+        const Icon icon = convertIcon(rom, kBaseIcons + i * kIconRecordSize);
+        if (icon.tiles.empty()) continue;
         const std::uint32_t at = icons + i * kIconRecordSize;
-        putPointer(at, data);
-        putPointer(at + 4, data + (frames - tiles));
-        putPointer(at + 8, data + (palette - tiles));
-        put32(at + 12, read32(rom, record + 12));
+        putPointer(at, append(icon.tiles.data(), icon.tiles.size()));
+        putPointer(at + 4, append(icon.frames.data(), icon.frames.size()));
+        putPointer(at + 8, append(icon.palette.data(), icon.palette.size()));
     }
 }
 

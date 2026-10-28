@@ -196,11 +196,13 @@ suffix) needs 29 bits. So the ROTK item is a handle:
   pool and skill record), and so were legacy passives (Gandalf with Elusion 2, Wisdom 3 and Flame
   of Anor 1 gets corruption resist 24, Wisdom 3, revive 20). Not yet tested: the ranger hollow,
   co-op, a mid-mission save.
-- **Legacy item icons:** legacy rows borrow the icon of their ROTK template item. The data block
-  carries Two Towers' backpack icons (a SpriteAnimation per base item at ROM 0x080519F0, each
-  icon's tiles, frame set and palette contiguous), but using them as-is drew every icon as the
-  same garbled shape, so the frame set format or the palette upload differs from ROTK's. Not
-  used yet.
+- **Legacy item icons:** the PC port redraws each Two Towers backpack icon in ROTK's style
+  (`convertIcon` in `src/two_towers.cpp`): frame 0 of the base item's SpriteAnimation (ROM
+  0x080519F0) is a 24x24 icon whose tile stream uses ROTK's LZ77 commands without their length
+  biases and whose OAM pieces are 12 bytes ({s16 x, s16 y, u8 size, u8 shape, u8 w, u8 h, u32
+  tile byte offset}). The gold bevel and the green fill are cleared, the art is centered in
+  ROTK's 32x24 white and black frame, and the tiles are stored uncompressed. Base item 63's icon
+  is broken in the ROM and no item uses it.
 - **Legacy skills:** `legacy_skills` applies the passives as their closest ROTK stats from the
   slot's record (single player). Some have no ROTK mechanic and use the nearest stat (Meditation,
   Spirit of the Forge, Duck). Page 3 and active legacy skills are still to do. Their state can
