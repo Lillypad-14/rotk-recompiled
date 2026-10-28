@@ -1,0 +1,45 @@
+--- a/src/common/backends/imgui/launcher_imgui.cpp
++++ b/src/common/backends/imgui/launcher_imgui.cpp
+@@ -2209,6 +2209,7 @@
+         if (m->password_save_path || m->password_sram_path)
+             reserve += px(96.0f);                      // password-save row (same footprint)
+         if (m->bios_name && launcher_model_bios_missing(m)) reserve += px(110.0f);  // "required" notice
++        if (launcher_model_bios_applies(m) && !m->bios_name) reserve += px(112.0f);  // BIOS row
+         if (m->edition_label && m->edition_label[0])
+             reserve += px(120.0f);                     // edition row: checkbox + wrapped note
+         if (m->msu1_patch_available) reserve += px(198.0f);  // MSU-1 patch-available sub-block
+@@ -2332,6 +2333,34 @@
+         }
+     }
+ 
++    // The BIOS under the ROM, for a console that boots one (has_bios): whether
++    // it verified, and its own Browse button, so the front page alone sets the
++    // game up. PLAY stays disabled until it verifies (launcher_model_can_launch);
++    // Settings > System has the same picker. A host-named system file keeps
++    // the notice below instead.
++    if (launcher_model_bios_applies(m) && !m->bios_name) {
++        const bool bios_ok = m->setup_bios_ok;
++        const char* bios_line = bios_ok              ? "BIOS verified"
++                                : m->s.bios_path[0] ? "BIOS not recognized"
++                                                     : "No BIOS loaded";
++        ImGui::Dummy(ImVec2(0, px(10)));
++        float bw = ImGui::GetTextLineHeight() + px(6) + ImGui::CalcTextSize(bios_line).x;
++        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (availw - bw) * 0.5f);
++        state_mark(bios_ok, th);
++        ImGui::SameLine(0, px(6));
++        ImGui::TextColored(bios_ok ? col(th.good) : col(th.warn), "%s", bios_line);
++        if (!bios_ok && m->setup_bios_detail[0]) {
++            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + availw);
++            ImGui::TextColored(col(th.text_muted), "%s", m->setup_bios_detail);
++            ImGui::PopTextWrapPos();
++        }
++        ImGui::Dummy(ImVec2(0, px(6)));
++        char bios_label[48];
++        snprintf(bios_label, sizeof(bios_label), "%s %s", ui_text("Browse For"), ui_text("BIOS"));
++        if (ImGui::Button(bios_label, ImVec2(availw, px(34))))
++            request_bios_picker(m, NULL, false);
++    }
++
+     // A required system file the host could not find (GameInfo.bios_name):
+     // say so where the player is looking and point at Settings, which owns the
+     // picker (the SYSTEM card). PLAY stays disabled until a pick verifies

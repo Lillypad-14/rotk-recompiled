@@ -42,6 +42,7 @@ RECOMP_UI = ROOT / "external/recomp-ui"
 RECOMP_UI_PATCHES = [
     ROOT / "patches/recomp-ui-gba-audio.patch",
     ROOT / "patches/recomp-ui-edition.patch",
+    ROOT / "patches/recomp-ui-bios-row.patch",
 ]
 
 STOCK_ROM_SIZE = 0x1000000
