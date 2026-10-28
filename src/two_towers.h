@@ -25,6 +25,7 @@ namespace rotk {
 //   0x3C  a backpack icon SpriteAnimation (16 bytes) per base item, its data copied along
 //   0x40  skill icon art: per hero, its 11 skills' art as ROTK skill icon tiles (32x24, 4bpp,
 //         384 bytes each, the art in colors 8..13, the rest 0)
+//   0x44  {u32 Two Towers address, ROTK SpriteAnimation pointer} per converted animation, 0x48 count
 //
 // Item records are Two Towers' own 16 bytes: u16 name string, s16 gem value, 5 x (u8 stat,
 // s8 value) with stat 0x40 for none. Strings are NUL-terminated font bytes.

@@ -35,7 +35,8 @@ constexpr std::array<std::uint32_t, 5> kPackageForLanguage = {0, 2, 3, 4, 5};
 constexpr std::uint32_t kSaveSlotsField = 0x20 + 4 * kPackageForLanguage.size();
 constexpr std::uint32_t kIconsField = kSaveSlotsField + 8;
 constexpr std::uint32_t kSkillArtField = kIconsField + 4;
-constexpr std::uint32_t kHeaderSize = kSkillArtField + 4;
+constexpr std::uint32_t kSpritesField = kSkillArtField + 4;
+constexpr std::uint32_t kHeaderSize = kSpritesField + 8;
 // Backpack icons: a 16-byte SpriteAnimation per base item (tiles, frame set, palette pointers and
 // a frame duration). Frame 0 is the 24x24 backpack icon: a gold bevel around a dark green fill.
 // A Two Towers frame is {u8 flags (OAM piece count in bits 0-4), u8, u8 width, u8 height,
@@ -467,6 +468,82 @@ std::vector<std::uint8_t> convertSkillArt(const std::vector<std::uint8_t>& rom, 
     return out;
 }
 
+// Two Towers sprite animations the legacy skills draw, converted to ROTK's format, with the palette
+// each is drawn with (Two Towers loads it separately), 0 for none.
+struct SpriteSource {
+    std::uint32_t animation, palette;
+};
+constexpr SpriteSource kSprites[] = {
+    // Gandalf's Zap: the bolt by facing (down, down-side, side, up-side), and its impact
+    {0x08050138u, 0x08CC6268u}, {0x08050148u, 0x08CC6268u}, {0x08050158u, 0x08CC6268u},
+    {0x08050168u, 0x08CC6268u}, {0x080501C8u, 0x08CC6268u},
+};
+constexpr std::uint32_t kFrameHeadSize = 6;          // Two Towers: flags, pad, width, height, tile offset
+constexpr std::uint32_t kRotkFrameHeadSize = 8;      // ROTK adds the frame's tile bytes
+// Two Towers frames keep hotspots before trigger boxes of 8 bytes; ROTK the boxes (6 bytes) first.
+constexpr std::uint32_t kHotspotSize = 2, kTriggerBoxSize = 8, kRotkTriggerBoxSize = 6;
+constexpr std::uint8_t kFramePieceCount = 0x1F, kFrameRl = 0x20, kFrameLz77 = 0x40;
+
+// ROTK frame set and 4bpp tiles of one Two Towers animation: same header; hotspots and trigger boxes
+// reordered; tiles
+// decompressed (the Two Towers LZ77, or copied when raw) and its 12-byte OAM pieces packed
+// into ROTK's {x:9, y:9, size:2, shape:2, tile:10}.
+struct Sprite {
+    std::vector<std::uint8_t> frames, tiles;
+    std::uint8_t duration = 0;
+};
+
+Sprite convertSprite(const std::vector<std::uint8_t>& rom, std::uint32_t animation)
+{
+    Sprite sprite;
+    const std::uint32_t tileBase = read32(rom, animation), frameSet = read32(rom, animation + 4);
+    sprite.duration = rom[animation + 12 - kRomBase];
+    const std::uint16_t frameCount = read16(rom, frameSet + 6);
+    const std::uint8_t hotspots = rom[frameSet + 10 - kRomBase], boxes = rom[frameSet + 11 - kRomBase];
+    sprite.frames.assign(rom.begin() + (frameSet - kRomBase), rom.begin() + (frameSet - kRomBase) + kFrameSetHeaderSize);
+    sprite.frames.resize(kFrameSetHeaderSize + frameCount * 2u + (frameCount & 1u) * 2u, 0);
+    for (std::uint32_t f = 0; f < frameCount; ++f) {
+        const std::uint32_t frame = frameSet + kFrameSetHeaderSize + read16(rom, frameSet + kFrameSetHeaderSize + f * 2);
+        const std::uint8_t flags = rom[frame - kRomBase];
+        const std::uint32_t pieces = flags & kFramePieceCount;
+        const std::uint32_t boxBytes = hotspots * kHotspotSize + boxes * kTriggerBoxSize;
+        const std::uint32_t firstPiece = frame + kFrameHeadSize + boxBytes;
+        std::uint32_t bytes = 0;
+        for (std::uint32_t k = 0; k < pieces; ++k) {
+            const std::uint32_t piece = firstPiece + k * kFramePieceSize;
+            bytes = std::max(bytes, read32(rom, piece + 8) + rom[piece + 6 - kRomBase] * rom[piece + 7 - kRomBase] / 2u);
+        }
+        const std::uint32_t source = tileBase + read16(rom, frame + 4);
+        std::vector<std::uint8_t> tiles = (flags & kFrameLz77) ? decompressTiles(rom, source)
+                                                               : std::vector<std::uint8_t>(rom.begin() + (source - kRomBase), rom.begin() + (source - kRomBase) + bytes);
+        tiles.resize(bytes, 0);
+        const std::uint32_t tileOffset = static_cast<std::uint32_t>(sprite.tiles.size());
+        sprite.tiles.insert(sprite.tiles.end(), tiles.begin(), tiles.end());
+
+        const std::uint16_t offset = static_cast<std::uint16_t>(sprite.frames.size() - kFrameSetHeaderSize);
+        std::memcpy(sprite.frames.data() + kFrameSetHeaderSize + f * 2, &offset, 2);
+        sprite.frames.insert(sprite.frames.end(), {static_cast<std::uint8_t>(pieces), 0, rom[frame + 2 - kRomBase], rom[frame + 3 - kRomBase],
+                                                   static_cast<std::uint8_t>(tileOffset), static_cast<std::uint8_t>(tileOffset >> 8),
+                                                   static_cast<std::uint8_t>(bytes), static_cast<std::uint8_t>(bytes >> 8)});
+        const std::uint32_t hotspotData = frame + kFrameHeadSize, boxData = hotspotData + hotspots * kHotspotSize;
+        for (std::uint32_t b = 0; b < boxes; ++b) {
+            const auto box = rom.begin() + (boxData + b * kTriggerBoxSize - kRomBase);
+            sprite.frames.insert(sprite.frames.end(), box, box + kRotkTriggerBoxSize);
+        }
+        sprite.frames.insert(sprite.frames.end(), rom.begin() + (hotspotData - kRomBase), rom.begin() + (boxData - kRomBase));
+        for (std::uint32_t k = 0; k < pieces; ++k) {
+            const std::uint32_t piece = firstPiece + k * kFramePieceSize;
+            const std::uint32_t x = read16(rom, piece) & 0x1FFu, y = read16(rom, piece + 2) & 0x1FFu;
+            const std::uint32_t size = rom[piece + 4 - kRomBase] & 3u, shape = rom[piece + 5 - kRomBase] & 3u;
+            const std::uint32_t tile = read32(rom, piece + 8) / 32u;
+            const std::uint32_t packed = x | y << 9 | size << 18 | shape << 20 | tile << 22;
+            sprite.frames.insert(sprite.frames.end(), {static_cast<std::uint8_t>(packed), static_cast<std::uint8_t>(packed >> 8),
+                                                       static_cast<std::uint8_t>(packed >> 16), static_cast<std::uint8_t>(packed >> 24)});
+        }
+    }
+    return sprite;
+}
+
 // The Two Towers save's character slots, zeroed for an empty or damaged one.
 std::vector<std::uint8_t> loadSaveSlots()
 {
@@ -551,6 +628,25 @@ void build(const std::vector<std::uint8_t>& rom)
             skillArt.insert(skillArt.end(), art.begin(), art.end());
         }
     putPointer(kSkillArtField, append(skillArt.data(), skillArt.size()));
+
+    // {Two Towers address, ROTK SpriteAnimation} per converted animation
+    std::vector<std::uint8_t> index(std::size(kSprites) * 8, 0);
+    const std::uint32_t sprites = append(index.data(), index.size());
+    putPointer(kSpritesField, sprites);
+    put32(kSpritesField + 4, static_cast<std::uint32_t>(std::size(kSprites)));
+    for (std::size_t i = 0; i < std::size(kSprites); ++i) {
+        const Sprite sprite = convertSprite(rom, kSprites[i].animation);
+        const std::uint32_t tiles = append(sprite.tiles.data(), sprite.tiles.size());
+        const std::uint32_t frames = append(sprite.frames.data(), sprite.frames.size());
+        const std::uint8_t record[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, sprite.duration, 0, 0, 0};
+        const std::uint32_t animation = append(record, sizeof record);
+        putPointer(animation, tiles);
+        putPointer(animation + 4, frames);
+        if (kSprites[i].palette) putPointer(animation + 8, append(rom.data() + (kSprites[i].palette - kRomBase), 32));
+        const std::uint32_t at = sprites + static_cast<std::uint32_t>(i) * 8;
+        put32(at, kSprites[i].animation);
+        putPointer(at + 4, animation);
+    }
 }
 
 }  // namespace
