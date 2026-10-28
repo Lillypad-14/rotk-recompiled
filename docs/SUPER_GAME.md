@@ -167,6 +167,33 @@ suffix) needs 29 bits. So the ROTK item is a handle:
   ROTK equivalent applies as that stat. A Two Towers skill bonus (+Wisdom, +all passive skills,
   ...) is dropped until page 3 exists.
 
+## Porting the Two Towers skills 1:1
+
+Goal: each legacy skill behaves as in The Two Towers (numbers, effects, timing, visuals), not as its
+closest ROTK skill. `tools/ttt_dis.py ADDRESS [LENGTH]` disassembles Two Towers code with the ROTK
+names the matcher found.
+
+How a Two Towers active runs:
+- Cast: per hero, 11 cast functions at 0x08057AB0 + hero * 0x2C (hero ids: 0 Frodo, 1 Legolas,
+  2 Aragorn, 3 Gandalf, 4 Eowyn, 5 Gimli). Gandalf's Zap (0x0803BC78) checks Spirit, takes it
+  (`player_addSpirit`), records the skill at player +0x1F, sets the casting flag and starts the
+  cast pose.
+- Trigger: the player actor tick (0x0801AFC8) switches on the actor's character type (+0x22, 0x0A
+  for Gandalf) and the cast skill to an effect function; another per-hero switch (0x0801C370,
+  hero -> 0x0801F590/F520/F4D4/F5E8/F6C8/F664) ends the cast.
+- Gandalf's effects: Shield 0x080185B4, Zap 0x08018FD4, Sunburst 0x08018880, Fireworks
+  0x08018280, Summon Eagle 0x08017AD4 + 0x080180CC, Thunderstrike 0x0801E658. Magical Healing
+  acts in its cast function.
+- Skill levels: player +0x30 + skill index (Two Towers player stride 0x128).
+
+Zap (0x08018FD4): a projectile actor at the caster's hotspot, speed (per-facing table 0x083278DC)
+x 0x50000, 30-frame lifetime, damage = 5 + 2 x level (+0x90), animation 0x08328258[facing],
+palette 0x08CC6268, tick 0x080191F1, hit callback 0x080115E1, a hit box object, sound 0x56.
+
+Per skill the port needs the whole chain read (cast, effect, the effect actor's callbacks and its
+damage), the effect rebuilt from ROTK engine calls, its sprite converted like the item icons, and
+its sound matched. About 36 actives and 30 passives.
+
 ## Technical notes
 
 - **Mod RAM:** the mod's globals live in a fixed 2.7 KB EWRAM slice (`hacks/layout.cfg`
