@@ -29,6 +29,8 @@ void twoTowersFind(const std::vector<std::string>& args);
 std::uint32_t twoTowersBlockSize();
 // The block as it reads at a host RAM address.
 std::vector<std::uint8_t> twoTowersBlockAt(std::uint32_t address);
+// Whether the block is at a host RAM address of the active console.
+bool twoTowersPresent(std::uint32_t address);
 // Writes the block at a host RAM address.
 void twoTowersWrite(std::uint32_t address);
 

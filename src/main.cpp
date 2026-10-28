@@ -17,6 +17,7 @@
 #include "duel_hud.h"
 #include "expanded_edition.h"
 #include "hd_icons.h"
+#include "legacy_item_tables.h"
 #include "two_towers.h"
 #include "minimap.h"
 #include "player2_controls.h"
@@ -45,8 +46,9 @@ namespace {
 //   kHostRamBase  info block (PcInfo below), read by PC-aware mod code
 //   +0x1000       per-actor queues (collision, world render, post-commit)
 //   ...           main and overlay actor pools
-//   ...           game heap
 //   ...           The Two Towers data block (src/two_towers.h), when its ROM was found
+//   ...           legacy item tables (src/legacy_item_tables.h), with The Two Towers data
+//   ...           game heap
 //
 // The player picks them on the launcher's Mods page (built-in package "rotk.pc", see
 // mods/rotk.pc.manifest.toml.in). Environment variables override the package for tests and scripts:
@@ -92,6 +94,7 @@ enum PcInfoField : std::uint32_t {
     kInfoStressSpawn = 0x20,
     kInfoDuel = 0x24,  // written by the mod (Versus duel scoreboard, duel_hud.cpp)
     kInfoTwoTowers = 0x28,
+    kInfoItemTypeInfos = 0x2C,  // the legacy item tables' ItemTypeInfos copy
 };
 
 // ROM literal-pool words that hold the base of a per-actor queue. The same addresses in the stock
@@ -122,6 +125,7 @@ struct PcLayout {
     std::uint32_t heapBase = 0;
     std::uint32_t heapEnd = 0;
     std::uint32_t twoTowers = 0;
+    std::uint32_t itemTables = 0;
 };
 
 unsigned long envNumber(const char* name, unsigned long fallback)
@@ -178,15 +182,17 @@ PcLayout makeLayout(bool coop = false)
         layout.overlayPool = alignUp(cursor + layout.mainActors * kActorSize, kHeapAlign);
         cursor = alignUp(layout.overlayPool + layout.overlayActors * kActorSize, kHeapAlign);
     }
+    // Before the heap: a save state keeps host RAM up to the highest address written.
+    if (const std::uint32_t size = rotk::twoTowersBlockSize()) {
+        layout.twoTowers = alignUp(cursor, kHeapAlign);
+        layout.itemTables = alignUp(layout.twoTowers + size, kHeapAlign);
+        cursor = alignUp(layout.itemTables + rotk::legacyItemTablesSize(), kHeapAlign);
+    }
     if (heapBytes != 0) {
         layout.heap = true;
         layout.heapBase = cursor;
         layout.heapEnd = cursor + static_cast<std::uint32_t>(heapBytes);
         cursor = layout.heapEnd;
-    }
-    if (const std::uint32_t size = rotk::twoTowersBlockSize()) {
-        layout.twoTowers = alignUp(cursor, kHeapAlign);
-        cursor = layout.twoTowers + size;
     }
     if (cursor - gba::kHostRamBase > hostBytes) {
         std::fprintf(stderr, "[rotk] PC layout needs %u KiB of host RAM, have %lu; stock heap and actors\n",
@@ -233,8 +239,12 @@ void writeInfoBlock()
                       static_cast<std::uint32_t>(envNumber("ROTK_PC_STRESS_SPAWN", 0)));
     }
     bus_write_u32(info + kInfoDuel, 0u);
-    if (pc.twoTowers) rotk::twoTowersWrite(pc.twoTowers);
+    // Written when this console's host RAM lacks them: rewriting would wipe the legacy rows the
+    // mod has added.
+    if (pc.twoTowers && !rotk::twoTowersPresent(pc.twoTowers)) rotk::twoTowersWrite(pc.twoTowers);
+    if (pc.itemTables && !rotk::legacyItemTablesPresent(pc.itemTables)) rotk::legacyItemTablesWrite(pc.itemTables);
     bus_write_u32(info + kInfoTwoTowers, pc.twoTowers);
+    bus_write_u32(info + kInfoItemTypeInfos, pc.itemTables);
     bus_write_u32(info + kInfoMagic, kPcInfoMagic);
 }
 
@@ -369,6 +379,13 @@ int pcQueueLiterals(std::uint32_t address, std::uint32_t original, std::uint32_t
     return 0;
 }
 
+
+// Every ROM literal redirect: the actor queues and the legacy item tables.
+int pcRomLiterals(std::uint32_t address, std::uint32_t original, std::uint32_t* out)
+{
+    if (layout().actors && pcQueueLiterals(address, original, out)) return 1;
+    return rotk::legacyItemTablesRedirect(original, out) ? 1 : 0;
+}
 
 // Extra sprite pieces beyond the 128 OAM entries. sprite_pushOam(index, entry) stops at 128
 // (g_SpriteAllocCount stays 128 from then on); the host keeps the rest in extra pages that mirror
@@ -595,7 +612,8 @@ void applyPcSettings()
     gba_mod_set_function_hook_enabled(kPushOamHookId, observePieces);
     gba_mod_set_function_hook_enabled(kHideOamHookId, observePieces);
     gba_mod_set_function_hook_enabled(kEndFrameHookId, observePieces);
-    gba::g_rom_read32_override = layout().actors ? pcQueueLiterals : nullptr;
+    if (!layout().itemTables) rotk::legacyItemTablesReset();
+    gba::g_rom_read32_override = layout().actors || layout().itemTables ? pcRomLiterals : nullptr;
     g_dma_observer = pcObserveDma;
     gba::g_extra_obj_provider = extra ? pcExtraObjects : nullptr;
     rotk::hdAudioApply();
@@ -627,7 +645,7 @@ void pcFeaturesStartCoop()
         }
         g_coopEngineLayout = true;
     }
-    gba::g_rom_read32_override = pcQueueLiterals;
+    gba::g_rom_read32_override = pcRomLiterals;
     for (ExtraObjects& extra : g_coopExtra) {
         freePages(extra);
         extra = ExtraObjects{};

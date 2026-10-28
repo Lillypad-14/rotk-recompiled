@@ -54,7 +54,7 @@ target_link_gbarecomp_runtime_stack(RotkCart)
 add_executable(${ROTK_EXECUTABLE} src/main.cpp src/widescreen.cpp src/hd_audio.cpp src/hd_icons.cpp src/local_coop.cpp
     src/smooth_motion.cpp src/transparency.cpp src/combat_info.cpp src/duel_hud.cpp src/rumble.cpp src/color_vision.cpp src/bug_report.cpp
     src/sample_packs.cpp src/minimap.cpp src/profiler.cpp src/player2_controls.cpp src/bps_patch.cpp
-    src/expanded_edition.cpp src/two_towers.cpp $<TARGET_OBJECTS:RotkCart>)
+    src/expanded_edition.cpp src/two_towers.cpp src/legacy_item_tables.cpp $<TARGET_OBJECTS:RotkCart>)
 target_include_directories(${ROTK_EXECUTABLE} PRIVATE ${ROTK_HOST_INCLUDES})
 # stb_image decodes the HD art packs.
 target_include_directories(${ROTK_EXECUTABLE} PRIVATE "${RECOMP_UI_ROOT}/src/third_party")

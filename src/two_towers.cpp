@@ -193,6 +193,11 @@ std::vector<std::uint8_t> twoTowersBlockAt(std::uint32_t address)
     return block;
 }
 
+bool twoTowersPresent(std::uint32_t address)
+{
+    return bus_read_u32(address) == kMagic;
+}
+
 void twoTowersWrite(std::uint32_t address)
 {
     const std::vector<std::uint8_t> block = twoTowersBlockAt(address);
