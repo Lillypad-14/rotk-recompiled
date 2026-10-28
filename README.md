@@ -87,13 +87,22 @@ python tools/lab.py prepare --rom path\to\rotk.gba --bios path\to\gba_bios.bin -
 python tools/lab.py build --sdl2 path\to\SDL2
 .\Play.cmd
 
-# Expanded PC edition: build the mod in game/ first (it expects game/rotk.gba), then
+# Expanded PC edition: copy your ROM to game/rotk.gba, build the mod's PC edition (its tools:
+# game/docs/setup.md), then recompile it. prepare picks game/build/rotk_pc.gba and hack_pc.elf.
+make -C game hack-pc
 python tools/lab.py prepare --target expanded --bios path\to\gba_bios.bin
 python tools/lab.py build --target expanded --sdl2 path\to\SDL2
 .\PlayExpanded.cmd
 ```
 
-Rebuild the Expanded target after every mod build: the executable is tied to that exact ROM.
+Rebuild the Expanded target after every mod build: the executable is tied to that exact ROM. The
+launcher's Expanded checkbox (a BPS patch made from that ROM) and making a release download:
+[docs/EXPANDED_EDITION.md](docs/EXPANDED_EDITION.md) and [docs/RELEASING.md](docs/RELEASING.md).
+
+The mod and the decompilation it is built on live in `game/` (the
+[ROTK-Expanded-experimental](https://github.com/Lillypad-14/ROTK-Expanded-experimental) repository, branch
+`pc-edition`), with their own docs in `game/docs/`. The Two Towers work is mapped in
+[docs/SUPER_GAME.md](docs/SUPER_GAME.md).
 
 ## Checks
 
