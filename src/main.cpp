@@ -17,6 +17,7 @@
 #include "duel_hud.h"
 #include "expanded_edition.h"
 #include "hd_icons.h"
+#include "two_towers.h"
 #include "minimap.h"
 #include "player2_controls.h"
 #include "rumble.h"
@@ -28,10 +29,10 @@
 #include "runtime_arm.h"
 #include "widescreen.h"
 
-#if defined(ROTK_LAUNCHER)
 #include <string>
 #include <vector>
 
+#if defined(ROTK_LAUNCHER)
 #include "launcher_boot.h"
 #endif
 
@@ -45,6 +46,7 @@ namespace {
 //   +0x1000       per-actor queues (collision, world render, post-commit)
 //   ...           main and overlay actor pools
 //   ...           game heap
+//   ...           The Two Towers data block (src/two_towers.h), when its ROM was found
 //
 // The player picks them on the launcher's Mods page (built-in package "rotk.pc", see
 // mods/rotk.pc.manifest.toml.in). Environment variables override the package for tests and scripts:
@@ -89,6 +91,7 @@ enum PcInfoField : std::uint32_t {
     kInfoHeapEnd = 0x1C,
     kInfoStressSpawn = 0x20,
     kInfoDuel = 0x24,  // written by the mod (Versus duel scoreboard, duel_hud.cpp)
+    kInfoTwoTowers = 0x28,
 };
 
 // ROM literal-pool words that hold the base of a per-actor queue. The same addresses in the stock
@@ -118,6 +121,7 @@ struct PcLayout {
     std::uint32_t overlayPool = 0;
     std::uint32_t heapBase = 0;
     std::uint32_t heapEnd = 0;
+    std::uint32_t twoTowers = 0;
 };
 
 unsigned long envNumber(const char* name, unsigned long fallback)
@@ -180,6 +184,10 @@ PcLayout makeLayout(bool coop = false)
         layout.heapEnd = cursor + static_cast<std::uint32_t>(heapBytes);
         cursor = layout.heapEnd;
     }
+    if (const std::uint32_t size = rotk::twoTowersBlockSize()) {
+        layout.twoTowers = alignUp(cursor, kHeapAlign);
+        cursor = layout.twoTowers + size;
+    }
     if (cursor - gba::kHostRamBase > hostBytes) {
         std::fprintf(stderr, "[rotk] PC layout needs %u KiB of host RAM, have %lu; stock heap and actors\n",
                      (cursor - gba::kHostRamBase) / 1024u, hostBytes / 1024u);
@@ -211,7 +219,7 @@ void writeInfoBlock()
     const PcLayout& pc = layout();
     const std::uint32_t info = gba::kHostRamBase;
     static bool stressArmed = false;
-    bus_write_u32(info + kInfoVersion, 3u);
+    bus_write_u32(info + kInfoVersion, 4u);
     bus_write_u32(info + kInfoMainActors, pc.mainActors);
     bus_write_u32(info + kInfoOverlayActors, pc.overlayActors);
     bus_write_u32(info + kInfoMainPool, pc.mainPool);
@@ -225,6 +233,8 @@ void writeInfoBlock()
                       static_cast<std::uint32_t>(envNumber("ROTK_PC_STRESS_SPAWN", 0)));
     }
     bus_write_u32(info + kInfoDuel, 0u);
+    if (pc.twoTowers) rotk::twoTowersWrite(pc.twoTowers);
+    bus_write_u32(info + kInfoTwoTowers, pc.twoTowers);
     bus_write_u32(info + kInfoMagic, kPcInfoMagic);
 }
 
@@ -722,10 +732,12 @@ int main(int argc, char** argv)
     std::vector<std::string> args(argv, argv + argc);
     if (rotk_launcher_preboot(args, options)) return 0;  // the player quit the launcher
     if (const int code = rotk::expandedEditionDispatch(args); code >= 0) return code;
+    rotk::twoTowersFind(args);
     std::vector<char*> launchArgs;
     for (std::string& arg : args) launchArgs.push_back(arg.data());
     return gbarecomp::run_game(static_cast<int>(launchArgs.size()), launchArgs.data(), options);
 #else
+    rotk::twoTowersFind(std::vector<std::string>(argv, argv + argc));
     return gbarecomp::run_game(argc, argv, options);
 #endif
 }

@@ -54,7 +54,7 @@ target_link_gbarecomp_runtime_stack(RotkCart)
 add_executable(${ROTK_EXECUTABLE} src/main.cpp src/widescreen.cpp src/hd_audio.cpp src/hd_icons.cpp src/local_coop.cpp
     src/smooth_motion.cpp src/transparency.cpp src/combat_info.cpp src/duel_hud.cpp src/rumble.cpp src/color_vision.cpp src/bug_report.cpp
     src/sample_packs.cpp src/minimap.cpp src/profiler.cpp src/player2_controls.cpp src/bps_patch.cpp
-    src/expanded_edition.cpp $<TARGET_OBJECTS:RotkCart>)
+    src/expanded_edition.cpp src/two_towers.cpp $<TARGET_OBJECTS:RotkCart>)
 target_include_directories(${ROTK_EXECUTABLE} PRIVATE ${ROTK_HOST_INCLUDES})
 # stb_image decodes the HD art packs.
 target_include_directories(${ROTK_EXECUTABLE} PRIVATE "${RECOMP_UI_ROOT}/src/third_party")
@@ -121,6 +121,12 @@ endforeach()
 add_executable(RotkBpsPatchCheck EXCLUDE_FROM_ALL tests/bps_patch_test.cpp src/bps_patch.cpp)
 target_include_directories(RotkBpsPatchCheck PRIVATE src ${ROTK_HOST_INCLUDES})
 target_link_gbarecomp_runtime_stack(RotkBpsPatchCheck)
+
+# Builds The Two Towers data block and checks it: RotkTwoTowersCheck <Two Towers ROM>.
+add_executable(RotkTwoTowersCheck EXCLUDE_FROM_ALL tests/two_towers_test.cpp src/two_towers.cpp
+    $<TARGET_OBJECTS:RotkCart>)
+target_include_directories(RotkTwoTowersCheck PRIVATE src ${ROTK_HOST_INCLUDES})
+target_link_gbarecomp_runtime_stack(RotkTwoTowersCheck)
 
 add_executable(RotkHostRamCheck EXCLUDE_FROM_ALL tests/host_ram_test.cpp)
 target_sources(RotkHostRamCheck PRIVATE $<TARGET_OBJECTS:RotkCart>)

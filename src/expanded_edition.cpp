@@ -96,6 +96,16 @@ int fail(const std::string& message)
 
 }  // namespace
 
+std::filesystem::path executableFolder()
+{
+    return executableDirectory();
+}
+
+std::string sessionRomPath(const std::vector<std::string>& args)
+{
+    return sourceRom(args);
+}
+
 void expandedEditionRegister(gbarecomp::RunOptions& options)
 {
 #if defined(ROTK_EDITION_PATCH)

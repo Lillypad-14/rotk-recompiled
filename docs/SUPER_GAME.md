@@ -170,6 +170,17 @@ suffix) needs 29 bits. So the ROTK item is a handle:
   MODCODE_BSS), now full after Versus. For the PC edition, move them to host RAM (0x12000000+,
   see `hacks/lib/pc_host.h` / `src/main.cpp` host RAM layout) with a PC build setting. Needed
   before page 3.
+- **Two Towers data for the mod:** the PC port finds The Two Towers ROM (`ROTK_PC_TWO_TOWERS_ROM`,
+  else beside the ROTK ROM or the executable, SHA-1 checked) and copies a 92 KB block into host
+  RAM after the heap: the three item tables and the item, stat, hero and skill text decoded for
+  ROTK's 5 languages (`src/two_towers.h`). Info block version 4 points at it
+  (`PcHostInfo.twoTowers`, `hackLib_twoTowersData()`). Only this block goes into host RAM, not the
+  16 MB ROM, so save states and rewind stay small. `RotkTwoTowersCheck <ROM>` checks it.
+- **Legacy items in memory:** the save keeps legacy handles. When a slot or hollow page loads, the
+  mod turns each handle into a real ROTK item of the matching type whose base, prefix and suffix
+  rows it builds in host RAM from the Two Towers records (Two Towers stats mapped to ROTK stats,
+  both prefixes merged into one row), the way the Ringwraith gear extends the item tables. Stock
+  code then handles icons, equipping, stats and names. Saving turns them back into handles.
 - **Mod ↔ PC port channel:** `PcHostInfo` in host RAM (version 3 adds `duel`). The menu button's
   switch request and the import hand-off can use the same block.
 - **Game handoff precedent:** `src/expanded_edition.cpp` already hands a session to another build;

@@ -1,11 +1,17 @@
 #pragma once
 
+#include <filesystem>
 #include <string>
 #include <vector>
 
 #include "runtime.h"
 
 namespace rotk {
+
+// The folder of the running executable.
+std::filesystem::path executableFolder();
+// The ROM a session boots: --rom, else the [rom] path in the --config file. Empty when neither.
+std::string sessionRomPath(const std::vector<std::string>& args);
 
 // The launcher's "Expanded" row, in builds made with ROTK_EDITION_PATCH (the vanilla game): the
 // Expanded mod is applied to the player's ROM as a BPS patch and the Expanded build plays it.
