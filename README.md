@@ -5,8 +5,19 @@ ROTK Expanded mod. The game's code is statically recompiled to native code with
 [GBARecomp](https://github.com/mstan/gbarecomp). Then the GBA's limits are removed one engine service at a
 time: memory, CPU budget, sprite and tile limits, screen size, saves.
 
-You need your own copy of the game. No ROM, BIOS, game art or code generated from the ROM is part of this
-repository or its releases.
+You need your own copy of the game. No ROM, BIOS or game art is part of this repository or its releases:
+the game runs from your own ROM and GBA BIOS dump.
+
+## Download and play (Windows)
+
+1. Download `ROTK-Recompiled-<version>-windows.zip` from the
+   [releases](https://github.com/Lillypad-14/rotk-recompiled/releases) and unzip it anywhere.
+2. Run `RotkPcLab.exe` and pick your ROM (*The Return of the King*, GBA, USA/Europe, SHA-1
+   `ec3d126d37ea6e2ad7030d8a99cf87c6e46c03fd`) and your GBA BIOS dump (SHA-1
+   `300c20df6731a33952ded8c436f7f186d25d3492`).
+3. Tick **Expanded** for the Expanded mod, or leave it off for the original game, and press Play.
+
+No build tools are needed. To build it yourself, see [Building](#building).
 
 ## Editions
 
@@ -106,4 +117,5 @@ See [CREDITS.md](CREDITS.md).
 - `patches/` modifies GBARecomp and stays under its PolyForm Noncommercial License 1.0.0
   ([patches/LICENSE.md](patches/LICENSE.md)). Executables built from this project include GBARecomp, so
   they can only be shared noncommercially.
-- No game code, data or art is included. Bring your own `rotk.gba`.
+- No ROM, BIOS, game data or art is included. Bring your own `rotk.gba` and GBA BIOS. The release
+  executables contain the game's code statically recompiled from the ROM, as other recompilations do.
