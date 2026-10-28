@@ -181,11 +181,13 @@ def prepare(args: argparse.Namespace) -> None:
         rom_bytes = rom.read_bytes()
         config = ROOT / "config/rotk.toml"
     else:
-        rom = args.rom or args.decomp / "build/rotk_hack.gba"
+        # The PC edition (`make hack-pc`, the mod's RAM in host RAM) when it is built.
+        pc_edition = args.rom is None and (args.decomp / "build/rotk_pc.gba").exists()
+        rom = args.rom or args.decomp / ("build/rotk_pc.gba" if pc_edition else "build/rotk_hack.gba")
         rom_bytes = rom.read_bytes()
         if len(rom_bytes) != EXPANDED_ROM_SIZE:
             raise ValueError(f"Expanded ROM must be {EXPANDED_ROM_SIZE:#x} bytes: {rom}")
-        elf = args.elf or args.decomp / "build/hack.elf"
+        elf = args.elf or args.decomp / ("build/hack_pc.elf" if pc_edition else "build/hack.elf")
         if elf.stat().st_mtime < rom.stat().st_mtime - 60:
             raise ValueError(f"{elf} is older than {rom}; rebuild the hack so symbols match")
         mod_symbols = elf_function_symbols(elf, args.readelf)

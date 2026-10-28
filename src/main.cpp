@@ -44,7 +44,9 @@ namespace {
 // PC engine services for ROTK. Each one moves a fixed GBA allocation into host RAM:
 //
 //   kHostRamBase  info block (PcInfo below), read by PC-aware mod code
-//   +0x1000       per-actor queues (collision, world render, post-commit)
+//   +0x1000       the mod's RAM when it is built with PC_EDITION=1 (MEM_PC_MODCODE_BSS in the
+//                 mod's hacks/layout.cfg), 64 KB the mod clears at boot
+//   +0x11000      per-actor queues (collision, world render, post-commit)
 //   ...           main and overlay actor pools
 //   ...           The Two Towers data block (src/two_towers.h), when its ROM was found
 //   ...           legacy item tables (src/legacy_item_tables.h), with The Two Towers data
@@ -72,6 +74,7 @@ constexpr std::uint32_t kActorSize = 0x148u;               // sizeof(Actor)
 constexpr std::uint32_t kStockMainActors = 0x100u;
 constexpr std::uint32_t kStockOverlayActors = 0x28u;
 constexpr std::uint32_t kInfoBytes = 0x1000u;
+constexpr std::uint32_t kModRamBytes = 0x10000u;
 constexpr const char* kPackageId = "rotk.pc";
 constexpr const char* kHeapHookId = "rotk.pc-heap";
 constexpr const char* kPoolHookId = "rotk.pc-actor-pools";
@@ -170,7 +173,7 @@ PcLayout makeLayout(bool coop = false)
     if (overlayActors < kStockOverlayActors) overlayActors = kStockOverlayActors;
     layout.actors = mainActors != kStockMainActors || overlayActors != kStockOverlayActors;
 
-    std::uint32_t cursor = gba::kHostRamBase + kInfoBytes;
+    std::uint32_t cursor = gba::kHostRamBase + kInfoBytes + kModRamBytes;
     if (layout.actors) {
         const std::uint32_t queueBytes = static_cast<std::uint32_t>(mainActors + overlayActors) * 4u;
         layout.mainActors = static_cast<std::uint32_t>(mainActors);

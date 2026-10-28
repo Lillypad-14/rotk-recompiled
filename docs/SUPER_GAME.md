@@ -170,9 +170,10 @@ suffix) needs 29 bits. So the ROTK item is a handle:
 ## Technical notes
 
 - **Mod RAM:** the mod's globals live in a fixed 2.7 KB EWRAM slice (`hacks/layout.cfg`
-  MODCODE_BSS), now full after Versus. For the PC edition, move them to host RAM (0x12000000+,
-  see `hacks/lib/pc_host.h` / `src/main.cpp` host RAM layout) with a PC build setting. Needed
-  before page 3.
+  MODCODE_BSS), full after Versus. The PC edition of the mod (`make hack-pc`, `PC_EDITION=1`)
+  links them at 0x12001000 in host RAM instead, with 64 KB reserved by the PC port before its
+  other host RAM regions; `modRam_init` clears them at boot and the stock heap gets the whole
+  EWRAM arena back. The Expanded build compiles this edition.
 - **Two Towers data for the mod:** the PC port finds The Two Towers ROM (`ROTK_PC_TWO_TOWERS_ROM`,
   else beside the ROTK ROM or the executable, SHA-1 checked) and copies a 93 KB block into host
   RAM before the heap: the three item tables, the item, stat, hero and skill text decoded for

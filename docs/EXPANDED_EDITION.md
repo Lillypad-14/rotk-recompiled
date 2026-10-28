@@ -30,10 +30,14 @@ and exits with its exit code.
 
 ## Building
 
-The patch is made from the exact Expanded ROM the Expanded build compiles, so the two can't drift:
+The patch is made from the exact Expanded ROM the Expanded build compiles, so the two can't drift.
+The Expanded build compiles the mod's PC edition (`make hack-pc` in ../rotk): the same patches with
+the mod's RAM in host RAM (0x12001000, reserved in `src/main.cpp`), so PC-only features are not
+bound by the GBA's RAM. `prepare` picks `build/rotk_pc.gba` and `build/hack_pc.elf` when they exist:
 
 ```powershell
-python tools/lab.py prepare --target expanded --rom ../rotk/build/rotk_hack.gba --elf ../rotk/build/hack.elf
+make -C ../rotk hack-pc
+python tools/lab.py prepare --target expanded --rom ../rotk/build/rotk_pc.gba --elf ../rotk/build/hack_pc.elf
 python tools/lab.py build --target expanded
 python tools/make_edition_patch.py     # .private/expanded/expanded.bps, prints the CMake settings
 cmake -S . -B build/host -DROTK_EDITION_PATCH=<bps> -DROTK_EDITION_SHA1=<sha1> -DROTK_EDITION_EXE=<expanded exe>
