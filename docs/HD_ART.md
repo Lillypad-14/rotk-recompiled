@@ -11,7 +11,7 @@ priority and blend stack (sprites stay on top, fades still apply). The GBA build
   tied to the exact 4bpp tile data it replaces. Each frame the PPU finds those tile blocks in the
   text BG tilemaps (whole blocks only, anchored on tiles unique to one image, so shared frame tiles
   cannot mix icons up), and on those pixels samples the image, pre-resampled to the internal scale.
-- ROTK (`src/hd_icons.cpp`): launcher feature "HD skill icons" (Display, off by default) with a
+- ROTK (`src/hd_icons.cpp`): launcher feature "HD skill icons" (Display, on by default at 6x) with a
   "Render resolution" option (3x/4x/6x). Loads every pack under
   `mods/packages/rotk.pc/<version>/hd/<pack>/manifest.txt` and raises the internal resolution.
 - Packs: the romhack's `hacks/patches/ringwraith/icons_hd/` and

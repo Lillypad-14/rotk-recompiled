@@ -29,7 +29,7 @@ Normal-device listening, song/effect accuracy against mGBA, extended gameplay, a
 
 # HD audio mixer (launcher feature "HD audio", src/hd_audio.cpp)
 
-Off by default. On, the host replaces the game's software mixer, advances the same voice state and
+On by default. On, the host replaces the game's software mixer, advances the same voice state and
 renders it in float at 65,536 Hz (4x the game's rate) with cubic, linear or original interpolation,
 then hands it to GBARecomp's mod PCM pull stream (framework docs/MOD_AUDIO.md). The guest output ring
 is zero-filled, so the FIFOs play silence. Off, the original mixer runs untouched.

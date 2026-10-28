@@ -45,7 +45,7 @@ python tools/lab.py build --target stock
 ```
 
 `ROTK_EDITION_EXE` is relative to the vanilla executable or absolute: a release puts both executables
-and `expanded.bps` in one folder. The patch is a Flips BPS delta (332 KB for v0.7 plus co-op);
+and `expanded.bps` in one folder. The patch is a Flips BPS delta (349 KB for mod 521e3b8);
 `RotkBpsPatchCheck <rom> <patch>` applies one and prints the result's SHA-1.
 
 The launcher row is `recomp-ui`'s `GameInfo.edition_label`/`edition_note` and `Settings.edition_enabled`
@@ -54,3 +54,6 @@ The launcher row is `recomp-ui`'s `GameInfo.edition_label`/`edition_note` and `S
 
 Checked (2026-10-27): the v0.7 release patch on the unmodified ROM gives the v0.7 ROM (`b8b1db5c...`),
 and the build's patch gives the Expanded build's ROM exactly (`b2fcf750...`); any other ROM is refused.
+
+Checked (2026-10-28): the build's patch (mod 521e3b8: Two Towers skills for every Two Towers hero,
+the Legacy Skills option) on the unmodified ROM gives the Expanded build's ROM exactly (`ae01d10a...`).

@@ -1,6 +1,6 @@
 # Smooth motion (launcher feature "Smooth motion (60 fps)", src/smooth_motion.cpp)
 
-Off by default. The game ticks once every 2 vblanks (30 Hz), so every second frame repeats. On the
+On by default. The game ticks once every 2 vblanks (30 Hz), so every second frame repeats. On the
 repeated vblank this draws the halfway point between the tick on screen and the next one. It is
 presentation only: guest memory, timing and saves are untouched, and the real tick frames are
 pixel-identical to the original.

@@ -148,7 +148,7 @@ id = "smooth-motion"
 name = "Smooth motion (60 fps)"
 description = "The game updates 30 times a second. This draws a halfway frame in between, so scrolling and movement look like 60 fps. Gameplay is unchanged. Works best with CPU boost."
 group = "Display"
-default_enabled = false
+default_enabled = true
 
 [[option]]
 feature = "smooth-motion"
@@ -281,7 +281,7 @@ id = "transparency"
 name = "Real transparency"
 description = "Draws see-through effects such as water and ice reflections as real transparency instead of the GBA's every-other-frame flicker."
 group = "Display"
-default_enabled = false
+default_enabled = true
 
 [[option]]
 feature = "transparency"
@@ -308,7 +308,7 @@ id = "hd-icons"
 name = "HD skill icons"
 description = "Draws the custom skill icons from the original art at full resolution and in full color instead of the GBA's 32x24, 16-color version."
 group = "Display"
-default_enabled = false
+default_enabled = true
 
 [[option]]
 feature = "hd-icons"
@@ -316,7 +316,7 @@ id = "resolution"
 label = "Render resolution"
 description = "The internal resolution the HD art is drawn at, as a multiple of the GBA screen. Higher is sharper and costs more."
 type = "choice"
-default = "4"
+default = "6"
 
 [[option.choice]]
 value = "3"
@@ -3866,7 +3866,7 @@ id = "hd-audio"
 name = "HD audio"
 description = "Mixes the music and sound effects on the PC at 65 kHz instead of the GBA's 16 kHz 8-bit mix: clearer highs, no hiss."
 group = "Audio"
-default_enabled = false
+default_enabled = true
 
 [[option]]
 feature = "hd-audio"

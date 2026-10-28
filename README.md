@@ -23,6 +23,23 @@ The game opens a launcher first (GBARecomp's recomp-ui). Its **Mods** page lists
 of them off the game runs exactly like the original. Environment variables override the launcher for
 tests and scripts. Headless runs (`--frames`, `--no-window`, `--tcp`) skip the launcher.
 
+## Expanded and The Two Towers
+
+The launcher's front page has an **Expanded** checkbox: on, Play patches your unmodified `rotk.gba`
+into the Expanded mod (a copy beside it; the original is never changed) and plays that
+([docs/EXPANDED_EDITION.md](docs/EXPANDED_EDITION.md)).
+
+The Expanded edition can also use *The Two Towers* (GBA, USA/Europe). Put your Two Towers ROM, and its
+`.sav` if you want your heroes, in the same folder as your `rotk.gba`. Then:
+
+- **Import a Two Towers hero:** on the Load Game menu, press L on an empty slot. The hero arrives with
+  their level, items (with their Two Towers names, stats and icons) and skill levels.
+- **Skill page 3, The Two Towers:** Frodo, Legolas, Aragorn, Gandalf, Eowyn and Gimli get their Two
+  Towers skills, bought with skill points by The Two Towers' rules. Imported heroes keep their levels.
+  Work in progress: every hero has their passives; so far only Gandalf has his actives, two of
+  them still ROTK stand-ins.
+- **Mod Options > Two Towers > Legacy Skills** turns the skills and the page off.
+
 ## What is already different from a GBA
 
 - 64 MiB of extra RAM at `0x12000000` (`GBARECOMP_HOST_RAM_MB`), and the game heap lives there (32 MiB by
@@ -38,8 +55,8 @@ tests and scripts. Headless runs (`--frames`, `--no-window`, `--tcp`) skip the l
   and in-game dialogue stays wide; menus and cutscenes keep their width with black bars. See
   [docs/WIDESCREEN.md](docs/WIDESCREEN.md).
 - With these at their stock values the game renders exactly like the original (same frame hashes).
-- HD audio: the game's mixer runs on the PC at 65 kHz in float, off by default ([docs/AUDIO.md](docs/AUDIO.md)). Sound is now stereo, as on the GBA.
-- Smooth motion: halfway frames between the game's 30 Hz ticks, off by default ([docs/SMOOTH_MOTION.md](docs/SMOOTH_MOTION.md)).
+- HD audio: the game's mixer runs on the PC at 65 kHz in float, on by default ([docs/AUDIO.md](docs/AUDIO.md)). Sound is now stereo, as on the GBA.
+- Smooth motion: halfway frames between the game's 30 Hz ticks, on by default ([docs/SMOOTH_MOTION.md](docs/SMOOTH_MOTION.md)).
 - Details and measurements: [docs/ENGINE_LIMITS.md](docs/ENGINE_LIMITS.md), [STATUS.md](STATUS.md).
   Current frame-time measurements, compiler repairs and remaining workload limits: [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
   Next steps: [docs/ROADMAP.md](docs/ROADMAP.md).
