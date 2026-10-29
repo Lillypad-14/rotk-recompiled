@@ -205,7 +205,13 @@ Ported (rotk `hacks/patches/legacy_skills/legacy_skills.c`, art via `kSprites` i
 do not rotate). Fireworks flies its 30 ticks in open ground and is gone without a blast at a wall
 (the map edge, x 17, in the earlier test); The Two Towers' rocket also has tile collision. Both
 projectiles hit foes in the arena (below).
-Still stand-ins: Summon Eagle (0x08017AD4 + 0x080180CC), Thunderstrike (0x0801E658). Then
+Thunderstrike (2026-10-29): a storm on Gandalf (unseen, radius 80) strikes a random foe in reach
+every 4 ticks, 5 + level / 3 times, for 20 + 2 per level; each strike is a bolt (0x08052690, palette
+0x08CC439C) that hits when its animation ends; the storm ends when no foe is in reach. Arena,
+level 5, the dummy alone: 6 hits, 84 damage. Still a stand-in: Summon Eagle (0x08017AD4 + 0x080180CC;
+an eagle that waits up to 15 ticks for a foe within 75 pixels, then swoops in from 160 pixels off at
+speed 5, states 0x25..0x28 in its tick 0x08017C64). Its ROTK stand-in (Gwaihir) outlives the arena's
+clear and adds hits to the next row. Then
 Gandalf's passives exact (Flame of Anor's revive burst is Sunburst's second branch, skill 3 level),
 then the other heroes. Sounds and cast poses are ROTK stand-ins throughout.
 
@@ -234,7 +240,9 @@ Lessons:
   and prints hits, kills and damage per row from the arena's `ARENA_ROW` debug lines
   (`patches/debug-print.patch` prints mGBA debug output). Gandalf, level 5, three archers: Zap 1
   hit / 6 damage, Fireworks 1 / 6, the Eagle and Thunderstrike stand-ins 2 / 30 and 3 / 37. So
-  both projectiles hit; 6 is below Zap's 5 + 2 x 5 (ROTK's ranged hit applies armor?).
+  both projectiles hit; 6 is Zap's 15 less the archer's armor, as in The Two Towers (0x0800D84C
+  subtracts the foe type's armor too; ROTK also adds Gandalf's Wisdom). `--reconfigure` changes
+  the hero, fixture, level or rows of the prepared arena in under a minute.
 - Testing, older: `ROTK_PC_STRESS_SPAWN=N` spawns foes; the debug cheats byte is save offset 0x2DAD (3 =
   max level and infinite skill points); legacy records start at 0x5FAC; the save `allskills.sav` (scratch) has all of
   Gandalf's actives at level 2; actor pool and player state are read from `final.gbas` (host RAM

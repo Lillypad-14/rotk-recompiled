@@ -488,6 +488,8 @@ constexpr SpriteSource kSprites[] = {
     // Gandalf's Fireworks: the rocket by facing (down .. up) and its explosion
     {0x08328208u, 0x08CC1338u, 1}, {0x08328210u, 0x08CC1338u, 1}, {0x08328218u, 0x08CC1338u, 1},
     {0x08328220u, 0x08CC1338u, 1}, {0x08328228u, 0x08CC1338u, 1}, {0x08328230u, 0x08CC1338u, 1},
+    // Gandalf's Thunderstrike: the bolt that falls on a foe
+    {0x08052690u, 0x08CC439Cu},
 };
 constexpr std::uint32_t kFrameHeadSize = 6;          // Two Towers: flags, pad, width, height, tile offset
 constexpr std::uint32_t kRotkFrameHeadSize = 8;      // ROTK adds the frame's tile bytes

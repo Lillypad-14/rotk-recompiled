@@ -11,16 +11,24 @@ the rows. A Two Towers hero's legacy rows start at 13; --legacy-level sets every
 
 usage: python tools/arena.py --rom <arena .gba> --elf <arena .elf> --decomp <mod checkout>
            [--hero 3] [--ticks 90] [--fixture 0] [--legacy-level 5] [--first-row 13]
-           [--two-towers <TTT ROM>] [--frames 20000] [--skip-build]
+           [--two-towers <TTT ROM>] [--frames 20000] [--skip-build | --reconfigure]
+
+--reconfigure changes only the sweep settings of the arena already prepared (they are ROM data,
+so the recompiled code stays): it patches the prepared ROM, updates its hash and rebuilds the host,
+a minute instead of a full prepare.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
+import re
 import struct
 import subprocess
 import sys
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,13 +54,16 @@ def config_offset(elf: Path, nm: str) -> int:
 
 def patched_rom(args: argparse.Namespace) -> Path:
     rom = bytearray(args.rom.read_bytes())
+    return write_config(args, rom, ROOT / ".private/arena-sweep.gba")
+
+
+def write_config(args: argparse.Namespace, rom: bytearray, out: Path) -> Path:
     offset = config_offset(args.elf, args.nm)
     words = struct.unpack_from(f"<{CONFIG_WORDS}I", rom, offset)
-    if words[1:] != (0,) * (CONFIG_WORDS - 1):
+    if words[1:] != (0,) * (CONFIG_WORDS - 1) and out.parent != ROOT / ".private/arena":
         raise SystemExit("the arena ROM's config is not the build's default; pass the unpatched ROM")
     struct.pack_into(f"<{CONFIG_WORDS}I", rom, offset, args.hero, args.ticks, args.fixture, 0, 0, 0,
                      args.legacy_level, args.first_row)
-    out = ROOT / ".private/arena-sweep.gba"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(bytes(rom))
     # Same build as the ELF: keep its time, so lab.py's ELF-older-than-ROM check holds.
@@ -75,9 +86,25 @@ def main() -> None:
     parser.add_argument("--frames", type=int, default=20000)
     parser.add_argument("--nm", default="arm-none-eabi-nm")
     parser.add_argument("--skip-build", action="store_true", help="run the arena build as it is")
+    parser.add_argument("--reconfigure", action="store_true",
+                        help="new sweep settings for the prepared arena: patch its ROM, rebuild the host")
     args = parser.parse_args()
 
-    if not args.skip_build:
+    if args.reconfigure:
+        private = ROOT / ".private/arena"
+        rom = bytearray((private / "rotk.gba").read_bytes())
+        write_config(args, rom, private / "rotk.gba")
+        sha1, crc32 = hashlib.sha1(rom).hexdigest(), f"0x{zlib.crc32(rom) & 0xFFFFFFFF:08x}"
+        game = (private / "game.toml").read_text()
+        game = re.sub(r'(\[rom\][^\[]*?sha1 = ")[0-9a-f]+', lambda m: m.group(1) + sha1, game, flags=re.S)
+        game = re.sub(r'crc32 = "0x[0-9a-f]+"', f'crc32 = "{crc32}"', game)
+        (private / "game.toml").write_text(game)
+        provenance = json.loads((private / "provenance.json").read_text())
+        provenance.update(rom_sha1=sha1, rom_crc32=crc32)
+        (private / "provenance.json").write_text(json.dumps(provenance, indent=2))
+        subprocess.run([sys.executable, str(ROOT / "tools/lab.py"), "build", "--target", "arena",
+                        "--decomp", str(args.decomp)], check=True)
+    elif not args.skip_build:
         rom = patched_rom(args)
         for command in ("prepare", "build"):
             subprocess.run([sys.executable, str(ROOT / "tools/lab.py"), command, "--target", "arena",
