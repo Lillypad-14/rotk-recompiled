@@ -36,6 +36,7 @@ FRAMEWORK_PATCHES = [
     ROOT / "patches/hd-icons.patch",
     ROOT / "patches/local-link.patch",
     ROOT / "patches/controls.patch",
+    ROOT / "patches/debug-print.patch",
 ]
 
 # recomp-ui (launcher) patches, applied the same way to external/recomp-ui.
@@ -71,6 +72,9 @@ TARGETS = {
     "expanded": Target("expanded", "ROTK Recompiled Expanded", ROOT / ".private/expanded",
                        ROOT / "build/expanded/generated", ROOT / "build/host-expanded",
                        "ROTK-Recompiled-Expanded", "sram", 19853),
+    # The mod's direct-boot test arena as a PC edition (tools/arena.py), apart from the Expanded build.
+    "arena": Target("arena", "ROTK Test Arena", ROOT / ".private/arena", ROOT / "build/arena/generated",
+                    ROOT / "build/host-arena", "RotkArena", "sram", 19854),
 }
 
 
@@ -201,7 +205,7 @@ def prepare(args: argparse.Namespace) -> None:
     rom_copy = target.private / "rotk.gba"
     rom_copy.write_bytes(rom_bytes)
     shutil.copyfile(args.bios, target.private / "gba_bios.bin")
-    if target.name == "expanded":
+    if target.name != "stock":
         config = expanded_config(target, sha1)
     symbol_file = target.private / "functions.tsv"
     write_symbols(symbol_file, symbols)

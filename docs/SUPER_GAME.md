@@ -203,8 +203,8 @@ its sound matched. About 36 actives and 30 passives.
 Ported (rotk `hacks/patches/legacy_skills/legacy_skills.c`, art via `kSprites` in
 `src/two_towers.cpp`): Gandalf's Zap, Magical Healing, Shield, Sunburst (no rays yet: ROTK sprites
 do not rotate). Fireworks flies its 30 ticks in open ground and is gone without a blast at a wall
-(the map edge, x 17, in the earlier test); The Two Towers' rocket also has tile collision. A hit on
-a foe is not verified yet: in the stress-spawn test the aimed rocket (and Zap) flew past the foes.
+(the map edge, x 17, in the earlier test); The Two Towers' rocket also has tile collision. Both
+projectiles hit foes in the arena (below).
 Still stand-ins: Summon Eagle (0x08017AD4 + 0x080180CC), Thunderstrike (0x0801E658). Then
 Gandalf's passives exact (Flame of Anor's revive burst is Sunburst's second branch, skill 3 level),
 then the other heroes. Sounds and cast poses are ROTK stand-ins throughout.
@@ -227,7 +227,15 @@ Lessons:
 - Effects tick at 30 Hz; Two Towers counts the same ticks.
 - Two Towers sprite frames: 6-byte head, hotspots, 8-byte trigger boxes, 12-byte pieces; some
   animations are 8-byte records (tiles, frames) bound without a duration.
-- Testing: `ROTK_PC_STRESS_SPAWN=N` spawns foes; the debug cheats byte is save offset 0x2DAD (3 =
+- Testing, the arena (2026-10-29): `tools/arena.py` builds the mod's test arena as a PC edition
+  (rotk `make hack HACKS="@cfg test_arena" PC_EDITION=1 ARENA_HERO=3 HACK_OUT=build/test_arena_pc.gba`,
+  then copy `build/hack.elf` beside it), patches it to sweep the legacy rows (13 on) with every Two
+  Towers skill at `--legacy-level`, runs it headless in the `arena` target with The Two Towers ROM
+  and prints hits, kills and damage per row from the arena's `ARENA_ROW` debug lines
+  (`patches/debug-print.patch` prints mGBA debug output). Gandalf, level 5, three archers: Zap 1
+  hit / 6 damage, Fireworks 1 / 6, the Eagle and Thunderstrike stand-ins 2 / 30 and 3 / 37. So
+  both projectiles hit; 6 is below Zap's 5 + 2 x 5 (ROTK's ranged hit applies armor?).
+- Testing, older: `ROTK_PC_STRESS_SPAWN=N` spawns foes; the debug cheats byte is save offset 0x2DAD (3 =
   max level and infinite skill points); legacy records start at 0x5FAC; the save `allskills.sav` (scratch) has all of
   Gandalf's actives at level 2; actor pool and player state are read from `final.gbas` (host RAM
   at the "RPC1" tag, IWRAM player at offset 0x400FC + 0x3C00).

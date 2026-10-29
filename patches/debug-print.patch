@@ -1,0 +1,68 @@
+diff --git a/src/gba/gba_bus.cpp b/src/gba/gba_bus.cpp
+index c72b87b..2481b61 100644
+--- a/src/gba/gba_bus.cpp
++++ b/src/gba/gba_bus.cpp
+@@ -176,6 +176,24 @@ void GbaBus::note_io_write(uint32_t off, uint8_t width) {
+     waits_apply_waitcnt(*waits_, masked);
+ }
+ 
++bool GbaBus::debug_print_write(uint32_t off, uint32_t value, uint8_t width) {
++    constexpr uint32_t kText = 0xFFF600u, kFlags = 0xFFF700u, kEnable = 0xFFF780u;
++    constexpr uint32_t kSend = 0x100u;
++    if (off >= kText && off < kFlags) {
++        for (uint8_t i = 0; i < width && off - kText + i < 256u; ++i)
++            debug_text_[off - kText + i] = static_cast<char>(value >> (8 * i));
++        return true;
++    }
++    if (off == kFlags) {
++        if (value & kSend) {
++            std::fprintf(stderr, "[gba:debug] %s\n", debug_text_);
++            std::memset(debug_text_, 0, sizeof(debug_text_));
++        }
++        return true;
++    }
++    return off == kEnable;
++}
++
+ namespace {
+ 
+ // Helper: read a little-endian halfword/word from a byte buffer at
+@@ -512,6 +530,7 @@ void GbaBus::write8(uint32_t addr, uint8_t v) {
+                 memctl_write(static_cast<uint32_t>(off), v, 1);
+                 return;
+             }
++            if (off >= 0xFFF600u && debug_print_write(static_cast<uint32_t>(off), v, 1)) return;
+             io_dispatch_.write8(static_cast<uint32_t>(off), v);
+             note_io_write(static_cast<uint32_t>(off), 1);
+             return;
+@@ -574,6 +593,7 @@ void GbaBus::write16(uint32_t addr, uint16_t v) {
+                 memctl_write(static_cast<uint32_t>(off), v, 2);
+                 return;
+             }
++            if (off >= 0xFFF600u && debug_print_write(static_cast<uint32_t>(off), v, 2)) return;
+             io_dispatch_.write16(static_cast<uint32_t>(off), v);
+             note_io_write(static_cast<uint32_t>(off), 2);
+             return;
+@@ -665,6 +685,7 @@ void GbaBus::write32(uint32_t addr, uint32_t v) {
+                 memctl_write(static_cast<uint32_t>(off), v, 4);
+                 return;
+             }
++            if (off >= 0xFFF600u && debug_print_write(static_cast<uint32_t>(off), v, 4)) return;
+             io_dispatch_.write32(static_cast<uint32_t>(off), v);
+             note_io_write(static_cast<uint32_t>(off), 4);
+             return;
+diff --git a/src/gba/gba_bus.h b/src/gba/gba_bus.h
+index ae58e39..c85dc21 100644
+--- a/src/gba/gba_bus.h
++++ b/src/gba/gba_bus.h
+@@ -315,6 +315,10 @@ private:
+     uint32_t memctl_read(uint32_t off, uint8_t width) const;
+     void memctl_write(uint32_t off, uint32_t value, uint8_t width);
+     void note_io_write(uint32_t off, uint8_t width);
++    // mGBA's debug output (text at 0x04FFF600, a send flag at 0x04FFF700): homebrew and mods
++    // print through it; a sent line goes to stderr. True when `off` was one of its registers.
++    bool debug_print_write(uint32_t off, uint32_t value, uint8_t width);
++    char debug_text_[257] = {};
+ 
+     std::array<uint8_t, 256 * 1024> ewram_{};
+     std::array<uint8_t,  32 * 1024> iwram_{};
