@@ -271,8 +271,13 @@ with The Two Towers' bonus as the stored damage (ROTK adds it to the melee hit i
   for 150 + 15 per level ticks), Princess of Rohan (4 Spirit flat, stun 30 + 6 per level), Shield
   Bash (8 Spirit, 5 + 1 per level, needs a shield as in ROTK), Double Strike (7 Spirit, +4 + 1 per
   level). Stand-in: Call Eomer is ROTK's Forth Eorlingas.
-- Frodo: Hobbit Appetite (25 + 5 per level), Knife Throw (2 Spirit, a plain melee hit). Stand-ins:
-  The One Ring and Snare are ROTK's. Not yet: Escape, Charge.
+- Frodo: Hobbit Appetite (25 + 5 per level), Knife Throw (2 Spirit, a plain melee hit), Escape (3
+  Spirit, Frodo rolls 13 ticks along his facing at his move speed, stopping at a wall, while a stun on
+  him stuns every foe it touches for 30 + 6 per level), Charge (4 Spirit, the same run, attacking the
+  first foe he reaches, +2 damage per level from the description, not found in the code). The cast
+  pose holds the hero still, so the run steps Frodo itself (`hackLib_canLandAt`). His non-throw casts
+  take Knife Toss's pose: Galadriel's Cloak's waits for the cloak to end it. Stand-ins: The One Ring
+  and Snare are ROTK's (Snare without ROTK's limit, which reads its own row's level).
 - Thrown weapons draw in their thrower's palette (the hero palettes at 0x0832B248 + (hero + 0x33) *
   4), not the trail lights' 0x08CA78B4.
 
