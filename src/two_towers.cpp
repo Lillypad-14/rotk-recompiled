@@ -166,6 +166,29 @@ void putPointer(std::uint32_t offset, std::uint32_t target)
 // A Two Towers sprite tile stream. The commands match ROTK's decompress_lz77 but carry no length
 // bias: 00 n:6 literal n bytes, 01 n:6 byte run of n, 1 d:7 d:3 n:5 copy n bytes from d back, with
 // n = 0 a run of d + 64 of the next byte. A copy from before the start reads zeros.
+// The GBA BIOS run-length format (RLUnComp), which Two Towers frames flagged kFrameRl use: a
+// header word (size << 8), then runs (flag bit 7: (flag & 0x7F) + 3 copies of one byte) and
+// literals ((flag & 0x7F) + 1 bytes).
+std::vector<std::uint8_t> decompressRunLength(const std::vector<std::uint8_t>& rom, std::uint32_t address)
+{
+    std::uint32_t p = address - kRomBase;
+    const std::uint32_t size = std::min<std::uint32_t>(read32(rom, address) >> 8, 0x4000);
+    std::vector<std::uint8_t> out;
+    p += 4;
+    while (out.size() < size && p < rom.size()) {
+        const std::uint8_t flag = rom[p++];
+        if (flag & 0x80) {
+            out.insert(out.end(), (flag & 0x7Fu) + 3u, rom[p++]);
+        } else {
+            const std::uint32_t count = (flag & 0x7Fu) + 1u;
+            out.insert(out.end(), rom.begin() + p, rom.begin() + p + count);
+            p += count;
+        }
+    }
+    out.resize(size);
+    return out;
+}
+
 std::vector<std::uint8_t> decompressTiles(const std::vector<std::uint8_t>& rom, std::uint32_t address)
 {
     std::vector<std::uint8_t> out;
@@ -529,6 +552,42 @@ constexpr SpriteSource kSprites[] = {
     {0x0804FF7Cu, 0x08CBE8BCu}, {0x0804FF8Cu, 0x08CBE8BCu}, {0x0804FF9Cu, 0x08CBE8BCu},
     // Eowyn's Princess of Rohan
     {0x0804FFACu, 0x08CBF0E4u},
+    // The summoning star of the allies, in the trail lights' palette
+    {0x08057E50u, 0x08CA78B4u},
+    // Legolas (Call Legolas): walking, standing and attacking by facing (up .. down), then his bow
+    // drawn over him; the bow shows his frame, so it never steps on its own
+    {0x08328B34u, 0x08A33664u, 1}, {0x08328B3Cu, 0x08A33664u, 1}, {0x08328B44u, 0x08A33664u, 1},
+    {0x08328B4Cu, 0x08A33664u, 1}, {0x08328B54u, 0x08A33664u, 1},
+    {0x08328B84u, 0x08A33664u, 3}, {0x08328B8Cu, 0x08A33664u, 3}, {0x08328B94u, 0x08A33664u, 3},
+    {0x08328B9Cu, 0x08A33664u, 3}, {0x08328BA4u, 0x08A33664u, 3},
+    {0x08328BACu, 0x08A33664u, 1}, {0x08328BB4u, 0x08A33664u, 1}, {0x08328BBCu, 0x08A33664u, 1},
+    {0x08328BC4u, 0x08A33664u, 1}, {0x08328BCCu, 0x08A33664u, 1},
+    {0x0832FD08u, 0x08A33664u, 255}, {0x0832FD10u, 0x08A33664u, 255}, {0x0832FD18u, 0x08A33664u, 255},
+    {0x0832FD20u, 0x08A33664u, 255}, {0x0832FD28u, 0x08A33664u, 255},
+    {0x0832FD58u, 0x08A33664u, 255}, {0x0832FD60u, 0x08A33664u, 255}, {0x0832FD68u, 0x08A33664u, 255},
+    {0x0832FD70u, 0x08A33664u, 255}, {0x0832FD78u, 0x08A33664u, 255},
+    {0x0832FD80u, 0x08A33664u, 255}, {0x0832FD88u, 0x08A33664u, 255}, {0x0832FD90u, 0x08A33664u, 255},
+    {0x0832FD98u, 0x08A33664u, 255}, {0x0832FDA0u, 0x08A33664u, 255},
+    // Gimli (Summon Gimli), then his axe
+    {0x08328F6Cu, 0x0898A874u, 1}, {0x08328F74u, 0x0898A874u, 1}, {0x08328F7Cu, 0x0898A874u, 1},
+    {0x08328F84u, 0x0898A874u, 1}, {0x08328F8Cu, 0x0898A874u, 1},
+    {0x08328FBCu, 0x0898A874u, 3}, {0x08328FC4u, 0x0898A874u, 3}, {0x08328FCCu, 0x0898A874u, 3},
+    {0x08328FD4u, 0x0898A874u, 3}, {0x08328FDCu, 0x0898A874u, 3},
+    {0x08328FE4u, 0x0898A874u, 1}, {0x08328FECu, 0x0898A874u, 1}, {0x08328FF4u, 0x0898A874u, 1},
+    {0x08328FFCu, 0x0898A874u, 1}, {0x08329004u, 0x0898A874u, 1},
+    {0x08330938u, 0x0898A874u, 255}, {0x08330940u, 0x0898A874u, 255}, {0x08330948u, 0x0898A874u, 255},
+    {0x08330950u, 0x0898A874u, 255}, {0x08330958u, 0x0898A874u, 255},
+    {0x08330988u, 0x0898A874u, 255}, {0x08330990u, 0x0898A874u, 255}, {0x08330998u, 0x0898A874u, 255},
+    {0x083309A0u, 0x0898A874u, 255}, {0x083309A8u, 0x0898A874u, 255},
+    {0x083309B0u, 0x0898A874u, 255}, {0x083309B8u, 0x0898A874u, 255}, {0x083309C0u, 0x0898A874u, 255},
+    {0x083309C8u, 0x0898A874u, 255}, {0x083309D0u, 0x0898A874u, 255},
+    // Eomer's soldier (Call Eomer)
+    {0x0832A2C8u, 0x08B39268u, 1}, {0x0832A2D0u, 0x08B39268u, 1}, {0x0832A2D8u, 0x08B39268u, 1},
+    {0x0832A2E0u, 0x08B39268u, 1}, {0x0832A2E8u, 0x08B39268u, 1},
+    {0x0832A2A0u, 0x08B39268u, 3}, {0x0832A2A8u, 0x08B39268u, 3}, {0x0832A2B0u, 0x08B39268u, 3},
+    {0x0832A2B8u, 0x08B39268u, 3}, {0x0832A2C0u, 0x08B39268u, 3},
+    {0x0832A2F0u, 0x08B39268u, 1}, {0x0832A2F8u, 0x08B39268u, 1}, {0x0832A300u, 0x08B39268u, 1},
+    {0x0832A308u, 0x08B39268u, 1}, {0x0832A310u, 0x08B39268u, 1},
 };
 constexpr std::uint32_t kFrameHeadSize = 6;          // Two Towers: flags, pad, width, height, tile offset
 constexpr std::uint32_t kRotkFrameHeadSize = 8;      // ROTK adds the frame's tile bytes
@@ -566,8 +625,10 @@ Sprite convertSprite(const std::vector<std::uint8_t>& rom, std::uint32_t animati
             bytes = std::max(bytes, read32(rom, piece + 8) + rom[piece + 6 - kRomBase] * rom[piece + 7 - kRomBase] / 2u);
         }
         const std::uint32_t source = tileBase + read16(rom, frame + 4);
-        std::vector<std::uint8_t> tiles = (flags & kFrameLz77) ? decompressTiles(rom, source)
-                                                               : std::vector<std::uint8_t>(rom.begin() + (source - kRomBase), rom.begin() + (source - kRomBase) + bytes);
+        // RL wins when both bits are set, as in the engine's sprite_getFrameCompression
+        std::vector<std::uint8_t> tiles = (flags & kFrameRl)     ? decompressRunLength(rom, source)
+                                          : (flags & kFrameLz77) ? decompressTiles(rom, source)
+                                                                 : std::vector<std::uint8_t>(rom.begin() + (source - kRomBase), rom.begin() + (source - kRomBase) + bytes);
         tiles.resize(bytes, 0);
         const std::uint32_t tileOffset = static_cast<std::uint32_t>(sprite.tiles.size());
         sprite.tiles.insert(sprite.tiles.end(), tiles.begin(), tiles.end());

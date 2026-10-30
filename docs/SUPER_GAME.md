@@ -263,20 +263,32 @@ with The Two Towers' bonus as the stored damage (ROTK adds it to the melee hit i
   call on Legolas that on its first tick sends a hawk at each of the first 2 + level / 2 foes within
   75 pixels; a hawk comes in from 160 pixels left or right of Legolas at a random height within 60,
   flies at its foe at speed 5 over walls, stuns it for 30 + 6 per level, no damage, as the code
-  (the description says injure), and flies off the screen; "Outdoors only": The Two Towers' cast does not check it either; the
-  hawk places itself on its first tick, as one moved in the call's trigger callback ends up
-  elsewhere). Suppress (3 Spirit, the arrow hits the first foe with Legolas's attack;
+  (the description says injure), and flies off the screen; "Outdoors only": The Two Towers' cast does not check it either; the hawk
+  places itself on its first tick, past the spawner's stale position, see `legacyFx_place`). Suppress (3 Spirit, the arrow hits the first foe with Legolas's attack;
   where it hits, a 35 pixel knock (0x080274E4) knocks each foe back along the arrow for 15 ticks on a
-  roll of 0..100 at most 25 + 3 per level). Not yet: Overdraw (cast, then hold A to charge, an aimed
-  arrow on release), Summon Gimli.
+  roll of 0..100 at most 25 + 3 per level), Summon Gimli (25 Spirit, Gimli with his axe for 300 + 60
+  per level ticks, see the summoned allies below). Not yet: Overdraw (cast, then hold A to charge,
+  an aimed arrow on release; Expanded's page 2 already has a hold-to-draw Overdraw to build on).
 - Aragorn: Herbal Remedy (25 + 5 per level), Commanding Presence (7 Spirit, stun 30 + 6 per level on
   its first tick), Rage of the North (10 Spirit, 3 corruption per level, 450 ticks of +20% speed and
   +2 damage per level), Sword Throw (4 Spirit, a plain melee hit, no level bonus), Sweep (8 Spirit,
-  +1 per level). Not yet: Call Legolas.
+  +1 per level), Call Legolas (24 Spirit, Legolas with his bow for 300 + 60 per level ticks).
 - Eowyn: Herbal Remedy, Defending Fury (10 Spirit, 3 corruption per level, +10 Defense +2 per level
   for 150 + 15 per level ticks), Princess of Rohan (4 Spirit flat, stun 30 + 6 per level), Shield
   Bash (8 Spirit, 5 + 1 per level, needs a shield as in ROTK), Double Strike (7 Spirit, +4 + 1 per
-  level). Stand-in: Call Eomer is ROTK's Forth Eorlingas.
+  level), Call Eomer (22 Spirit, one of Eomer's soldiers with his sword for 300 + 30 per level ticks).
+- Summoned allies (rotk `legacy_ally.c`, Two Towers 0x0803E110 the star, 0x0802EE54 the ally, its tick
+  0x0802F0E4 and AI 0x0800638C), arena-tested at level 5 against three archers, 2026-10-30: a
+  summoning star (0x08057E50, trail lights' palette) 20 pixels left of the hero brings the ally in
+  on its 4th frame. With no target it wanders 10 ticks in a random direction and stands 8; it takes
+  the first foe within 200 pixels, walks at it at 2.5 pixels a tick (20 ticks sideways past a wall)
+  and attacks within 70 pixels (Legolas: an arrow at speed 7.5 nine ticks into his draw) or 35 (Gimli:
+  his axe overlay's hit box, the soldier: his sword's box 1, on the swing's hit frame). Hits are
+  ROTK's `combat_resolveNonPlayerAttackOnEnemy` with level + 50 accuracy and level + 10 damage, the
+  hero getting kill credit. Foes can't hurt it, and it leaves in another star. One ally per player.
+  Body and weapon are separate Two Towers sprites, the weapon showing the body's frame; the ally
+  has its own palette slot (`hackLib_fxUsePalette`). Arena: Legolas 14 hits of 27 arrows, Gimli 17
+  of 25 swings, the soldier 11 of 25.
 - Frodo: Hobbit Appetite (25 + 5 per level), Knife Throw (2 Spirit, a plain melee hit), Escape (3
   Spirit, Frodo rolls 13 ticks along his facing at his move speed, stopping at a wall, while a stun on
   him stuns every foe it touches for 30 + 6 per level), Charge (4 Spirit, the same run, attacking the
@@ -314,8 +326,17 @@ Lessons:
 - A Two Towers player stat k sits at player +0x3C + 2 * k (k as the item stat text 271 + k: 0
   damage, 13 melee armor, 24 max HP, 26 crit, 27 speed, 38 parry). Two Towers mirrors effect art
   for the western facings (`legacyFx_faceSprite`).
-- Two Towers sprite frames: 6-byte head, hotspots, 8-byte trigger boxes, 12-byte pieces; some
-  animations are 8-byte records (tiles, frames) bound without a duration.
+- Two Towers sprite frames: 6-byte head, hotspots, 8-byte trigger boxes (signed bytes: x min, x max,
+  y min, y max, flags), 12-byte pieces; some animations are 8-byte records (tiles, frames) bound
+  without a duration. Frame tiles are raw, Two Towers LZ77 (flag 0x40) or the BIOS run-length format
+  (flag 0x20, `decompressRunLength`); character animations use all three.
+- Place a fresh effect with `legacyFx_place`: the spawner leaves a stale spawn position in
+  `Actor.as` + 0x20 and the effect jumps there before its first tick (the Forest Friend hawks, the
+  allies).
+- A spawned effect with tile collision ends at a wall; an effect that should stop there instead
+  checks `hackLib_canLandAt` itself.
+- All effects share OBJ palette bank 2; anything long-lived takes its own slot
+  (`hackLib_fxUsePalette`).
 - Testing, the arena (2026-10-29): `tools/arena.py` builds the mod's test arena as a PC edition
   (rotk `make hack HACKS="@cfg test_arena" PC_EDITION=1 ARENA_HERO=3 HACK_OUT=build/test_arena_pc.gba`,
   then copy `build/hack.elf` beside it), patches it to sweep the legacy rows (13 on) with every Two
