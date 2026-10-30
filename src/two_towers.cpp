@@ -507,6 +507,12 @@ constexpr SpriteSource kSprites[] = {
     // Legolas's Suppress: the arrow by facing (up .. down), and the knock where it hits (slot 7)
     {0x083299B0u, 0x08E65320u, 1}, {0x083299B8u, 0x08E65320u, 1}, {0x083299C0u, 0x08E65320u, 1},
     {0x083299C8u, 0x08E65320u, 1}, {0x083299D0u, 0x08E65320u, 1}, {0x08052660u, 0x08CA82ACu},
+    // Legolas's Forest Friend: the call, and a hawk flying and striking by facing (up .. down)
+    {0x08052600u, 0x08340650u},
+    {0x0832E9FCu, 0x08340650u, 1}, {0x0832EA04u, 0x08340650u, 1}, {0x0832EA0Cu, 0x08340650u, 1},
+    {0x0832EA14u, 0x08340650u, 1}, {0x0832EA1Cu, 0x08340650u, 1},
+    {0x0832E9D4u, 0x08340650u, 1}, {0x0832E9DCu, 0x08340650u, 1}, {0x0832E9E4u, 0x08340650u, 1},
+    {0x0832E9ECu, 0x08340650u, 1}, {0x0832E9F4u, 0x08340650u, 1},
     // Aragorn's Sword Throw: the sword by facing (up .. down), in Aragorn's palette
     {0x08327C64u, 0x083DB784u, 1}, {0x08327C6Cu, 0x083DB784u, 1}, {0x08327C74u, 0x083DB784u, 1},
     {0x08327C7Cu, 0x083DB784u, 1}, {0x08327C84u, 0x083DB784u, 1},

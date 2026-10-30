@@ -259,8 +259,13 @@ with The Two Towers' bonus as the stored damage (ROTK adds it to the melee hit i
 - Legolas: Spread Fire (9 Spirit, 2 + level / 4 arrows up to 7 fanned at the angles -2, 2, 0, -4,
   4, -1, 1 of 32-way steps, speed 7.5, 21 ticks, each hits the first foe with Legolas's attack at +1
   accuracy per level and is gone; the arrows' palette 0x08E65320 is unconfirmed), White Knives
-  (2 Spirit, ROTK's with no stored damage, no backpack knife needed). Stand-in: Forest Friend is
-  ROTK's Friend of Mirkwood. Suppress (3 Spirit, the arrow hits the first foe with Legolas's attack;
+  (2 Spirit, ROTK's with no stored damage, no backpack knife needed). Forest Friend (12 Spirit, a
+  call on Legolas that on its first tick sends a hawk at each of the first 2 + level / 2 foes within
+  75 pixels; a hawk comes in from 160 pixels left or right of Legolas at a random height within 60,
+  flies at its foe at speed 5 over walls, stuns it for 30 + 6 per level, no damage, as the code
+  (the description says injure), and flies off the screen; "Outdoors only": The Two Towers' cast does not check it either; the
+  hawk places itself on its first tick, as one moved in the call's trigger callback ends up
+  elsewhere). Suppress (3 Spirit, the arrow hits the first foe with Legolas's attack;
   where it hits, a 35 pixel knock (0x080274E4) knocks each foe back along the arrow for 15 ticks on a
   roll of 0..100 at most 25 + 3 per level). Not yet: Overdraw (cast, then hold A to charge, an aimed
   arrow on release), Summon Gimli.
