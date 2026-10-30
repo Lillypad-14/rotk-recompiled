@@ -260,9 +260,10 @@ with The Two Towers' bonus as the stored damage (ROTK adds it to the melee hit i
   4, -1, 1 of 32-way steps, speed 7.5, 21 ticks, each hits the first foe with Legolas's attack at +1
   accuracy per level and is gone; the arrows' palette 0x08E65320 is unconfirmed), White Knives
   (2 Spirit, ROTK's with no stored damage, no backpack knife needed). Stand-in: Forest Friend is
-  ROTK's Friend of Mirkwood. Not yet: Overdraw (cast, then hold A to charge, an aimed arrow on
-  release), Suppress (an arrow that bursts at its first foe, `actor_unknown08016958`'s match, its
-  knockback not found yet), Summon Gimli.
+  ROTK's Friend of Mirkwood. Suppress (3 Spirit, the arrow hits the first foe with Legolas's attack;
+  where it hits, a 35 pixel knock (0x080274E4) knocks each foe back along the arrow for 15 ticks on a
+  roll of 0..100 at most 25 + 3 per level). Not yet: Overdraw (cast, then hold A to charge, an aimed
+  arrow on release), Summon Gimli.
 - Aragorn: Herbal Remedy (25 + 5 per level), Commanding Presence (7 Spirit, stun 30 + 6 per level on
   its first tick), Rage of the North (10 Spirit, 3 corruption per level, 450 ticks of +20% speed and
   +2 damage per level), Sword Throw (4 Spirit, a plain melee hit, no level bonus), Sweep (8 Spirit,

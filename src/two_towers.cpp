@@ -504,6 +504,9 @@ constexpr SpriteSource kSprites[] = {
     // its palette table 0x0832B248)
     {0x08329960u, 0x08E65320u, 1}, {0x08329968u, 0x08E65320u, 1}, {0x08329970u, 0x08E65320u, 1},
     {0x08329978u, 0x08E65320u, 1}, {0x08329980u, 0x08E65320u, 1},
+    // Legolas's Suppress: the arrow by facing (up .. down), and the knock where it hits (slot 7)
+    {0x083299B0u, 0x08E65320u, 1}, {0x083299B8u, 0x08E65320u, 1}, {0x083299C0u, 0x08E65320u, 1},
+    {0x083299C8u, 0x08E65320u, 1}, {0x083299D0u, 0x08E65320u, 1}, {0x08052660u, 0x08CA82ACu},
     // Aragorn's Sword Throw: the sword by facing (up .. down), in Aragorn's palette
     {0x08327C64u, 0x083DB784u, 1}, {0x08327C6Cu, 0x083DB784u, 1}, {0x08327C74u, 0x083DB784u, 1},
     {0x08327C7Cu, 0x083DB784u, 1}, {0x08327C84u, 0x083DB784u, 1},
