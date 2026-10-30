@@ -552,6 +552,10 @@ constexpr SpriteSource kSprites[] = {
     {0x0804FF7Cu, 0x08CBE8BCu}, {0x0804FF8Cu, 0x08CBE8BCu}, {0x0804FF9Cu, 0x08CBE8BCu},
     // Eowyn's Princess of Rohan
     {0x0804FFACu, 0x08CBF0E4u},
+    // Frodo's Snare: the trap, and its shrapnel by facing (up .. down), in the trail lights' palette
+    {0x080500A8u, 0x08CA78B4u},
+    {0x0832EBD4u, 0x08CA78B4u, 1}, {0x0832EBDCu, 0x08CA78B4u, 1}, {0x0832EBE4u, 0x08CA78B4u, 1},
+    {0x0832EBECu, 0x08CA78B4u, 1}, {0x0832EBF4u, 0x08CA78B4u, 1},
     // Legolas's Overdraw: the glow's four stages, and the arrow by facing (up .. down)
     {0x08052610u, 0x08CCC5B8u}, {0x08052620u, 0x08CCC5D8u}, {0x08052630u, 0x08CCC5F8u}, {0x08052640u, 0x08CCC618u},
     {0x08329888u, 0x08E65320u, 1}, {0x08329890u, 0x08E65320u, 1}, {0x08329898u, 0x08E65320u, 1},

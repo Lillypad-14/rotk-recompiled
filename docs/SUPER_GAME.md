@@ -299,8 +299,14 @@ with The Two Towers' bonus as the stored damage (ROTK adds it to the melee hit i
   him stuns every foe it touches for 30 + 6 per level), Charge (4 Spirit, the same run, attacking the
   first foe he reaches, +2 damage per level from the description, not found in the code). The cast
   pose holds the hero still, so the run steps Frodo itself (`hackLib_canLandAt`). His non-throw casts
-  take Knife Toss's pose: Galadriel's Cloak's waits for the cloak to end it. Stand-ins: The One Ring
-  and Snare are ROTK's (Snare without ROTK's limit, which reads its own row's level).
+  take Knife Toss's pose: Galadriel's Cloak's waits for the cloak to end it. The One Ring (10 Spirit,
+  35 corruption: ROTK's ring, unseen in the Ring's shadow, with The Two Towers' numbers: 300 + 60 per
+  level ticks and +4 damage; not ported: foes within 75 pixels standing idle 90 ticks as he puts it
+  on, and the ring sprite, which The Two Towers shows only on a co-op partner's screen), Snare (9
+  Spirit, up to level / 2 traps rounded up: the trap opens and waits, a foe touching it, even while
+  it opens, bursts it into shrapnel in 4 directions, 8 from level 10, at speed 5 for 21 ticks, each
+  hitting the first foe for 8 + 1 per level; arena: 4 pieces of 13 at level 5). All 36 Two Towers
+  actives are ported (2026-10-30).
 - Thrown weapons draw in their thrower's palette (the hero palettes at 0x0832B248 + (hero + 0x33) *
   4), not the trail lights' 0x08CA78B4.
 
