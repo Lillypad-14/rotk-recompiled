@@ -182,9 +182,12 @@ How a Two Towers active runs:
   2 Aragorn, 3 Gandalf, 4 Eowyn, 5 Gimli). Gandalf's Zap (0x0803BC78) checks Spirit, takes it
   (`player_addSpirit`), records the skill at player +0x1F, sets the casting flag and starts the
   cast pose.
-- Trigger: the player actor tick (0x0801AFC8) switches on the actor's character type (+0x22, 0x0A
-  for Gandalf) and the cast skill to an effect function; another per-hero switch (0x0801C370,
-  hero -> 0x0801F590/F520/F4D4/F5E8/F6C8/F664) ends the cast.
+- Trigger: when the cast pose ends, the player actor tick (0x0801AFC8, at 0x0801C370) calls the
+  hero's trigger function by hero id (Frodo 0x0801F590, Legolas F520, Aragorn F4D4, Gandalf
+  F5E8, Eowyn F664, Gimli F6C8), which switches on the cast skill (player +0x1F) to its effect.
+  Gandalf's spells also jump through a table in the tick (0x0801C4A4, skills 5..10, character
+  type 0x0A at +0x22; 0x0801C644 for type 0x06). Some casts start their effect themselves.
+  `ttt_skill.py --list` prints every active's cast and trigger target.
 - Gandalf's effects: Shield 0x080185B4, Zap 0x08018FD4, Sunburst 0x08018880, Fireworks
   0x08018280, Summon Eagle 0x08017AD4 + 0x080180CC, Thunderstrike 0x0801E658. Magical Healing
   acts in its cast function.
@@ -198,22 +201,88 @@ Per skill the port needs the whole chain read (cast, effect, the effect actor's 
 damage), the effect rebuilt from ROTK engine calls, its sprite converted like the item icons, and
 its sound matched. About 36 actives and 30 passives.
 
-### Skill port status (2026-10-28)
+Porting one active (rotk `two-towers/README.md` lists the tools):
+1. `uv run python two-towers/tools/ttt_skill.py "<Hero> <Skill>"` writes a fact sheet: the skill's
+   text, its cast and effect decompiled from the Two Towers Ghidra project (`ttt_ghidra.py build`
+   once), every Two Towers-only function they reach, the ROM data they use and their numbers. If
+   the effect is not in its `EFFECTS` table yet, the sheet shows the hero's trigger function: find
+   the effect there and add it (and every address you name to `two-towers/ttt_labels.txt`).
+2. Port it in rotk `hacks/patches/legacy_skills/legacy_<hero>.c` (one file per hero, its
+   `Legacy<Hero>Actives` table hooked up in `HeroActives` in `legacy_skills.c`). Projectiles (with
+   or without a blast), bursts on the caster (stun and/or damage) and heals are a const def and a
+   one-line cast through `legacy_fx.h`; other kinds build on its helpers (`legacyFx_spawn`,
+   `LEGACY_FX(fx)` scratch, `legacyFx_finishTick`). Convert the sprites the sheet lists via
+   `kSprites` in `src/two_towers.cpp`.
+3. Check it in the arena (below) against the sheet's numbers.
 
-Ported (rotk `hacks/patches/legacy_skills/legacy_skills.c`, art via `kSprites` in
-`src/two_towers.cpp`): Gandalf's Zap, Magical Healing, Shield, Sunburst (no rays yet: ROTK sprites
-do not rotate). Fireworks flies its 30 ticks in open ground and is gone without a blast at a wall
-(the map edge, x 17, in the earlier test); The Two Towers' rocket also has tile collision. Both
-projectiles hit foes in the arena (below).
-Thunderstrike (2026-10-29): a storm on Gandalf (unseen, radius 80) strikes a random foe in reach
-every 4 ticks, 5 + level / 3 times, for 20 + 2 per level; each strike is a bolt (0x08052690, palette
-0x08CC439C) that hits when its animation ends; the storm ends when no foe is in reach. Arena,
-level 5, the dummy alone: 6 hits, 84 damage. Still a stand-in: Summon Eagle (0x08017AD4 + 0x080180CC;
-an eagle that waits up to 15 ticks for a foe within 75 pixels, then swoops in from 160 pixels off at
-speed 5, states 0x25..0x28 in its tick 0x08017C64). Its ROTK stand-in (Gwaihir) outlives the arena's
-clear and adds hits to the next row. Then
-Gandalf's passives exact (Flame of Anor's revive burst is Sunburst's second branch, skill 3 level),
-then the other heroes. Sounds and cast poses are ROTK stand-ins throughout.
+### Skill port status (2026-10-29)
+
+Gandalf is done (rotk `hacks/patches/legacy_skills/legacy_gandalf.c`, art via `kSprites` in
+`src/two_towers.cpp`), with sounds and cast poses as ROTK stand-ins:
+- Zap, Magical Healing, Shield, Fireworks, Thunderstrike: as The Two Towers. Fireworks' rocket has
+  tile collision there too and nothing handles a wall: at one it stops and fizzles out after its 30
+  ticks, no blast. Its burst also enlarges a glow object (light, not the blast), not ported.
+- Sunburst: as The Two Towers (stun 30 + 10 per level, radius 75, no damage when cast), without its
+  8 rotated rays, which only show (ROTK sprites scale but do not rotate).
+- Summon Eagle: one eagle at a time, 12 Spirit and 3 corruption per level, a swoop per level for
+  20 + 5 per level. Each swoop it waits unseen up to 16 ticks for a foe within 75 pixels, comes in
+  from 160 pixels left or right of Gandalf (alternating) at a random height within 60, strikes and
+  flies off the screen. It flies over walls (no tile collision; the spawner's would stop it at the
+  map edge). Arena, level 5, the dummy: 5 hits.
+- Passives (0x0803AA20, 0x0803A928, 0x0803AAB4, 0x0803A98C): Elusion corruption resist 20 + 4 per
+  level, Inspire Spirit regen +25% per level (every player in The Two Towers, single player here),
+  Wisdom +1 spell damage per level, Flame of Anor revive chance 20 + 2 per level. A revive with Flame
+  of Anor (rotk `legacy_skills.asm` hooks the stock revive's heal at 0x08023FDA) brings Gandalf back
+  at full HP, not ROTK's half, with Sunburst's second branch: stun 30 + 10 per level and 5 per level
+  damage to every foe within 75 pixels. Not yet tested in a fight that kills him.
+
+Gimli (rotk `legacy_gimli.c`, 2026-10-29), untested in play beyond the arena casting each:
+- Axe Throw: 4 Spirit (the description says 3), the axe flies 21 ticks and hits every foe it passes
+  with Gimli's own melee hit (`combat_resolvePveAttack`, accuracy roll included, as The Two Towers'
+  0x0800CD94) +1 damage per level, skipping a foe already hurt, stopping at one that does not
+  flinch. The arena hero's accuracy (20 against defense 50) misses there. Not yet: one axe at a
+  time, its two trail lights.
+- Whirlwind Attack: 3 Spirit (not 6), ROTK's Whirling Attack with its stored damage set to the level
+  (ROTK adds it to the melee hit in that state, as The Two Towers adds the level).
+- Berserk Fury: 8 Spirit (not 10) and 3 corruption per level, 300 ticks of +20% speed, +10 damage
+  per level and +1 melee armor per 2 levels (the description says +1 toughness and damage per
+  level), with its rising, burning and fading art. One at a time.
+- Healing Salves: 25 + 7 per level for 8 + 2 per level Spirit, Magical Healing's sparkle.
+- Battle Cry: 12 Spirit flat (the description says +1 per level), stuns foes within 75 pixels for
+  30 + 6 per level on its first tick only, on Gimli, as long as its animation.
+- Passives as their code: Headsplitter +2% crit per level (the description says 10% + 3%), Dwarven
+  Resilience +2% parry per level.
+
+The other heroes (2026-10-29, rotk `legacy_<hero>.c`), each casting in the arena; with sounds,
+cast poses and trail lights as before. Where a skill is ROTK's own spin or strike, the hit is ROTK's
+with The Two Towers' bonus as the stored damage (ROTK adds it to the melee hit in those states).
+- Legolas: Spread Fire (9 Spirit, 2 + level / 4 arrows up to 7 fanned at the angles -2, 2, 0, -4,
+  4, -1, 1 of 32-way steps, speed 7.5, 21 ticks, each hits the first foe with Legolas's attack at +1
+  accuracy per level and is gone; the arrows' palette 0x08E65320 is unconfirmed), White Knives
+  (2 Spirit, ROTK's with no stored damage, no backpack knife needed). Stand-in: Forest Friend is
+  ROTK's Friend of Mirkwood. Not yet: Overdraw (cast, then hold A to charge, an aimed arrow on
+  release), Suppress (an arrow that bursts at its first foe, `actor_unknown08016958`'s match, its
+  knockback not found yet), Summon Gimli.
+- Aragorn: Herbal Remedy (25 + 5 per level), Commanding Presence (7 Spirit, stun 30 + 6 per level on
+  its first tick), Rage of the North (10 Spirit, 3 corruption per level, 450 ticks of +20% speed and
+  +2 damage per level), Sword Throw (4 Spirit, a plain melee hit, no level bonus), Sweep (8 Spirit,
+  +1 per level). Not yet: Call Legolas.
+- Eowyn: Herbal Remedy, Defending Fury (10 Spirit, 3 corruption per level, +10 Defense +2 per level
+  for 150 + 15 per level ticks), Princess of Rohan (4 Spirit flat, stun 30 + 6 per level), Shield
+  Bash (8 Spirit, 5 + 1 per level, needs a shield as in ROTK), Double Strike (7 Spirit, +4 + 1 per
+  level). Stand-in: Call Eomer is ROTK's Forth Eorlingas.
+- Frodo: Hobbit Appetite (25 + 5 per level), Knife Throw (2 Spirit, a plain melee hit). Stand-ins:
+  The One Ring and Snare are ROTK's. Not yet: Escape, Charge.
+- Thrown weapons draw in their thrower's palette (the hero palettes at 0x0832B248 + (hero + 0x33) *
+  4), not the trail lights' 0x08CA78B4.
+
+Passive rows of the other heroes fixed from their code (2026-10-29): Strength of the Shire's Spirit
+regen is level / 3, Rummage and Eyes of Rohan 5 + level treasure, Duck melee armor only, Critical
+Shot 10 + level, Aragorn's Ferocity 5 + level. Still mapped by guess: Resist One Ring, Meditation,
+Eowyn's Ferocity (their Two Towers stats have no item text) and the Parry rows (level thresholds).
+
+Damage goes through ROTK's `combat_applyPveRangedHit`, which reduces it more than The Two Towers'
+armor subtraction (0x0800D84C): the eagle's 45 lands as 21 on the arena dummy, Zap's 15 as 6.
 
 Buying (rotk 63e69d4): the page shows for the six Two Towers heroes, imported or not. A buys a
 rank with the shared skill point by The Two Towers' rules (its table at 0x08057780: 0x88 bytes
@@ -223,14 +292,17 @@ first rank only, max rank 20. Imported levels are the start. Casts read the full
 Single player only. Sam, Smeagol, the Ringwraith and Saruman get no page.
 
 Lessons:
-- Spawn effects with `fx_unknown08043d74` (ROTK's projectile spawner) and override; play Two
-  Towers art with `setSprite`, which clears the spawner's animation script (else the animation
-  never ends).
+- Spawn effects with `legacyFx_spawn` (ROTK's projectile spawner, `fx_unknown08043d74`, standing
+  still with no callbacks) and override; play Two Towers art with `legacyFx_setSprite`, which
+  clears the spawner's animation script (else the animation never ends).
 - Do not set `renderFollowTarget` on a fresh effect (render sort hangs); copy `coords` instead.
 - Do not borrow Herbal Healing's row (cast hangs).
 - Two Towers actor offsets differ from ROTK's (state 0x67 vs 0x62, timer 0x58 vs 0x50, facing 0xFA
   vs 0xF8, radius 0x75 vs 0x72); flags, stun state 0x1A, hit mask 0x10040400 match.
 - Effects tick at 30 Hz; Two Towers counts the same ticks.
+- A Two Towers player stat k sits at player +0x3C + 2 * k (k as the item stat text 271 + k: 0
+  damage, 13 melee armor, 24 max HP, 26 crit, 27 speed, 38 parry). Two Towers mirrors effect art
+  for the western facings (`legacyFx_faceSprite`).
 - Two Towers sprite frames: 6-byte head, hotspots, 8-byte trigger boxes, 12-byte pieces; some
   animations are 8-byte records (tiles, frames) bound without a duration.
 - Testing, the arena (2026-10-29): `tools/arena.py` builds the mod's test arena as a PC edition

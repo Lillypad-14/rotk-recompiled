@@ -86,6 +86,7 @@ def main() -> None:
     parser.add_argument("--frames", type=int, default=20000)
     parser.add_argument("--nm", default="arm-none-eabi-nm")
     parser.add_argument("--skip-build", action="store_true", help="run the arena build as it is")
+    parser.add_argument("--show", help="also print the debug lines that start with this, in order")
     parser.add_argument("--reconfigure", action="store_true",
                         help="new sweep settings for the prepared arena: patch its ROM, rebuild the host")
     args = parser.parse_args()
@@ -124,6 +125,9 @@ def main() -> None:
         v = dict(zip(ROW_FIELDS, (int(x) for x in values)))
         print(f"{v['row']:>4} {v['accepted']:>5} {v['recast']:>5} {v['hits']:>5} {v['kills']:>5} "
               f"{v['damage']:>7} {v['player_hp']:>5}")
+    for line in lines:
+        if args.show and line.startswith(args.show):
+            print(line)
     done = [line for line in lines if line.startswith("ARENA_DONE")]
     print(done[0] if done else f"no ARENA_DONE in {args.frames} frames ({len(lines)} debug lines)")
     if not lines:

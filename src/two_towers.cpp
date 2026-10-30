@@ -490,6 +490,36 @@ constexpr SpriteSource kSprites[] = {
     {0x08328220u, 0x08CC1338u, 1}, {0x08328228u, 0x08CC1338u, 1}, {0x08328230u, 0x08CC1338u, 1},
     // Gandalf's Thunderstrike: the bolt that falls on a foe
     {0x08052690u, 0x08CC439Cu},
+    // Gandalf's Summon Eagle: flying, striking, leaving
+    {0x083281A0u, 0x08340630u, 1}, {0x08328190u, 0x08340630u, 1}, {0x08328198u, 0x08340630u, 1},
+    // Gimli's Axe Throw: the axe by facing (up .. down), in Gimli's palette (the thrower's slot; the
+    // hero palettes are at 0x0832B248 + (hero + 0x33) * 4)
+    {0x083282D8u, 0x0898A874u, 1}, {0x083282E0u, 0x0898A874u, 1}, {0x083282E8u, 0x0898A874u, 1},
+    {0x083282F0u, 0x0898A874u, 1}, {0x083282F8u, 0x0898A874u, 1},
+    // Gimli's Battle Cry
+    {0x080501E8u, 0x08CC71D4u},
+    // Gimli's Berserk Fury: rising, burning, fading
+    {0x08050208u, 0x08CC83B0u}, {0x08050218u, 0x08CC83B0u}, {0x08050228u, 0x08CC83B0u},
+    // Legolas's Spread Fire: the arrow by facing (up .. down), in the arrows' shared palette (slot 5,
+    // its palette table 0x0832B248)
+    {0x08329960u, 0x08E65320u, 1}, {0x08329968u, 0x08E65320u, 1}, {0x08329970u, 0x08E65320u, 1},
+    {0x08329978u, 0x08E65320u, 1}, {0x08329980u, 0x08E65320u, 1},
+    // Aragorn's Sword Throw: the sword by facing (up .. down), in Aragorn's palette
+    {0x08327C64u, 0x083DB784u, 1}, {0x08327C6Cu, 0x083DB784u, 1}, {0x08327C74u, 0x083DB784u, 1},
+    {0x08327C7Cu, 0x083DB784u, 1}, {0x08327C84u, 0x083DB784u, 1},
+    // Frodo's Knife Throw: the knife by facing (up .. down), in Frodo's palette
+    {0x08328148u, 0x088F2F30u, 1}, {0x08328150u, 0x088F2F30u, 1}, {0x08328158u, 0x088F2F30u, 1},
+    {0x08328160u, 0x088F2F30u, 1}, {0x08328168u, 0x088F2F30u, 1},
+    // Frodo's Escape: the stun on him, in Frodo's palette (slot 0)
+    {0x08050088u, 0x088F2F30u},
+    // Aragorn's Commanding Presence
+    {0x0804E1E8u, 0x08CBBDD8u},
+    // Aragorn's Rage of the North: rising, burning, fading
+    {0x0804E208u, 0x08CBCA28u}, {0x0804E218u, 0x08CBCA28u}, {0x0804E228u, 0x08CBCA28u},
+    // Eowyn's Defending Fury: rising, burning, fading
+    {0x0804FF7Cu, 0x08CBE8BCu}, {0x0804FF8Cu, 0x08CBE8BCu}, {0x0804FF9Cu, 0x08CBE8BCu},
+    // Eowyn's Princess of Rohan
+    {0x0804FFACu, 0x08CBF0E4u},
 };
 constexpr std::uint32_t kFrameHeadSize = 6;          // Two Towers: flags, pad, width, height, tile offset
 constexpr std::uint32_t kRotkFrameHeadSize = 8;      // ROTK adds the frame's tile bytes
