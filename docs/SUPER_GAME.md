@@ -267,8 +267,13 @@ with The Two Towers' bonus as the stored damage (ROTK adds it to the melee hit i
   places itself on its first tick, past the spawner's stale position, see `legacyFx_place`). Suppress (3 Spirit, the arrow hits the first foe with Legolas's attack;
   where it hits, a 35 pixel knock (0x080274E4) knocks each foe back along the arrow for 15 ticks on a
   roll of 0..100 at most 25 + 3 per level), Summon Gimli (25 Spirit, Gimli with his axe for 300 + 60
-  per level ticks, see the summoned allies below). Not yet: Overdraw (cast, then hold A to charge,
-  an aimed arrow on release; Expanded's page 2 already has a hold-to-draw Overdraw to build on).
+  per level ticks, see the summoned allies below), Overdraw (6 Spirit: Spread Fire's draw, held for
+  as long as the button that cast it stays down, The Two Towers' four-stage glow under Legolas
+  growing every 30 ticks; on release one arrow at the first foe on screen within one 8-way step of
+  his facing, else straight ahead, speed 7.5 for 21 ticks, hitting each foe it passes with his attack
+  + level x (ticks held / 30 + 1) + 2 and stopping at one that does not flinch. The Two Towers holds
+  A; here it is the cast button, A or L+A/B/R. The hold tops up the cast's recovery, which keeps the
+  drawn pose; arena: a 95-tick hold at level 5 looses with +22).
 - Aragorn: Herbal Remedy (25 + 5 per level), Commanding Presence (7 Spirit, stun 30 + 6 per level on
   its first tick), Rage of the North (10 Spirit, 3 corruption per level, 450 ticks of +20% speed and
   +2 damage per level), Sword Throw (4 Spirit, a plain melee hit, no level bonus), Sweep (8 Spirit,

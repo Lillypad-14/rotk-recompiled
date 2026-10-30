@@ -552,6 +552,10 @@ constexpr SpriteSource kSprites[] = {
     {0x0804FF7Cu, 0x08CBE8BCu}, {0x0804FF8Cu, 0x08CBE8BCu}, {0x0804FF9Cu, 0x08CBE8BCu},
     // Eowyn's Princess of Rohan
     {0x0804FFACu, 0x08CBF0E4u},
+    // Legolas's Overdraw: the glow's four stages, and the arrow by facing (up .. down)
+    {0x08052610u, 0x08CCC5B8u}, {0x08052620u, 0x08CCC5D8u}, {0x08052630u, 0x08CCC5F8u}, {0x08052640u, 0x08CCC618u},
+    {0x08329888u, 0x08E65320u, 1}, {0x08329890u, 0x08E65320u, 1}, {0x08329898u, 0x08E65320u, 1},
+    {0x083298A0u, 0x08E65320u, 1}, {0x083298A8u, 0x08E65320u, 1},
     // The summoning star of the allies, in the trail lights' palette
     {0x08057E50u, 0x08CA78B4u},
     // Legolas (Call Legolas): walking, standing and attacking by facing (up .. down), then his bow
