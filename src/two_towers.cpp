@@ -717,12 +717,27 @@ Sprite convertSprite(const std::vector<std::uint8_t>& rom, std::uint32_t animati
     return sprite;
 }
 
+// The save to import from: ROTK_PC_TWO_TOWERS_SAV, else the newer of an emulator's .sav beside the ROM
+// and the save The Two Towers keeps when the super game plays it (super_game.cpp), which has the
+// same layout.
+fs::path savePath()
+{
+    if (const char* given = std::getenv("ROTK_PC_TWO_TOWERS_SAV")) return given;
+    fs::path emulator = g_romPath;
+    emulator.replace_extension(".sav");
+    const fs::path recompiled = g_romPath.parent_path() / (g_romPath.stem().string() + "-recompiled.eeprom");
+    std::error_code error;
+    const bool hasEmulator = fs::file_size(emulator, error) == kSaveSize && !error;
+    const bool hasRecompiled = fs::file_size(recompiled, error) == kSaveSize && !error;
+    if (hasEmulator && hasRecompiled)
+        return fs::last_write_time(recompiled, error) > fs::last_write_time(emulator, error) ? recompiled : emulator;
+    return hasRecompiled ? recompiled : emulator;
+}
+
 // The Two Towers save's character slots, zeroed for an empty or damaged one.
 std::vector<std::uint8_t> loadSaveSlots()
 {
-    fs::path path = g_romPath;
-    path.replace_extension(".sav");
-    if (const char* given = std::getenv("ROTK_PC_TWO_TOWERS_SAV")) path = given;
+    const fs::path path = savePath();
     const std::vector<std::uint8_t> file = load(path);
     std::vector<std::uint8_t> slots(std::size(kSaveSlotBlocks) * kSaveSlotSize, 0);
     if (file.size() != kSaveSize) return slots;
@@ -873,8 +888,20 @@ bool twoTowersPresent(std::uint32_t address)
     return bus_read_u32(address) == kMagic;
 }
 
+// Where twoTowersWrite put the block, 0 before.
+std::uint32_t g_writtenAt = 0;
+
+void twoTowersReloadSave()
+{
+    if (!g_writtenAt || g_romPath.empty()) return;
+    const std::vector<std::uint8_t> slots = loadSaveSlots();
+    const std::uint32_t at = bus_read_u32(g_writtenAt + kSaveSlotsField);
+    for (std::size_t i = 0; i < slots.size(); ++i) bus_write_u8(at + static_cast<std::uint32_t>(i), slots[i]);
+}
+
 void twoTowersWrite(std::uint32_t address)
 {
+    g_writtenAt = address;
     const std::vector<std::uint8_t> block = twoTowersBlockAt(address);
     for (std::size_t i = 0; i < block.size(); i += 4) {
         std::uint32_t word;

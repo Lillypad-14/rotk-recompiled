@@ -1,0 +1,40 @@
+--- a/src/runtime/runtime.h
++++ b/src/runtime/runtime.h
+@@ -419,6 +419,9 @@
+ };
+ 
+ int run_game(int argc, char** argv, const RunOptions& opts = {});
++// Runs the game at the top fast-forward speed, silent, while `on`, whatever the assist tools
++// allow: for a host that boots the game out of sight (e.g. a hidden window handed over later).
++void set_host_fast_forward(bool on);
+ 
+ // Rumbles player 1's (0) or player 2's (1) controller in the game's window, if both exist: low and
+ // high frequency motor strengths 0..0xFFFF for `ms` milliseconds.
+--- a/src/runtime/runtime.cpp
++++ b/src/runtime/runtime.cpp
+@@ -1333,6 +1333,14 @@
+     if (g_rumble_window) g_rumble_window->rumble(player, low, high, ms);
+ }
+ 
++namespace {
++std::atomic<bool> g_host_fast_forward{false};
++}  // namespace
++
++void set_host_fast_forward(bool on) {
++    g_host_fast_forward.store(on, std::memory_order_relaxed);
++}
++
+ int run_game(int argc, char** argv, const RunOptions& opts) {
+     // Game runners install this before entering run_game(). Clear it on every
+     // return path so a later game launched in the same process cannot call a
+@@ -3790,6 +3798,10 @@
+ #endif
+         fast_forward_active = assist_tools_enabled() &&
+                               (ev.fast_forward || fast_forward_latched);
++        if (g_host_fast_forward.load(std::memory_order_relaxed)) {
++            fast_forward_active = true;
++            fast_forward_multiplier = 10;
++        }
+         // System hotkeys (config.ini [KeyMap], rebindable in the launcher).
+         if (ev.toggle_fullscreen) {
+             // Toggle between windowed and the configured mode. A session

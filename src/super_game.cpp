@@ -211,6 +211,8 @@ void playTwoTowers()
     }
     pumpWhile(process.hProcess, INFINITE, nullptr);
     fs::remove(backFile, error);
+    // its heroes, saved just now, can be imported at once
+    twoTowersReloadSave();
     SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
     for (int id = 1; id <= kMaxAudioDeviceId; ++id)
         if (paused[id]) SDL_PauseAudioDevice(static_cast<SDL_AudioDeviceID>(id), 0);

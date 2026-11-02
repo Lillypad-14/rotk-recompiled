@@ -39,6 +39,7 @@ FRAMEWORK_PATCHES = [
     ROOT / "patches/debug-print.patch",
     ROOT / "patches/window-handoff.patch",
     ROOT / "patches/launcher-companion-rom.patch",
+    ROOT / "patches/host-fast-forward.patch",
 ]
 
 # recomp-ui (launcher) patches, applied the same way to external/recomp-ui.

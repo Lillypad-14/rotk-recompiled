@@ -5,7 +5,7 @@
 // (GBARECOMP_WINDOW_HANDOFF="x,y,w,h,fullscreen"), and once a frame is drawn it takes ROTK's place,
 // size and fullscreen state, shows itself and signals ROTK_SUPER_GAME_READY, the event ROTK waits on
 // before it hides its own window. Started that way it skips the language menu (English) and the logos,
-// and shows itself once its main menu has faded in. Its main menu then has a fifth row, Return of the
+// and shows itself once its main menu has faded in. Until then it runs at fast-forward speed, silent. Its main menu then has a fifth row, Return of the
 // King, which hands the window back: it writes its place, size and fullscreen state to
 // ROTK_SUPER_GAME_BACK_FILE, sets ROTK_SUPER_GAME_BACK (ROTK shows itself there) and quits.
 #include "runtime.h"
@@ -299,6 +299,7 @@ SDL_Window* hiddenWindow()
 
 void reveal()
 {
+    gbarecomp::set_host_fast_forward(false);
     int x = 0, y = 0, w = 0, h = 0, fullscreen = 0;
     const char* geometry = std::getenv("GBARECOMP_WINDOW_HANDOFF");
     SDL_Window* window = hiddenWindow();
@@ -354,6 +355,8 @@ int main(int argc, char** argv)
     options.expose_assist_tools = true;
     g_handoff = std::getenv("GBARECOMP_WINDOW_HANDOFF") != nullptr;
     g_fromRotk = g_handoff;
+    // out of sight it boots at fast-forward speed, so the swap comes quickly
+    if (g_handoff) gbarecomp::set_host_fast_forward(true);
     gba_mod_register_function_entry_plugin(kMenuRowHookId, kMainMenuDrawEntry, 1, menuRow);
     gba_mod_register_function_entry_plugin(kMenuCursorHookId, kMainMenuMoveCursor, 1, menuCursor);
     gba_mod_register_function_entry_plugin(kMenuConfirmHookId, kMainMenuConfirm, 1, menuConfirm);

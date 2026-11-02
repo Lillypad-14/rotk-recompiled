@@ -37,6 +37,8 @@ void twoTowersFind(const std::vector<std::string>& args);
 std::string twoTowersRomPath();
 // Whether the file is The Two Towers ROM the PC edition reads (size, header and SHA-1).
 bool twoTowersRomValid(const std::string& path);
+// Reads the save's character slots into the block again (after The Two Towers played and saved).
+void twoTowersReloadSave();
 // The block's size in bytes, 0 without The Two Towers.
 std::uint32_t twoTowersBlockSize();
 // The block as it reads at a host RAM address.
