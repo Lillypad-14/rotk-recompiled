@@ -572,11 +572,7 @@ How to run it:
   (ttt-rotk-portraits: dialog portraits only). Switch from ROTK's main menu. ROTK dumps its ROM to
   %TEMP%/rotk-recompiled-rom.gba when either is on and sets ROTK_TTT_ROTK_SPRITES=1 and/or
   ROTK_TTT_ROTK_PORTRAITS=1 plus ROTK_TTT_ROTK_ROM for the child (src/super_game.cpp).
-- A third feature, "ROTK skill animations in The Two Towers" (ttt-rotk-skills, **on** by default,
-  env ROTK_TTT_ROTK_SKILLS=1), only matters with the sprites on: off, the skills play the Two
-  Towers' own animations recolored to the ROTK hero palette (`recolorFacings`, nearest color per
-  index; the hero palette is ROTK's either way, so stock skill art drew in the wrong colors - the
-  user saw "a buggy two towers version" when it was a plain toggle).
+- Skill animations: always ROTK's with the heroes on (the user, 2026-11-02, merged the old "ROTK skill animations" toggle, ttt-rotk-skills / ROTK_TTT_ROTK_SKILLS, into the heroes option: Two Towers skill art cannot match ROTK bodies anyway; the recolored fallback, recolorFacings, is gone).
 - A fourth, "ROTK sound effects in The Two Towers" (ttt-rotk-sounds, off by default, env
   ROTK_TTT_ROTK_SOUNDS=1; src/rotk_sounds.cpp): Two Towers sound ids in `kSwaps` play ROTK's sound
   instead. The engines differ (Two Towers: note sequences from a sound bank, sfx_play 0x0803DCA0
@@ -625,7 +621,7 @@ How to run it:
   emblems 0x08282B94 (ring, face, crown, starburst, 4x3 at tile 0x56) are not ported (corruption has
   no Two Towers meaning). Pickup line (standing at loot): the Two Towers paints it with font_rasterizeString 0x08015300 (from 0x080151F4, called at 0x08021474) into tiles 0x28..; the font context 0x03000478 decides the rest: +0x08 background (-1 = copy what the screen shows, which picked up ROTK's bars; otherwise a fill color), +0x04 glyph color base (glyph pixels base + 1..3), +0x14 the map address, which sets the row (y only places pixels in the tile). A hook on 0x080151F4 lends background 0 and moves the map address 12 rows down, so the cells land off screen on row 30; the next VBlank restores both, takes the cells, colors glyphs ROTK light yellow over the strip's pixels and maps them onto the strip row (19) until the bar clears the line. ROTK_TTT_HUD_MSG_TEST=1 fakes a pickup line headless. Checked: clean text with tails, no blink. Unseen: a boss fight in the circle (could
   feed Two Towers boss health later).
-- Direct: set ROTK_TTT_ROTK_SPRITES=1 (+ ROTK_TTT_ROTK_SKILLS=1) and/or ROTK_TTT_ROTK_PORTRAITS=1 and
+- Direct: set ROTK_TTT_ROTK_SPRITES=1 and/or ROTK_TTT_ROTK_PORTRAITS=1 and
   ROTK_TTT_ROTK_ROM (ROM = .private/rotk.gba), then run PlayTwoTowers.cmd. Checked headless at frame 3400 of the route: each
   alone and both together draw as expected.
 - Never run TTT-Recompiled.exe with `--help`: it starts the game (in a window). Headless runs use

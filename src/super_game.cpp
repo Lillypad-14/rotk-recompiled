@@ -31,8 +31,6 @@ constexpr std::uint32_t kRomBytes = 0x02000000u;
 
 // "ttt-rotk-portraits": its dialog portraits are ROTK's (same ROM copy).
 bool g_tttRotkPortraits = false;
-// "ttt-rotk-skills": with the sprites, the heroes' skill animations are ROTK's too.
-bool g_tttRotkSkills = false;
 // "ttt-rotk-sounds": some of its sound effects are ROTK's (src/rotk_sounds.cpp in its host).
 bool g_tttRotkSounds = false;
 // "ttt-rotk-hud": its HUD is ROTK's (src/rotk_hud.cpp in its host).
@@ -40,14 +38,12 @@ bool g_tttRotkHud = false;
 
 void tttRotkSpritesActivated() { g_tttRotkSprites = true; }
 void tttRotkPortraitsActivated() { g_tttRotkPortraits = true; }
-void tttRotkSkillsActivated() { g_tttRotkSkills = true; }
 void tttRotkSoundsActivated() { g_tttRotkSounds = true; }
 void tttRotkHudActivated() { g_tttRotkHud = true; }
 void tttRotkSpritesReset()
 {
     g_tttRotkSprites = std::getenv("ROTK_TTT_ROTK_SPRITES") != nullptr;
     g_tttRotkPortraits = std::getenv("ROTK_TTT_ROTK_PORTRAITS") != nullptr;
-    g_tttRotkSkills = std::getenv("ROTK_TTT_ROTK_SKILLS") != nullptr;
     g_tttRotkSounds = std::getenv("ROTK_TTT_ROTK_SOUNDS") != nullptr;
     g_tttRotkHud = std::getenv("ROTK_TTT_ROTK_HUD") != nullptr;
 }
@@ -212,7 +208,6 @@ void playTwoTowers()
     const fs::path rotkRom = g_tttRotkSprites || g_tttRotkPortraits || g_tttRotkSounds || g_tttRotkHud ? rotkRomCopy() : fs::path();
     SetEnvironmentVariableA("ROTK_TTT_ROTK_SPRITES", !rotkRom.empty() && g_tttRotkSprites ? "1" : nullptr);
     SetEnvironmentVariableA("ROTK_TTT_ROTK_PORTRAITS", !rotkRom.empty() && g_tttRotkPortraits ? "1" : nullptr);
-    SetEnvironmentVariableA("ROTK_TTT_ROTK_SKILLS", !rotkRom.empty() && g_tttRotkSkills ? "1" : nullptr);
     SetEnvironmentVariableA("ROTK_TTT_ROTK_SOUNDS", !rotkRom.empty() && g_tttRotkSounds ? "1" : nullptr);
     SetEnvironmentVariableA("ROTK_TTT_ROTK_HUD", !rotkRom.empty() && g_tttRotkHud ? "1" : nullptr);
     SetEnvironmentVariableA("ROTK_TTT_ROTK_ROM", rotkRom.empty() ? nullptr : rotkRom.string().c_str());
@@ -235,7 +230,6 @@ void playTwoTowers()
     SetEnvironmentVariableA("ROTK_PC_COLOR_VISION", hadColorVision ? colorVision : nullptr);
     SetEnvironmentVariableA("ROTK_TTT_ROTK_SPRITES", nullptr);
     SetEnvironmentVariableA("ROTK_TTT_ROTK_PORTRAITS", nullptr);
-    SetEnvironmentVariableA("ROTK_TTT_ROTK_SKILLS", nullptr);
     SetEnvironmentVariableA("ROTK_TTT_ROTK_SOUNDS", nullptr);
     SetEnvironmentVariableA("ROTK_TTT_ROTK_HUD", nullptr);
     SetEnvironmentVariableA("ROTK_TTT_ROTK_ROM", nullptr);
@@ -304,7 +298,6 @@ void superGameRegister(gbarecomp::RunOptions& options)
 {
     gba_mod_register_activation_plugin("rotk.pc.ttt-rotk-sprites", tttRotkSpritesActivated);
     gba_mod_register_activation_plugin("rotk.pc.ttt-rotk-portraits", tttRotkPortraitsActivated);
-    gba_mod_register_activation_plugin("rotk.pc.ttt-rotk-skills", tttRotkSkillsActivated);
     gba_mod_register_activation_plugin("rotk.pc.ttt-rotk-sounds", tttRotkSoundsActivated);
     gba_mod_register_activation_plugin("rotk.pc.ttt-rotk-hud", tttRotkHudActivated);
     gba_mod_register_reset_callback(tttRotkSpritesReset);
