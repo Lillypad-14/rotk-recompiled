@@ -1,5 +1,6 @@
-// A plain host for a cartridge other than ROTK: The Two Towers (docs/SUPER_GAME.md). Its only PC
-// extra so far is color vision correction, carried over from ROTK's setting. The ROTK
+// A plain host for a cartridge other than ROTK: The Two Towers (docs/SUPER_GAME.md). Its PC
+// extras are color vision correction and ROTK hero sprites (src/rotk_sprites.cpp), both carried over
+// from ROTK's settings. The ROTK
 // host's hooks are tied to ROTK addresses, so it can't run another cartridge.
 //
 // Started by the ROTK host for the super game, it takes over ROTK's window: the window opens hidden
@@ -12,6 +13,7 @@
 #include "runtime.h"
 
 #include "color_vision.h"
+#include "rotk_sprites.h"
 
 #include "gba_bus.h"
 #include "mod_function_hooks.h"
@@ -377,6 +379,7 @@ int main(int argc, char** argv)
     gba_mod_register_reset_callback(enableSkipIntro);
     // ROTK_PC_COLOR_VISION, which ROTK sets to its own choice when it starts this game
     rotk::colorVisionRegister();
+    rotk::rotkSpritesRegister();
     options.present_decorate = presentDecorate;
     options.present_decorate_active = presentDecorateActive;
     return gbarecomp::run_game(argc, argv, options);

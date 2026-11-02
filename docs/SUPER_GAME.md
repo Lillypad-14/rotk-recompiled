@@ -496,3 +496,49 @@ Lessons:
   switch request and the import hand-off can use the same block.
 - **Game handoff precedent:** `src/expanded_edition.cpp` already hands a session to another build;
   the super game should run both carts in one exe instead.
+
+## Phase 5: ROTK hero sprites in The Two Towers (option, research 2026-11-01)
+
+Goal: an optional switch that draws the Two Towers heroes with their ROTK sprites and attack
+animations (smoother, more frames), PC host only.
+
+The Two Towers' hero animations:
+- Pose table 0x08329664: 36 entries, hero * 6 + pose (heroes Frodo, Legolas, Aragorn, Gandalf, Eowyn,
+  Gimli), each a pointer to a 5-facing array of pointers to 8-byte records (tiles, frame set).
+  Read by the player code at 0x0801AE64, 0x0801B480, 0x0801B554, 0x0801B678, 0x0801B728, 0x0801B7A4.
+- Poses (checked by rendering Aragorn): 0 walk, 1 stand, 2 attack (one slash, hit box), 3 death,
+  4 hit/flinch, 5 cast (raise + throw, hit box). One sprite part, weapon drawn in.
+- Hero palettes: 0x0832B248 + (hero + 0x33) * 4. sprite_setAnimation 0x08001918 is not how the
+  player's poses change (they come from the actor's bank, as in ROTK).
+
+ROTK's: HeroMoveAnimationBanks 0x08282898 / Melee 0x082828B8 / Cast 0x082828D8, per hero a bank of
+part * 7 + pose entries, each 5 inline 16-byte SpriteAnimation records (one per facing). The move
+bank has 8 parts (body, then hand/weapon parts drawn over it); melee and cast banks have 6 body poses.
+
+Plan:
+1. Host converter ROTK -> Two Towers format (the reverse of convertSprite): frames with 12-byte
+   pieces, hotspots before 8-byte trigger boxes, raw tiles. Body and the hero's stock weapon part
+   are merged into one sprite per frame (aligned by hotspot), since the Two Towers player draws one part.
+2. Map poses: walk/stand from the move bank, attack from the melee bank (first combo swing; later
+   cycle the combo), cast from the cast bank, death/flinch from the move bank.
+3. Swap at the source: the ROM read override (gba::g_rom_read32_override) answers the pose table and
+   hero palette reads with host RAM copies, so no game code changes. Hit timing follows the ROTK
+   attack frames' trigger boxes.
+4. Option: on in the launcher / passed from ROTK like color vision; off = stock Two Towers art.
+   The plain host needs the ROTK ROM (ROTK passes its path when it starts the game).
+
+Findings so far (prototype `rotk/two-towers/tools/rotk_hero_sprites.py` converts and renders):
+- ROTK frames: 8-byte head (flags, pad, w, h, tile offset, tile bytes), then 6-byte trigger boxes, then
+  hotspots, then u32 packed pieces. Tiles use ROTK's own LZ77 (decompress_lz77 0x0800D1D4): runs
+  are 3, copies 2 and long runs 0x42 longer than the Two Towers' variant.
+- The Two Towers' frames: 6-byte head, hotspots, 8-byte boxes (bounds, type, 3 zero bytes), 12-byte
+  pieces (x, y, size, shape, w, h, tile byte offset). Raw frames (no compression bit) are fine.
+- ROTK Aragorn move bank part 0: 0 lying down, 1 death, 2 getting up, 3 stagger, 4 idle, 5 knocked
+  flying, 6 walk. Melee bank: 0 first swing, 1 its recovery, 2 second swing, 3 its recovery,
+  4 and 5 finishers. Cast bank: the cast poses.
+- ROTK attack frames carry only the body box (ROTK finds melee hits another way); the Two Towers'
+  attack frames carry an attack box on the strike frame. The converted swings get the Two Towers'
+  attack box (per facing) on their strike frame, or they would never hit.
+- Next: the host converter in C++ (src/rotk_sprites.cpp in the plain host), the pose table and
+  hero palette reads answered from host RAM through gba::g_rom_read32_override, and the facing order
+  checked (both games store 5 facings).

@@ -211,6 +211,13 @@ type = "boolean"
 default = true
 
 [[feature]]
+id = "ttt-rotk-sprites"
+name = "ROTK heroes in The Two Towers"
+description = "When you switch to The Two Towers, its heroes walk, fight and cast with their Return of the King sprites and animations."
+group = "The Two Towers"
+default_enabled = false
+
+[[feature]]
 id = "color-vision"
 name = "Color vision correction"
 description = "Recolors the screen so colors that are hard to tell apart with color blindness look different. Display only."
@@ -3971,6 +3978,10 @@ id = "rotk.pc.minimap"
 [[plugin]]
 feature = "color-vision"
 id = "rotk.pc.color-vision"
+
+[[plugin]]
+feature = "ttt-rotk-sprites"
+id = "rotk.pc.ttt-rotk-sprites"
 
 [[plugin]]
 feature = "rumble"
