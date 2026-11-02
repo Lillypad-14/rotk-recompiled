@@ -8,6 +8,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -72,16 +73,21 @@ constexpr std::uint32_t kOamEntries = 128;
 constexpr const char* kHookIds[] = {"ttt.rotk-sprites-compose", "ttt.rotk-sprites-push", "ttt.rotk-sprites-loose",
                                     "ttt.rotk-sprites-oam-copy"};
 enum Pose { kWalk, kStand, kAttack, kDeath, kFlinch, kCast };
-// ROTK's combo: an attack that starts soon after the last one plays the next swing (melee poses 0,
-// 2 and 4). Looks only: the Two Towers' attack timing and damage are unchanged. The game reads the
-// body's attack entry once when an attack starts and the weapon's on every tick. Times are the
-// game's frame counter (60 a second): word +0x1C of the struct at *0x03003910.
-constexpr int kComboSteps = 3;
-constexpr std::uint32_t kComboSwings[kComboSteps] = {0, 2, 4};
+// ROTK's combo chain (actor_player_tick 0x080236B8, melee state 3): melee poses 0, 2, 4 are the
+// swings, 1 and 3 the recoveries after the first two. A B press during swing 0 or 2 is kept; when the
+// swing ends the next swing starts at once, else its recovery plays, where a press on frames 0..4
+// starts the next swing. Swing 4 and the recoveries end the attack. The Two Towers' attack (state 3)
+// starts with the attack pose entry, read once, and ends when its animation does; the chain swaps
+// the body's animation between ticks (sprite_composeOam runs after the tick) so state 3 goes on. The
+// weapon follows the body's frame and reads its table entry every tick.
+constexpr std::uint32_t kMeleePoses = 5;
+constexpr std::uint32_t kRecoveryCancelFrames = 4;
+constexpr std::uint32_t kPlayerTick = 0x0801AFC9u;   // a player body actor's tick callback
+constexpr std::uint32_t kPressedKeys = 0x030038E0u;  // u16 per player, pressed this tick (held: 0x030038DC)
+constexpr std::uint32_t kKeyB = 2u;
+constexpr std::uint32_t kAnimationEnded = 0x00400000u;  // actor+0xE8
 constexpr std::uint32_t kGameStatePointer = 0x03003910u, kGameFrame = 0x1Cu;
-// within kComboWindow frames of the last attack's start, the next swing (stock attacks start at
-// least 20 apart); within kComboSame, the same attack read again
-constexpr std::uint32_t kComboWindow = 50, kComboSame = 8;
+constexpr std::uint32_t kPlayers = 2;
 
 // ROTK: per hero a bank of part * 7 + pose entries, each 5 inline 16-byte SpriteAnimation records.
 constexpr std::uint32_t kMoveBanks = 0x08282898u, kMeleeBanks = 0x082828B8u, kCastBanks = 0x082828D8u;
@@ -124,7 +130,7 @@ constexpr Special kSpecials[] = {
     // Gandalf
     {0x083294F8u, 3, {kCastBanks, 0}},  {0x0832950Cu, 3, {kCastBanks, 1}},
     // Gimli
-    {0x08329584u, 5, {kMeleeBanks, 4}}, {0x08329598u, 5, {kMeleeBanks, 5}},
+    {0x08329584u, 5, {kMeleeBanks, 4}}, {0x08329598u, 5, {kCastBanks, 2}},
     // Eowyn
     {0x08329624u, 4, {kMeleeBanks, 2}}, {0x08329638u, 4, {kMeleeBanks, 4}},
 };
@@ -162,18 +168,34 @@ constexpr std::uint32_t kMagic = 0x53544B52u;  // "RKTS"
 
 struct State {
     bool enabled = false;
+    // the hero sprites (ROTK_TTT_ROTK_SPRITES=1) and the dialog portraits (ROTK_TTT_ROTK_PORTRAITS=1), each optional
+    bool sprites = false, portraitsOn = false;
     Bytes rotk;
     Bytes image;  // written at kDataBase
     std::uint32_t poseTable = 0, palettes = 0, blankWeapon = 0;
     std::uint32_t portraits[std::size(kPortraitSwaps)] = {};
     std::uint32_t weaponTable[kWeaponEntries] = {};
-    // the attack's facing arrays per combo step (step 0 is the tables' own)
-    std::uint32_t comboBody[kHeroes][kComboSteps] = {};
-    std::uint32_t comboWeapon[kWeaponEntries / kPoses][kComboSteps] = {};
-    // per hero: the combo step showing and when its attack started
-    int comboStep[kHeroes] = {};
-    std::uint32_t comboStart[kHeroes] = {};
-    bool comboStarted[kHeroes] = {};
+    // the facing arrays per ROTK melee pose (pose 0 is the pose table's attack)
+    std::uint32_t comboBody[kHeroes][kMeleePoses] = {};
+    std::uint32_t comboWeapon[kWeaponEntries / kPoses][kMeleePoses] = {};
+    // the converted melee body records (sorted): hero, melee pose, facing, ROTK ticks per frame
+    struct ComboRecord {
+        std::uint32_t record;
+        std::uint8_t hero, melee, facing, ticks;
+        bool operator<(const ComboRecord& o) const { return record < o.record; }
+    };
+    std::vector<ComboRecord> comboRecords;
+    // per hero: the melee pose showing (the weapon's entry); per player: a press kept, last record
+    std::uint32_t comboPose[kHeroes] = {};
+    bool comboBuffered[kPlayers] = {};
+    std::uint32_t comboLastRecord[kPlayers] = {};
+    // per player: a swap chosen while drawing, made after the OAM copy (before the next tick): made
+    // while drawing, the body is drawn once with the new record before its tiles are loaded
+    struct ComboSwap {
+        std::uint32_t actor = 0, from = 0, to = 0, hero = 0, pose = 0;
+        std::uint8_t ticks = 1;
+    };
+    ComboSwap comboSwap[kPlayers];
     // code literals that load a special animation, and the converted facing array each answers with
     std::vector<std::pair<std::uint32_t, std::uint32_t>> literals;
     std::uint32_t literalsLow = ~0u, literalsHigh = 0;
@@ -283,9 +305,13 @@ std::vector<Box> scaleBoxes(const TtBoxes& tt, std::uint32_t outCount)
 // How a converted animation gets its boxes. Body: ROTK's boxes, and the Two Towers' box in slot 1
 // (its attack box). Weapon: one slot, ROTK's strike box when the animation has one, else the Two
 // Towers' box.
+// Bodies with a Two Towers source (fromTt) take both of its slots: 0 the hurt box (held frame by
+// frame), 1 the attack box (each boxed frame once, scaled), so the heroes are hit and hit as in the
+// stock game; ROTK's own body boxes differ (Gandalf's hurt box smaller, Aragorn's sweep hittable).
 struct BoxPlan {
     bool weapon = false;
-    TtBoxes tt;
+    bool fromTt = false;
+    TtBoxes tt, ttHurt;
 };
 
 // ROTK frame f's box k (6 bytes) as a Two Towers box (8 bytes).
@@ -309,12 +335,25 @@ std::vector<std::vector<Box>> planBoxes(const Bytes& rom, std::uint32_t frameSet
         bool own = false;
         for (std::uint32_t f = 0; f < count && !own; ++f)
             for (std::uint32_t k = 0; k < boxes && !own; ++k) own = rotkBox(rom, frameSet, f, k) != Box{};
+        // ROTK's own strike boxes, reach included: they reach further than the Two Towers' (Aragorn's
+        // 67 wide where the Two Towers' is 40). The user tried the Two Towers' reach at ROTK's strike
+        // frame (2026-11-02) and preferred ROTK's.
         for (std::uint32_t f = 0; f < outCount; ++f) {
             Box b = {};
             if (!own) b = tt[f];
             else if (f < count)
                 for (std::uint32_t k = 0; k < boxes && b == Box{}; ++k) b = rotkBox(rom, frameSet, f, k);
             out[f] = {b};
+        }
+        return out;
+    }
+    if (plan.fromTt) {
+        const std::uint32_t hurtCount = static_cast<std::uint32_t>(plan.ttHurt.frames.size());
+        for (std::uint32_t f = 0; f < outCount; ++f) {
+            out[f].assign(std::max<std::uint32_t>(boxes, 2), Box{});
+            for (std::uint32_t k = 2; k < boxes; ++k) out[f][k] = rotkBox(rom, frameSet, std::min(f, count - 1), k);
+            if (plan.ttHurt.any && hurtCount) out[f][0] = plan.ttHurt.frames[std::min(hurtCount - 1, f * hurtCount / outCount)];
+            out[f][1] = tt[f];
         }
         return out;
     }
@@ -412,7 +451,11 @@ std::uint32_t convertFacings(Bytes& image, const Bytes& rom, std::uint32_t entry
     Bytes facings;
     for (int facing = 0; facing < kFacings; ++facing) {
         BoxPlan plan;
-        if (ttFacings) plan.tt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 1);
+        if (ttFacings) {
+            plan.fromTt = true;
+            plan.ttHurt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 0);
+            plan.tt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 1);
+        }
         const Converted c = convert(rom, entry + facing * kRecordSize, plan);
         Bytes record;
         put32(record, append(image, c.tiles));
@@ -546,31 +589,38 @@ void build()
     image.clear();
     g_state.weaponRecords.clear();
     g_state.idleTicks.clear();
+    g_state.comboRecords.clear();
     const std::uint32_t weaponsPalette = r32(rom, kObjPalettes + kWeaponsPalette * 4u);
     for (std::uint32_t i = 0; i < 32; ++i) g_state.weaponColors[i] = static_cast<std::uint8_t>(r8(rom, weaponsPalette + i));
     put32(image, kMagic);
     put32(image, 0);  // the image's hash, set when it is complete
     Bytes poseTable(kHeroes * kPoses * 4, 0), palettes;
     // a hero's body animation as a facing array; attack boxes from the Two Towers' pose when attacking
-    auto bodyArray = [&](int hero, const Source& source, int pose) {
+    auto bodyArray = [&](int hero, const Source& source, int pose, bool strike = true) {
         const std::uint32_t entry = r32(rom, r32(rom, source.banks + hero * 4u) + source.pose * 4u);
         const std::uint32_t ttFacings = bus_read_u32(kPoseTable + (hero * kPoses + pose) * 4u);
         Bytes facings;
         for (int facing = 0; facing < kFacings; ++facing) {
             BoxPlan plan;
-            if (pose == kAttack) plan.tt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 1);
+            plan.fromTt = true;
+            plan.ttHurt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 0);
+            if (strike) plan.tt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 1);
             const Converted c = convert(rom, entry + facing * kRecordSize, plan);
             Bytes record;
             put32(record, append(image, c.tiles));
             put32(record, append(image, c.frameSet));
             const std::uint32_t at = append(image, record);
-            if (pose == kStand) g_state.idleTicks.emplace_back(at, r8(rom, entry + facing * kRecordSize + 12));
+            const auto ticks = static_cast<std::uint8_t>(r8(rom, entry + facing * kRecordSize + 12));
+            if (pose == kStand) g_state.idleTicks.emplace_back(at, ticks);
+            if (pose == kAttack && source.banks == kMeleeBanks)
+                g_state.comboRecords.push_back({at, static_cast<std::uint8_t>(hero), static_cast<std::uint8_t>(source.pose),
+                                                static_cast<std::uint8_t>(facing), ticks});
             put32(facings, at);
         }
         return append(image, facings);
     };
     // a weapon kind's animation drawn with its hero's body, as many frames as the body has
-    auto weaponArray = [&](int kind, const Source& source, int pose) {
+    auto weaponArray = [&](int kind, const Source& source, int pose, bool strike = true) {
         const int hero = kWeaponSources[kind].hero;
         const std::uint32_t bank = r32(rom, source.banks + hero * 4u);
         const std::uint32_t body = r32(rom, bank + source.pose * 4u);
@@ -583,7 +633,7 @@ void build()
             const std::uint32_t bodyFrames = r16(rom, r32(rom, body + facing * kRecordSize + 4) + 6);
             BoxPlan plan;
             plan.weapon = true;
-            plan.tt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 0);
+            if (strike) plan.tt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 0);
             const Converted c = art ? convert(rom, entry + facing * kRecordSize, plan, bodyFrames)
                                     : blankAnimation(blankBoxes(scaleBoxes(plan.tt, bodyFrames)));
             Bytes record;
@@ -601,16 +651,16 @@ void build()
             std::memcpy(poseTable.data() + (hero * kPoses + pose) * 4, &array, 4);
             if (pose == kAttack) g_state.comboBody[hero][0] = array;
         }
-        for (int step = 1; step < kComboSteps; ++step)
-            g_state.comboBody[hero][step] = bodyArray(hero, {kMeleeBanks, kComboSwings[step]}, kAttack);
+        for (std::uint32_t melee = 1; melee < kMeleePoses; ++melee)
+            g_state.comboBody[hero][melee] = bodyArray(hero, {kMeleeBanks, melee}, kAttack, melee % 2 == 0);
         const std::uint32_t palette = r32(rom, kObjPalettes + (kHeroPaletteBase + hero) * 4u);
         for (int kind = 0; kind < static_cast<int>(std::size(kWeaponSources)); ++kind) {
             if (kWeaponSources[kind].hero != hero) continue;
             for (int pose = 0; pose < kPoses; ++pose)
                 g_state.weaponTable[kind * kPoses + pose] = weaponArray(kind, kSources[pose], pose);
             g_state.comboWeapon[kind][0] = g_state.weaponTable[kind * kPoses + kAttack];
-            for (int step = 1; step < kComboSteps; ++step)
-                g_state.comboWeapon[kind][step] = weaponArray(kind, {kMeleeBanks, kComboSwings[step]}, kAttack);
+            for (std::uint32_t melee = 1; melee < kMeleePoses; ++melee)
+                g_state.comboWeapon[kind][melee] = weaponArray(kind, {kMeleeBanks, melee}, kAttack, melee % 2 == 0);
         }
         Bytes colors;
         for (std::uint32_t i = 0; i < 32; ++i) colors.push_back(static_cast<std::uint8_t>(r8(rom, palette + i)));
@@ -640,6 +690,7 @@ void build()
         g_state.portraits[i] = append(image, convertPortrait(rom, kPortraitSwaps[i].rotk));
     std::sort(g_state.weaponRecords.begin(), g_state.weaponRecords.end());
     std::sort(g_state.idleTicks.begin(), g_state.idleTicks.end());
+    std::sort(g_state.comboRecords.begin(), g_state.comboRecords.end());
     g_state.poseTable = append(image, poseTable);
     g_state.palettes = append(image, palettes);
     // FNV-1a of the image after its stamp, so a save state holding another build's image is replaced
@@ -660,19 +711,136 @@ void ensureWritten()
         bus_write_u8(kDataBase + static_cast<std::uint32_t>(i), g_state.image[i]);
 }
 
-// A hero's attack starting: the combo's next swing when the last one started recently.
+int romRead32(std::uint32_t address, std::uint32_t original, std::uint32_t* out);
+
+// ROTK_TTT_DUMP_BOXES=1: per weapon kind, the attack's frames and frames with a strike box, the Two
+// Towers' and each ROTK melee pose's (facing 0).
+void dumpBoxes()
+{
+    auto count = [](std::uint32_t facings) {
+        const TtBoxes b = ttBoxes(bus_read_u32(facings), 0);
+        int boxed = 0;
+        std::string marks;
+        std::string sizes;
+        for (const Box& f : b.frames) {
+            const bool on = f != Box{};
+            boxed += on;
+            if (on) {
+                char text[64];
+                std::snprintf(text, sizeof text, " x%d..%d y%d..%d fl%02X", static_cast<std::int8_t>(f[0]),
+                              static_cast<std::int8_t>(f[1]), static_cast<std::int8_t>(f[2]),
+                              static_cast<std::int8_t>(f[3]), f[4]);
+                sizes += text;
+            }
+        }
+        return std::to_string(b.frames.size()) + "f" + sizes;
+    };
+    for (int kind = 0; kind < kWeaponEntries / kPoses; ++kind) {
+        if (!g_state.comboWeapon[kind][0]) continue;
+        gba::g_rom_read32_override = nullptr;
+        std::string line = "tt " + count(bus_read_u32(kWeaponPoseTable + (kind * kPoses + kAttack) * 4u));
+        gba::g_rom_read32_override = romRead32;
+        for (std::uint32_t melee = 0; melee < kMeleePoses; ++melee)
+            line += " | m" + std::to_string(melee) + " " + count(g_state.comboWeapon[kind][melee]);
+        std::fprintf(stderr, "[boxes] kind %d: %s\n", kind, line.c_str());
+    }
+    // bodies: slot 0 (hurt) and 1 (attack) of the pose table's walk, stand, attack; Two Towers vs ROTK
+    auto slot = [](std::uint32_t facings, std::uint32_t k) {
+        const TtBoxes b = ttBoxes(bus_read_u32(facings), k);
+        for (const Box& f : b.frames)
+            if (f != Box{}) {
+                char text[48];
+                std::snprintf(text, sizeof text, "x%d..%d y%d..%d", static_cast<std::int8_t>(f[0]),
+                              static_cast<std::int8_t>(f[1]), static_cast<std::int8_t>(f[2]),
+                              static_cast<std::int8_t>(f[3]));
+                return std::string(text);
+            }
+        return std::string("-");
+    };
+    for (int hero = 0; hero < kHeroes; ++hero)
+        for (int pose : {kWalk, kStand, kAttack, kCast}) {
+            const std::uint32_t at = kPoseTable + (hero * kPoses + pose) * 4u;
+            gba::g_rom_read32_override = nullptr;
+            const std::uint32_t tt = bus_read_u32(at);
+            const std::string tt0 = slot(tt, 0), tt1 = slot(tt, 1);
+            gba::g_rom_read32_override = romRead32;
+            const std::uint32_t ours = pose == kAttack ? g_state.comboBody[hero][0] : bus_read_u32(g_state.poseTable + (at - kPoseTable));
+            std::fprintf(stderr, "[body] hero %d pose %d: tt hurt %s atk %s | rotk hurt %s atk %s\n", hero, pose,
+                         tt0.c_str(), tt1.c_str(), slot(ours, 0).c_str(), slot(ours, 1).c_str());
+        }
+    for (const auto& [literal, array] : g_state.literals) {
+        gba::g_rom_read32_override = nullptr;
+        const std::uint32_t tt = bus_read_u32(literal);
+        const std::string tt0 = slot(tt, 0), tt1 = slot(tt, 1);
+        gba::g_rom_read32_override = romRead32;
+        std::fprintf(stderr, "[special] %08X: tt hurt %s atk %s | rotk hurt %s atk %s\n", tt, tt0.c_str(),
+                     tt1.c_str(), slot(array, 0).c_str(), slot(array, 1).c_str());
+    }
+}
+
+// A hero's attack starting: the chain's first swing.
 std::uint32_t comboAttack(int hero)
 {
-    const std::uint32_t now = bus_read_u32(bus_read_u32(kGameStatePointer) + kGameFrame);
-    const std::uint32_t since = now - g_state.comboStart[hero];
-    int& step = g_state.comboStep[hero];
-    if (!g_state.comboStarted[hero] || since > kComboWindow)
-        step = 0;
-    else if (since >= kComboSame)
-        step = (step + 1) % kComboSteps;
-    if (!g_state.comboStarted[hero] || since >= kComboSame) g_state.comboStart[hero] = now;
-    g_state.comboStarted[hero] = true;
-    return g_state.comboBody[hero][step];
+    g_state.comboPose[hero] = 0;
+    return g_state.comboBody[hero][0];
+}
+
+const State::ComboRecord* comboRecord(std::uint32_t record)
+{
+    const auto it = std::lower_bound(g_state.comboRecords.begin(), g_state.comboRecords.end(),
+                                     State::ComboRecord{record, 0, 0, 0, 0});
+    return it != g_state.comboRecords.end() && it->record == record ? &*it : nullptr;
+}
+
+// After a player body's tick: ROTK's chain on its melee animation (see kMeleePoses).
+void comboTick(std::uint32_t actor, std::uint32_t record)
+{
+    const std::uint32_t player = bus_read_u8(actor + 0x9A);
+    if (player >= kPlayers) return;
+    const std::uint32_t last = g_state.comboLastRecord[player];
+    g_state.comboLastRecord[player] = record;
+    const State::ComboRecord* at = comboRecord(record);
+    if (bus_read_u8(actor + 0x67) != 3 || !at) {
+        g_state.comboBuffered[player] = false;
+        return;
+    }
+    // the press that started this animation is not one for the next swing
+    const bool pressed = record == last && (bus_read_u16(kPressedKeys + player * 2u) & kKeyB);
+    const bool ended = bus_read_u32(actor + 0xE8) & kAnimationEnded;
+    const std::uint32_t melee = at->melee, frame = bus_read_u8(actor + 0x22);
+    std::uint32_t next = 0;
+    if (melee % 2 == 0) {
+        if (melee < 4 && pressed) g_state.comboBuffered[player] = true;
+        if (melee < 4 && ended) next = g_state.comboBuffered[player] ? melee + 2 : melee + 1;
+    } else if (pressed && frame <= kRecoveryCancelFrames) {
+        next = melee + 1;
+    }
+    if (!next) return;
+    const std::uint32_t target = bus_read_u32(g_state.comboBody[at->hero][next] + at->facing * 4u);
+    const State::ComboRecord* to = comboRecord(target);
+    if (!to) return;
+    g_state.comboSwap[player] = {actor, record, target, at->hero, next, static_cast<std::uint8_t>(to->ticks ? to->ticks : 1)};
+    g_state.comboBuffered[player] = false;
+    g_state.comboLastRecord[player] = target;
+}
+
+// After the OAM copy: the chosen swaps, the next swing or recovery from its first frame.
+void comboApply()
+{
+    for (State::ComboSwap& swap : g_state.comboSwap) {
+        if (!swap.actor) continue;
+        const std::uint32_t actor = swap.actor;
+        if (bus_read_u32(actor + kActorRecord) == swap.from && bus_read_u8(actor + 0x67) == 3) {
+            bus_write_u32(actor + kActorRecord, swap.to);
+            bus_write_u32(actor + 0x8C, swap.to);
+            bus_write_u8(actor + 0x22, 0);
+            bus_write_u8(actor + 0x21, swap.ticks);
+            bus_write_u8(actor + 0x20, swap.ticks);
+            bus_write_u32(actor + 0xE8, bus_read_u32(actor + 0xE8) & ~kAnimationEnded);
+            g_state.comboPose[swap.hero] = swap.pose;
+        }
+        swap = {};
+    }
 }
 
 int romRead32(std::uint32_t address, std::uint32_t original, std::uint32_t* out)
@@ -683,6 +851,23 @@ int romRead32(std::uint32_t address, std::uint32_t original, std::uint32_t* out)
         gba::g_rom_read32_override = nullptr;
         build();
         gba::g_rom_read32_override = romRead32;
+        if (std::getenv("ROTK_TTT_DUMP_BOXES")) {
+            ensureWritten();
+            dumpBoxes();
+        }
+    }
+    // ROTK_TTT_TEST_VANILLA=1 (tests): the hooks and traces run, the Two Towers' own art plays
+    if (std::getenv("ROTK_TTT_TEST_VANILLA")) return 0;
+    if (!g_state.sprites) {
+        if (g_state.portraitsOn && address >= kLinePortraits && address < kLinePortraits + kLinePortraitCount * 8u &&
+            address % 8 == kLinePortraits % 8)
+            for (std::size_t i = 0; i < std::size(kPortraitSwaps); ++i)
+                if (original == kPortraitSwaps[i].tt) {
+                    ensureWritten();
+                    *out = g_state.portraits[i];
+                    return 1;
+                }
+        return 0;
     }
     if (address >= kPoseTable && address < kPoseTable + kHeroes * kPoses * 4u) {
         ensureWritten();
@@ -709,7 +894,7 @@ int romRead32(std::uint32_t address, std::uint32_t original, std::uint32_t* out)
         ensureWritten();
         const std::uint32_t entry = (address - kWeaponPoseTable) / 4u, kind = entry / kPoses;
         const std::uint32_t weapon = entry % kPoses == kAttack
-                                         ? g_state.comboWeapon[kind][g_state.comboStep[kWeaponSources[kind].hero]]
+                                         ? g_state.comboWeapon[kind][g_state.comboPose[kWeaponSources[kind].hero]]
                                          : g_state.weaponTable[entry];
         // ROTK_TTT_TRACE_WEAPON=1 logs each weapon kind and pose the game first reads
         static std::uint32_t seen[kWeaponEntries] = {};
@@ -719,7 +904,8 @@ int romRead32(std::uint32_t address, std::uint32_t original, std::uint32_t* out)
         *out = weapon ? weapon : g_state.blankWeapon;
         return 1;
     }
-    if (address >= kLinePortraits && address < kLinePortraits + kLinePortraitCount * 8u && address % 8 == kLinePortraits % 8) {
+    if (g_state.portraitsOn && address >= kLinePortraits && address < kLinePortraits + kLinePortraitCount * 8u &&
+        address % 8 == kLinePortraits % 8) {
         for (std::size_t i = 0; i < std::size(kPortraitSwaps); ++i)
             if (original == kPortraitSwaps[i].tt) {
                 ensureWritten();
@@ -740,6 +926,38 @@ int composeEntry(std::uint32_t, int, ArmCpuState* cpu)
 {
     const std::uint32_t record = bus_read_u32(cpu->R[0] + kActorRecord);
     g_state.actorWeapon = std::binary_search(g_state.weaponRecords.begin(), g_state.weaponRecords.end(), record);
+    // ROTK_TTT_TRACE_HITS=1 logs each tick player 0's weapon shows a frame with a strike box (each
+    // such tick can roll a hit, 0x08010ED4)
+    if (std::getenv("ROTK_TTT_TRACE_HITS")) {
+        const std::uint32_t a = cpu->R[0], parent = bus_read_u32(a + 0x10);
+        if (parent && bus_read_u32(a + 0x14) != kPlayerTick && bus_read_u32(parent + 0x14) == kPlayerTick &&
+            bus_read_u8(parent + 0x9A) == 0 && record) {
+            const auto saved = gba::g_rom_read32_override;
+            gba::g_rom_read32_override = nullptr;
+            const std::uint32_t frameSet = bus_read_u32(record + 4), frame = bus_read_u8(a + 0x22);
+            if (frame < bus_read_u16(frameSet + 6) && bus_read_u8(frameSet + 11)) {
+                const std::uint32_t box = frameSet + 12 + bus_read_u16(frameSet + 12 + frame * 2) + 6 +
+                                          bus_read_u8(frameSet + 10) * 2;
+                if (bus_read_u32(box) || bus_read_u32(box + 4))
+                    std::fprintf(stderr, "[hit] f=%u fr=%u tick=%u/%u body=%u/%u\n",
+                                 bus_read_u32(bus_read_u32(kGameStatePointer) + kGameFrame), frame,
+                                 bus_read_u8(a + 0x20), bus_read_u8(a + 0x21), bus_read_u8(parent + 0x20),
+                                 bus_read_u8(parent + 0x21));
+            }
+            gba::g_rom_read32_override = saved;
+        }
+    }
+    if (bus_read_u32(cpu->R[0] + 0x14) == kPlayerTick) {
+        comboTick(cpu->R[0], record);
+        // ROTK_TTT_TRACE_ATTACK=1 logs player 0's body each tick: state, frame, record, B pressed
+        if (std::getenv("ROTK_TTT_TRACE_ATTACK") && bus_read_u8(cpu->R[0] + 0x9A) == 0) {
+            const State::ComboRecord* at = comboRecord(bus_read_u32(cpu->R[0] + kActorRecord));
+            std::fprintf(stderr, "[attack] f=%u st=%02X fr=%u melee=%d b=%u 9b=%02X dmg=%04X\n",
+                         bus_read_u32(bus_read_u32(kGameStatePointer) + kGameFrame), bus_read_u8(cpu->R[0] + 0x67),
+                         bus_read_u8(cpu->R[0] + 0x22), at ? at->melee : -1, bus_read_u16(kPressedKeys) & kKeyB,
+                         bus_read_u8(cpu->R[0] + 0x9B), bus_read_u16(cpu->R[0] + 0x90));
+        }
+    }
     // idle at ROTK's speed: actor+0x21 is the ticks per frame, +0x20 the countdown (actor_tickAnimation)
     const auto idle = std::lower_bound(g_state.idleTicks.begin(), g_state.idleTicks.end(), std::make_pair(record, std::uint8_t{0}));
     if (idle != g_state.idleTicks.end() && idle->first == record && idle->second) {
@@ -769,6 +987,7 @@ int oamCopyEntry(std::uint32_t, int, ArmCpuState*)
 {
     g_state.displayed = g_state.pending;
     g_state.pending.fill(false);
+    comboApply();
     // ROTK_TTT_SKILL_TEST=N (tests): player 0 knows and selects skill N, spirit kept full. Player
     // records at 0x03003640, 0x128 apart: +0x0A spirit, +0x6E its maximum, +0x1E the selected
     // skill, skill levels at +0x25 + N and +0x30 + N.
@@ -811,8 +1030,10 @@ void reset()
     if (!g_state.enabled) return;
     gba::g_rom_read32_override = romRead32;
     g_state.actorWeapon = false;
-    std::fill(std::begin(g_state.comboStep), std::end(g_state.comboStep), 0);
-    std::fill(std::begin(g_state.comboStarted), std::end(g_state.comboStarted), false);
+    std::fill(std::begin(g_state.comboPose), std::end(g_state.comboPose), 0u);
+    std::fill(std::begin(g_state.comboBuffered), std::end(g_state.comboBuffered), false);
+    std::fill(std::begin(g_state.comboLastRecord), std::end(g_state.comboLastRecord), 0u);
+    for (State::ComboSwap& swap : g_state.comboSwap) swap = {};
     g_state.pending.fill(false);
     g_state.displayed.fill(false);
     gba::g_obj_palette_provider = paletteProvider;
@@ -823,9 +1044,14 @@ void reset()
 
 void rotkSpritesRegister()
 {
-    const char* on = std::getenv("ROTK_TTT_ROTK_SPRITES");
+    auto on = [](const char* name) {
+        const char* value = std::getenv(name);
+        return value && std::strcmp(value, "1") == 0;
+    };
+    g_state.sprites = on("ROTK_TTT_ROTK_SPRITES");
+    g_state.portraitsOn = on("ROTK_TTT_ROTK_PORTRAITS");
     const char* path = std::getenv("ROTK_TTT_ROTK_ROM");
-    if (!on || std::strcmp(on, "1") != 0 || !path) return;
+    if ((!g_state.sprites && !g_state.portraitsOn) || !path) return;
     std::ifstream file(path, std::ios::binary);
     g_state.rotk.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
     if (g_state.rotk.size() < 0x00400000u) {

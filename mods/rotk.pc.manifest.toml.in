@@ -218,6 +218,13 @@ group = "The Two Towers"
 default_enabled = false
 
 [[feature]]
+id = "ttt-rotk-portraits"
+name = "ROTK portraits in The Two Towers"
+description = "When you switch to The Two Towers, the heroes, Sam, Smeagol, Eomer and Theoden speak with their Return of the King dialog portraits."
+group = "The Two Towers"
+default_enabled = false
+
+[[feature]]
 id = "color-vision"
 name = "Color vision correction"
 description = "Recolors the screen so colors that are hard to tell apart with color blindness look different. Display only."
@@ -3982,6 +3989,10 @@ id = "rotk.pc.color-vision"
 [[plugin]]
 feature = "ttt-rotk-sprites"
 id = "rotk.pc.ttt-rotk-sprites"
+
+[[plugin]]
+feature = "ttt-rotk-portraits"
+id = "rotk.pc.ttt-rotk-portraits"
 
 [[plugin]]
 feature = "rumble"

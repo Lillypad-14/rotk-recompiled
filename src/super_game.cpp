@@ -29,8 +29,16 @@ bool g_tttRotkSprites = false;
 fs::path g_rotkRomCopy;
 constexpr std::uint32_t kRomBytes = 0x02000000u;
 
+// "ttt-rotk-portraits": its dialog portraits are ROTK's (same ROM copy).
+bool g_tttRotkPortraits = false;
+
 void tttRotkSpritesActivated() { g_tttRotkSprites = true; }
-void tttRotkSpritesReset() { g_tttRotkSprites = std::getenv("ROTK_TTT_ROTK_SPRITES") != nullptr; }
+void tttRotkPortraitsActivated() { g_tttRotkPortraits = true; }
+void tttRotkSpritesReset()
+{
+    g_tttRotkSprites = std::getenv("ROTK_TTT_ROTK_SPRITES") != nullptr;
+    g_tttRotkPortraits = std::getenv("ROTK_TTT_ROTK_PORTRAITS") != nullptr;
+}
 
 // This game's ROM as loaded, in a temp file for The Two Towers' host.
 fs::path rotkRomCopy()
@@ -189,8 +197,9 @@ void playTwoTowers()
     char colorVision[16] = {};
     const bool hadColorVision = GetEnvironmentVariableA("ROTK_PC_COLOR_VISION", colorVision, sizeof colorVision) != 0;
     SetEnvironmentVariableA("ROTK_PC_COLOR_VISION", colorVisionModeName());
-    const fs::path rotkRom = g_tttRotkSprites ? rotkRomCopy() : fs::path();
-    SetEnvironmentVariableA("ROTK_TTT_ROTK_SPRITES", rotkRom.empty() ? nullptr : "1");
+    const fs::path rotkRom = g_tttRotkSprites || g_tttRotkPortraits ? rotkRomCopy() : fs::path();
+    SetEnvironmentVariableA("ROTK_TTT_ROTK_SPRITES", !rotkRom.empty() && g_tttRotkSprites ? "1" : nullptr);
+    SetEnvironmentVariableA("ROTK_TTT_ROTK_PORTRAITS", !rotkRom.empty() && g_tttRotkPortraits ? "1" : nullptr);
     SetEnvironmentVariableA("ROTK_TTT_ROTK_ROM", rotkRom.empty() ? nullptr : rotkRom.string().c_str());
 
     // straight into the game: the GBA boot logo would break the swap
@@ -210,6 +219,7 @@ void playTwoTowers()
     if (hadModsRoot) SetEnvironmentVariableW(L"GBARECOMP_MODS_ROOT", modsRoot);
     SetEnvironmentVariableA("ROTK_PC_COLOR_VISION", hadColorVision ? colorVision : nullptr);
     SetEnvironmentVariableA("ROTK_TTT_ROTK_SPRITES", nullptr);
+    SetEnvironmentVariableA("ROTK_TTT_ROTK_PORTRAITS", nullptr);
     SetEnvironmentVariableA("ROTK_TTT_ROTK_ROM", nullptr);
     if (!started) {
         std::fprintf(stderr, "[rotk] super game: could not start %s\n", g_executable.string().c_str());
@@ -275,6 +285,7 @@ void playTwoTowers()
 void superGameRegister(gbarecomp::RunOptions& options)
 {
     gba_mod_register_activation_plugin("rotk.pc.ttt-rotk-sprites", tttRotkSpritesActivated);
+    gba_mod_register_activation_plugin("rotk.pc.ttt-rotk-portraits", tttRotkPortraitsActivated);
     gba_mod_register_reset_callback(tttRotkSpritesReset);
     options.launcher_companion_label = "The Two Towers ROM";
     options.launcher_companion_note =

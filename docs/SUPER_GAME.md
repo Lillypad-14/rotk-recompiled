@@ -546,23 +546,19 @@ Findings so far (prototype `rotk/two-towers/tools/rotk_hero_sprites.py` converts
 ### Phase 5 status and next session (updated 2026-11-02, end of session)
 
 **Start here.** Phase 5 is the PC-only option that draws The Two Towers' heroes with ROTK's sprites.
-The user first called it "real unfinished" (Aragorn held a bow). Since then everything under
-"Done" was fixed and checked headless (no window); the user has not looked in a window since.
+**Scope (the user, 2026-11-02): sprites and character models only. No menu, hero select or other
+screen art.** The user first called it "real unfinished" (Aragorn held a bow); after everything under
+"Done" up to 7, they played it in a window and said attacking felt clunky, which Done 4 (the combo
+chain) answers. They have not looked at the chain in a window yet.
 
 Next session, in order:
-1. Ask the user to look in a window (`ROTK_TTT_ROTK_SPRITES=1` + `ROTK_TTT_ROTK_ROM`, then
-   PlayTwoTowers.cmd): mash B for the combo, use skills, talk at the start of Helm's Deep for the
-   portraits. Their report decides what comes next.
+1. Ask the user how the combo chain feels in a window (mash B; slow taps play the recoveries). If
+   chained swings are silent, find where the Two Towers plays its swing sound at an attack's start
+   (ROTK keeps a combo sound pending in comboState[4]).
 2. Gimli: unchecked everywhere (weapon, combo, Axe Throw 0x08329584, Whirlwind 0x08329598, idle at
    3). Hero select needs a third Right/Left press (see "Other heroes" below); make a state at 5560
    for him like the others.
-3. Hero select screen: its big hero render (BG art, "ARAGORN" panel) is the Two Towers'. ROTK's
-   stat-screen hero portraits (carved/data/hero_portraits, 8x6 tiles, 8bpp, HeroPortraits at
-   0x08B91FD4) are the nearest ROTK art; find how the select scene loads its render first.
-4. Menus: the backpack/stat screens and the skill screen still show Two Towers art (silhouette,
-   skill icons). The ROTK side already ports TTT skill icons the other way (src/two_towers.cpp).
-5. Aragorn's two pose variants (0x0832946C, 0x083293E0, see Done 5) never seen in play.
-6. Optional: a real combo (ROTK recovery poses and timing); it is looks only now.
+3. Aragorn's two pose variants (0x0832946C, 0x083293E0, see Done 5) never seen in play.
 
 Commits this phase: 17da709 bodies, 786c711 weapons, 7ef6848 skill animations, 28aa44c weapon
 kinds, b139e21 hits, 921cbbf weapon colors, 22f1aa5 combo, fdca774 specials (build after the cart
@@ -571,10 +567,15 @@ rotk repo's two-towers/tools/rotk_hero_sprites.py hotspot/box order fix (the use
 whether to commit it).
 
 How to run it:
-- Launcher: feature "ROTK heroes in The Two Towers" (rotk.pc, off by default); switch from ROTK's
-  main menu. ROTK dumps its ROM to %TEMP%/rotk-recompiled-rom.gba and sets ROTK_TTT_ROTK_SPRITES=1
-  and ROTK_TTT_ROTK_ROM for the child (src/super_game.cpp).
-- Direct: set those two variables (ROM = .private/rotk.gba) and run PlayTwoTowers.cmd.
+- Launcher: two features of rotk.pc, both off by default and independent (the user, 2026-11-02:
+  portraits "probably didn't need" replacing, so each is optional): "ROTK heroes in The Two Towers"
+  (ttt-rotk-sprites: bodies, weapons, combo, skills, colors) and "ROTK portraits in The Two Towers"
+  (ttt-rotk-portraits: dialog portraits only). Switch from ROTK's main menu. ROTK dumps its ROM to
+  %TEMP%/rotk-recompiled-rom.gba when either is on and sets ROTK_TTT_ROTK_SPRITES=1 and/or
+  ROTK_TTT_ROTK_PORTRAITS=1 plus ROTK_TTT_ROTK_ROM for the child (src/super_game.cpp).
+- Direct: set ROTK_TTT_ROTK_SPRITES=1 and/or ROTK_TTT_ROTK_PORTRAITS=1 and ROTK_TTT_ROTK_ROM (ROM =
+  .private/rotk.gba), then run PlayTwoTowers.cmd. Checked headless at frame 3400 of the route: each
+  alone and both together draw as expected.
 - Never run TTT-Recompiled.exe with `--help`: it starts the game (in a window). Headless runs use
   `--no-window`, absolute paths, and one run at a time (parallel runs fight over the mod state
   file: "cannot publish mod state").
@@ -617,7 +618,7 @@ image's second word is its hash, so a save state holding another build's image i
 - pose table 0x08329664 (hero * 6 + pose) with ROTK body animations (kSources: walk = move 6,
   stand = move 4, attack = melee 0, death = move 1, flinch = move 3, cast = cast 0); the attack gets
   the Two Towers' body attack box (slot 1) on the matching frame, scaled to the ROTK frame count.
-  The attack entry is answered per hero by `comboAttack` (Done 4);
+  The attack entry is answered per hero by `comboAttack` (the chain's first swing; Done 4);
 - hero palettes 0x0832B248 + (hero + 0x33) * 4 with ROTK's ObjPalettes[0x21 + hero];
 - weapon table 0x083314A0 (kind * 6 + pose) with ROTK weapon parts (frames padded to the body's,
   in ROTK's weapons palette, bank 2, drawn through the renderer's palette provider: hooks on
@@ -648,11 +649,42 @@ Done (each checked headless):
    Legolas's shots kill. Rechecked after fdca774 (the Two Towers' boxes now present): still kills.
 3. Weapon colors (921cbbf): ROTK's weapons palette instead of the nearest hero colors (Aragorn's
    blade has ROTK's three greys where it had one).
-4. Combo (22f1aa5, looks only): an attack that starts within 50 frames of the hero's last one
-   plays ROTK's next swing (melee 0, 2, 4, then back to 0), body and weapon, each with its own
-   strike box. The game reads the body's attack entry once per attack and the weapon's every tick,
-   and the attack still lasts the Two Towers' 20 frames, so ROTK's recoveries (melee 1/3) and its
-   longer third swing are not played out. Each swing forced alone killed in the fight check.
+4. Combo chain (2026-11-02, replaces 22f1aa5's looks-only combo; the user called that one
+   "clunky, nothing like ROTK's smooth chain of 3 hits"). ROTK's rules, read from actor_player_tick
+   0x080236B8 melee state 3 (case at 0x08024602; actor +0x95 melee pose, +0x9C stage 1/2/4/8/0x10,
+   +0x9E press kept): melee 0, 2, 4 are swings, 1 and 3 the recoveries after the first two. A B
+   press during swing 0 or 2 is kept, and when the swing ends the next one starts at once; with no
+   press the recovery plays, and a press on its frames 0..4 starts the next swing. Swing 4 and the
+   recoveries end the attack. The Two Towers' attack is state 3 (actor +0x67), started from the pose
+   table's attack entry and ended when its animation does (actor +0xE8 bit 0x00400000); stock, a
+   press during a swing was dropped and the hero stood for 1..3 ticks between swings.
+   `comboTick` runs in the compose hook for player bodies (tick callback 0x0801AFC9): presses come
+   from 0x030038E0 + 2 * player (u16, pressed this tick; 0x030038DC is held), and the swap is made
+   by `comboApply` after the OAM copy (0x0800E270 hook): made while drawing, the body was drawn one
+   frame with the new record before its tiles were loaded (a blank body). The swap writes the record
+   (+0x24 and +0x8C), frame 0 (+0x22), ROTK's ticks (+0x20/+0x21) and clears the end bit. The weapon
+   follows the body's frame and reads its entry every tick (`comboPose`). Recoveries have no strike
+   boxes. Each animation frame with a box hits once (hit callback: weapon countdown == ticks), so
+   every swing deals damage. Swing lengths (Aragorn, ticks): 12, 10, 18; recoveries about 4 frames
+   at 2 ticks. Checked headless: mash (B every 4 ticks) plays 0, 2, 4, idle, 0...; slow taps play
+   0, 1, cancel to 2, 3, idle; the fight check kills; no blank frame at the swaps.
+   `ROTK_TTT_TRACE_ATTACK=1` logs player 0's body each tick (state, frame, melee pose, B).
+8. Balance kept stock (2026-11-02; the user found the chain "a lot more powerful than the vanilla
+   attack and high accuracy"). Damage and accuracy are the Two Towers' own (one roll per hit frame,
+   0x08010ED4 -> 0x0800D5DC, same per-attack fields), and every ROTK swing has one hit frame like
+   the stock swing. Mashing B gives about the stock rate of hit frames (stock 30, chain 24 in 320
+   ticks; a fight: 28 vs 26). What differed was box sizes: ROTK's weapon strike boxes reach much
+   further (Aragorn 67 wide vs 40, Gimli 57 vs 30), so swings connected from further away and with
+   more foes. Weapons were given the Two Towers' box at ROTK's strike frame, but the user preferred
+   ROTK's reach ("it felt better before"), so **weapons keep ROTK's own strike boxes, by choice**.
+   Bodies take both slots from the Two Towers' animation they replace (`fromTt`:
+   slot 0 hurt box held per frame, slot 1 attack box scaled; recoveries none). That also fixed: the
+   cast pose had lost its stock attack box; Frodo's snare and Aragorn's sweep were hittable (stock:
+   no hurt box); Gimli's Whirlwind had no hurt box and no art (it pointed at melee pose 5, which
+   Gimli lacks; ROTK's Whirling Attack is his cast pose 2, now used, unseen in play).
+   Checks: `ROTK_TTT_DUMP_BOXES=1` prints every weapon's and body's boxes, stock vs converted (all
+   44 bodies/specials match); `ROTK_TTT_TRACE_HITS=1` logs each tick player 0's weapon shows a hit
+   frame; `ROTK_TTT_TEST_VANILLA=1` runs the hooks and traces with the stock art, for A/B runs.
 5. Specials (fdca774): build moved to the first ROM read (see above); the skills' cast functions,
    reached only through the skill cast table 0x08057AB0, are extra_funcs in config/ttt.toml (they
    used to run through the interpreter, which also bypassed the override). With the skill
