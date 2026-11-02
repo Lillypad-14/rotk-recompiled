@@ -72,6 +72,16 @@ constexpr std::uint32_t kOamEntries = 128;
 constexpr const char* kHookIds[] = {"ttt.rotk-sprites-compose", "ttt.rotk-sprites-push", "ttt.rotk-sprites-loose",
                                     "ttt.rotk-sprites-oam-copy"};
 enum Pose { kWalk, kStand, kAttack, kDeath, kFlinch, kCast };
+// ROTK's combo: an attack that starts soon after the last one plays the next swing (melee poses 0,
+// 2 and 4). Looks only: the Two Towers' attack timing and damage are unchanged. The game reads the
+// body's attack entry once when an attack starts and the weapon's on every tick. Times are the
+// game's frame counter (60 a second): word +0x1C of the struct at *0x03003910.
+constexpr int kComboSteps = 3;
+constexpr std::uint32_t kComboSwings[kComboSteps] = {0, 2, 4};
+constexpr std::uint32_t kGameStatePointer = 0x03003910u, kGameFrame = 0x1Cu;
+// within kComboWindow frames of the last attack's start, the next swing (stock attacks start at
+// least 20 apart); within kComboSame, the same attack read again
+constexpr std::uint32_t kComboWindow = 50, kComboSame = 8;
 
 // ROTK: per hero a bank of part * 7 + pose entries, each 5 inline 16-byte SpriteAnimation records.
 constexpr std::uint32_t kMoveBanks = 0x08282898u, kMeleeBanks = 0x082828B8u, kCastBanks = 0x082828D8u;
@@ -130,6 +140,13 @@ struct State {
     Bytes image;  // written at kDataBase
     std::uint32_t poseTable = 0, palettes = 0, blankWeapon = 0;
     std::uint32_t weaponTable[kWeaponEntries] = {};
+    // the attack's facing arrays per combo step (step 0 is the tables' own)
+    std::uint32_t comboBody[kHeroes][kComboSteps] = {};
+    std::uint32_t comboWeapon[kWeaponEntries / kPoses][kComboSteps] = {};
+    // per hero: the combo step showing and when its attack started
+    int comboStep[kHeroes] = {};
+    std::uint32_t comboStart[kHeroes] = {};
+    bool comboStarted[kHeroes] = {};
     // code literals that load a special animation, and the converted facing array each answers with
     std::vector<std::pair<std::uint32_t, std::uint32_t>> literals;
     std::uint32_t literalsLow = ~0u, literalsHigh = 0;
@@ -417,53 +434,64 @@ void build()
     put32(image, kMagic);
     put32(image, 0);  // the image's hash, set when it is complete
     Bytes poseTable(kHeroes * kPoses * 4, 0), palettes;
+    // a hero's body animation as a facing array; attack boxes from the Two Towers' pose when attacking
+    auto bodyArray = [&](int hero, const Source& source, int pose) {
+        const std::uint32_t entry = r32(rom, r32(rom, source.banks + hero * 4u) + source.pose * 4u);
+        const std::uint32_t ttFacings = bus_read_u32(kPoseTable + (hero * kPoses + pose) * 4u);
+        Bytes facings;
+        for (int facing = 0; facing < kFacings; ++facing) {
+            BoxPlan plan;
+            if (pose == kAttack) plan.tt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 1);
+            const Converted c = convert(rom, entry + facing * kRecordSize, plan);
+            Bytes record;
+            put32(record, append(image, c.tiles));
+            put32(record, append(image, c.frameSet));
+            put32(facings, append(image, record));
+        }
+        return append(image, facings);
+    };
+    // a weapon kind's animation drawn with its hero's body, as many frames as the body has
+    auto weaponArray = [&](int kind, const Source& source, int pose) {
+        const int hero = kWeaponSources[kind].hero;
+        const std::uint32_t bank = r32(rom, source.banks + hero * 4u);
+        const std::uint32_t body = r32(rom, bank + source.pose * 4u);
+        const std::uint32_t part = kWeaponSources[kind].part;
+        const std::uint32_t entry = part ? r32(rom, bank + (part * 7u + source.pose) * 4u) : 0;
+        const bool art = entry >= kRomBase && entry < kRomBase + rom.size();
+        const std::uint32_t ttFacings = bus_read_u32(kWeaponPoseTable + (kind * kPoses + pose) * 4u);
+        Bytes facings;
+        for (int facing = 0; facing < kFacings; ++facing) {
+            const std::uint32_t bodyFrames = r16(rom, r32(rom, body + facing * kRecordSize + 4) + 6);
+            BoxPlan plan;
+            plan.weapon = true;
+            plan.tt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 0);
+            const Converted c = art ? convert(rom, entry + facing * kRecordSize, plan, bodyFrames)
+                                    : blankAnimation(blankBoxes(scaleBoxes(plan.tt, bodyFrames)));
+            Bytes record;
+            put32(record, append(image, c.tiles));
+            put32(record, append(image, c.frameSet));
+            const std::uint32_t at = append(image, record);
+            if (art) g_state.weaponRecords.push_back(at);
+            put32(facings, at);
+        }
+        return append(image, facings);
+    };
     for (int hero = 0; hero < kHeroes; ++hero) {
         for (int pose = 0; pose < kPoses; ++pose) {
-            const Source& source = kSources[pose];
-            const std::uint32_t entry = r32(rom, r32(rom, source.banks + hero * 4u) + source.pose * 4u);
-            Bytes facings;
-            const std::uint32_t ttFacings = bus_read_u32(kPoseTable + (hero * kPoses + pose) * 4u);
-            for (int facing = 0; facing < kFacings; ++facing) {
-                BoxPlan plan;
-                if (pose == kAttack) plan.tt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 1);
-                const Converted c = convert(rom, entry + facing * kRecordSize, plan);
-                Bytes record;
-                put32(record, append(image, c.tiles));
-                put32(record, append(image, c.frameSet));
-                put32(facings, append(image, record));
-            }
-            const std::uint32_t array = append(image, facings);
+            const std::uint32_t array = bodyArray(hero, kSources[pose], pose);
             std::memcpy(poseTable.data() + (hero * kPoses + pose) * 4, &array, 4);
+            if (pose == kAttack) g_state.comboBody[hero][0] = array;
         }
+        for (int step = 1; step < kComboSteps; ++step)
+            g_state.comboBody[hero][step] = bodyArray(hero, {kMeleeBanks, kComboSwings[step]}, kAttack);
         const std::uint32_t palette = r32(rom, kObjPalettes + (kHeroPaletteBase + hero) * 4u);
-        // the weapon kinds drawn with this hero, as many frames as the body has in each pose
         for (int kind = 0; kind < static_cast<int>(std::size(kWeaponSources)); ++kind) {
             if (kWeaponSources[kind].hero != hero) continue;
-            for (int pose = 0; pose < kPoses; ++pose) {
-                const Source& source = kSources[pose];
-                const std::uint32_t bank = r32(rom, source.banks + hero * 4u);
-                const std::uint32_t body = r32(rom, bank + source.pose * 4u);
-                const std::uint32_t part = kWeaponSources[kind].part;
-                const std::uint32_t entry = part ? r32(rom, bank + (part * 7u + source.pose) * 4u) : 0;
-                const bool art = entry >= kRomBase && entry < kRomBase + rom.size();
-                const std::uint32_t ttFacings = bus_read_u32(kWeaponPoseTable + (kind * kPoses + pose) * 4u);
-                Bytes facings;
-                for (int facing = 0; facing < kFacings; ++facing) {
-                    const std::uint32_t bodyFrames = r16(rom, r32(rom, body + facing * kRecordSize + 4) + 6);
-                    BoxPlan plan;
-                    plan.weapon = true;
-                    plan.tt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 0);
-                    const Converted c = art ? convert(rom, entry + facing * kRecordSize, plan, bodyFrames)
-                                            : blankAnimation(blankBoxes(scaleBoxes(plan.tt, bodyFrames)));
-                    Bytes record;
-                    put32(record, append(image, c.tiles));
-                    put32(record, append(image, c.frameSet));
-                    const std::uint32_t at = append(image, record);
-                    if (art) g_state.weaponRecords.push_back(at);
-                    put32(facings, at);
-                }
-                g_state.weaponTable[kind * kPoses + pose] = append(image, facings);
-            }
+            for (int pose = 0; pose < kPoses; ++pose)
+                g_state.weaponTable[kind * kPoses + pose] = weaponArray(kind, kSources[pose], pose);
+            g_state.comboWeapon[kind][0] = g_state.weaponTable[kind * kPoses + kAttack];
+            for (int step = 1; step < kComboSteps; ++step)
+                g_state.comboWeapon[kind][step] = weaponArray(kind, {kMeleeBanks, kComboSwings[step]}, kAttack);
         }
         Bytes colors;
         for (std::uint32_t i = 0; i < 32; ++i) colors.push_back(static_cast<std::uint8_t>(r8(rom, palette + i)));
@@ -509,11 +537,28 @@ void ensureWritten()
         bus_write_u8(kDataBase + static_cast<std::uint32_t>(i), g_state.image[i]);
 }
 
+// A hero's attack starting: the combo's next swing when the last one started recently.
+std::uint32_t comboAttack(int hero)
+{
+    const std::uint32_t now = bus_read_u32(bus_read_u32(kGameStatePointer) + kGameFrame);
+    const std::uint32_t since = now - g_state.comboStart[hero];
+    int& step = g_state.comboStep[hero];
+    if (!g_state.comboStarted[hero] || since > kComboWindow)
+        step = 0;
+    else if (since >= kComboSame)
+        step = (step + 1) % kComboSteps;
+    if (!g_state.comboStarted[hero] || since >= kComboSame) g_state.comboStart[hero] = now;
+    g_state.comboStarted[hero] = true;
+    return g_state.comboBody[hero][step];
+}
+
 int romRead32(std::uint32_t address, std::uint32_t, std::uint32_t* out)
 {
     if (address >= kPoseTable && address < kPoseTable + kHeroes * kPoses * 4u) {
         ensureWritten();
-        *out = bus_read_u32(g_state.poseTable + (address - kPoseTable));
+        const std::uint32_t entry = (address - kPoseTable) / 4u;
+        *out = entry % kPoses == kAttack ? comboAttack(static_cast<int>(entry / kPoses))
+                                         : bus_read_u32(g_state.poseTable + entry * 4u);
         return 1;
     }
     if (address < kCodeEnd) {
@@ -528,7 +573,10 @@ int romRead32(std::uint32_t address, std::uint32_t, std::uint32_t* out)
     }
     if (address >= kWeaponPoseTable && address < kWeaponPoseTable + kWeaponEntries * 4u) {
         ensureWritten();
-        const std::uint32_t weapon = g_state.weaponTable[(address - kWeaponPoseTable) / 4u];
+        const std::uint32_t entry = (address - kWeaponPoseTable) / 4u, kind = entry / kPoses;
+        const std::uint32_t weapon = entry % kPoses == kAttack
+                                         ? g_state.comboWeapon[kind][g_state.comboStep[kWeaponSources[kind].hero]]
+                                         : g_state.weaponTable[entry];
         // ROTK_TTT_TRACE_WEAPON=1 logs each weapon kind and pose the game first reads
         static std::uint32_t seen[kWeaponEntries] = {};
         if (std::getenv("ROTK_TTT_TRACE_WEAPON") && !seen[(address - kWeaponPoseTable) / 4u]++)
@@ -585,6 +633,8 @@ void reset()
     if (g_state.image.empty()) build();
     gba::g_rom_read32_override = romRead32;
     g_state.actorWeapon = false;
+    std::fill(std::begin(g_state.comboStep), std::end(g_state.comboStep), 0);
+    std::fill(std::begin(g_state.comboStarted), std::end(g_state.comboStarted), false);
     g_state.pending.fill(false);
     g_state.displayed.fill(false);
     gba::g_obj_palette_provider = paletteProvider;

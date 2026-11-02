@@ -604,7 +604,12 @@ Known problems, in order:
 3. Weapon colors (fixed 2026-11-02): weapons draw in ROTK's own weapons palette instead of the
    nearest hero colors (see the weapon table above). Checked for Aragorn's sword: the blade has
    ROTK's three greys where it had one. Other heroes' weapons not looked at yet.
-4. One swing only; ROTK's combo (melee 0/2/4 with recoveries 1/3) not used.
+4. Combo (done 2026-11-02, looks only): an attack that starts within 50 frames of the hero's last one
+   plays ROTK's next swing (melee 0, 2, 4, then back to 0), body and weapon, each with its own
+   strike box (`comboAttack`). The game reads the body's attack entry once per attack and the
+   weapon's every tick, and the attack still lasts the Two Towers' 20 frames, so ROTK's recoveries
+   (melee 1/3) and its longer third swing are not played out. Each swing forced alone killed in
+   the fight check; the kill times vary with how the fight goes, not with the swing.
 5. The specials mapping is a guess per animation; verify each skill in play.
 6. Not converted: HUD portraits, menus, other characters. Animation timing: ROTK walk and swing play
    at the Two Towers' 1 tick per frame (as ROTK); idle is 3 ticks per frame (ROTK uses 2).
