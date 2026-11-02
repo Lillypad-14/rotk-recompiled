@@ -617,9 +617,15 @@ How to run it:
   writes ROTK's tiles into TTT HUD tile slots (0x01.., 0x3C, 0x50; TTT's message text uses 0x27..),
   the map rows 16..19 and the palette (bank = TTT's HUD bank, into the BG shadow 0x030003E8 too, and
   palette RAM unless a fade runs, 0x03003620). Checked headless on the Helm's Deep route: bars,
-  vial and colors right in both levels, backpack screens untouched. Not yet: the middle box ROTK
-  shows (a sprite indicator, 0x080629C0 table), the skill circle's icon (still ROTK's default),
-  pickup messages on the strip unseen.
+  vial and colors right in both levels, backpack screens untouched. The skill circle is ROTK's
+  multi-purpose indicator, not the selected skill: ROTK redraws it (tile base 0x44 at 27, 17) with a
+  boss's health from 0x08282A90 (15 steps, PLAYERHUD_FLAG_BOSS_BAR, 0x08028E1E) and two counters
+  from 0x08282B44/0x08282B64 (font_drawString puts the number beside it); idle, it is the green
+  arrow the port shows. The dark middle box in the arena capture is not drawn by the HUD layout
+  (likely the arena's own state); normal play leaves it clear as the port does. The top-left
+  emblems 0x08282B94 (ring, face, crown, starburst, 4x3 at tile 0x56) are not ported (corruption has
+  no Two Towers meaning). Unseen: a pickup message on the strip; a boss fight in the circle (could
+  feed Two Towers boss health later).
 - Direct: set ROTK_TTT_ROTK_SPRITES=1 (+ ROTK_TTT_ROTK_SKILLS=1) and/or ROTK_TTT_ROTK_PORTRAITS=1 and
   ROTK_TTT_ROTK_ROM (ROM = .private/rotk.gba), then run PlayTwoTowers.cmd. Checked headless at frame 3400 of the route: each
   alone and both together draw as expected.
