@@ -848,6 +848,12 @@ void build(const std::vector<std::uint8_t>& rom)
 
 void twoTowersFind(const std::vector<std::string>& args)
 {
+    // ROTK_PC_TWO_TOWERS=0 (the launcher's Two Towers checkbox, off): as without the ROM, so no legacy
+    // items or skills, hero import or The Two Towers row
+    if (const char* on = std::getenv("ROTK_PC_TWO_TOWERS"); on && std::strcmp(on, "0") == 0) {
+        std::fprintf(stderr, "[rotk] The Two Towers: off in the launcher\n");
+        return;
+    }
     const std::vector<std::uint8_t> rom = findRom(args);
     if (rom.empty()) return;
     build(rom);

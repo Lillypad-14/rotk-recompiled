@@ -42,6 +42,7 @@ FRAMEWORK_PATCHES = [
     ROOT / "patches/host-fast-forward.patch",
     ROOT / "patches/headless-framedump.patch",
     ROOT / "patches/host-palettes.patch",
+    ROOT / "patches/launcher-companion-toggle.patch",
 ]
 
 # recomp-ui (launcher) patches, applied the same way to external/recomp-ui.
@@ -52,6 +53,7 @@ RECOMP_UI_PATCHES = [
     ROOT / "patches/recomp-ui-bios-row.patch",
     ROOT / "patches/recomp-ui-controls.patch",
     ROOT / "patches/recomp-ui-companion-rom.patch",
+    ROOT / "patches/recomp-ui-companion-toggle.patch",
 ]
 
 STOCK_ROM_SIZE = 0x1000000

@@ -1,0 +1,84 @@
+diff --git a/src/runtime/runtime.h b/src/runtime/runtime.h
+--- a/src/runtime/runtime.h
++++ b/src/runtime/runtime.h
+@@ -377,6 +377,11 @@ struct RunOptions {
+     const char* launcher_companion_note = nullptr;
+     const char* (*launcher_companion_status)(const char* path) = nullptr;
+     void (*launcher_companion_chosen)(const char* path) = nullptr;
++    // A checkbox on that row turning what the companion brings on and off (saved, on by
++    // default); its state reaches launcher_companion_enabled before every boot, before
++    // launcher_companion_chosen. Null label = no checkbox.
++    const char* launcher_companion_toggle_label = nullptr;
++    void (*launcher_companion_enabled)(bool on) = nullptr;
+     // Keep an implemented extended-view mode out of the public launcher while
+     // it is still being profiled. Explicit CLI/TOML opt-ins remain available.
+     // Defaults true so existing games (including MMZ) retain today's UI.
+diff --git a/src/runtime/launcher_seam.h b/src/runtime/launcher_seam.h
+--- a/src/runtime/launcher_seam.h
++++ b/src/runtime/launcher_seam.h
+@@ -344,6 +344,7 @@ struct SeamConfig {
+     int  edition_enabled = 0;
+     std::string rom_patch_path;
+     std::string companion_path;
++    int  companion_enabled = 1;
+ };
+ 
+ inline void seam_config_load(const std::string& path, SeamConfig* c) {
+@@ -397,6 +398,7 @@ inline void seam_config_load(const std::string& path, SeamConfig* c) {
+         else if (key == "edition_enabled") c->edition_enabled = std::atoi(val.c_str());
+         else if (key == "rom_patch_path") c->rom_patch_path = val;
+         else if (key == "companion_rom") c->companion_path = val;
++        else if (key == "companion_enabled") c->companion_enabled = std::atoi(val.c_str());
+     }
+     if (c->scale < 1) c->scale = 1;
+     if (c->scale > 8) c->scale = 8;
+@@ -467,6 +469,7 @@ inline void seam_config_save(const std::string& path, const SeamConfig& c) {
+     f << "edition_enabled = " << c.edition_enabled << "\n";
+     f << "rom_patch_path = " << c.rom_patch_path << "\n";
+     f << "companion_rom = " << c.companion_path << "\n";
++    f << "companion_enabled = " << c.companion_enabled << "\n";
+ }
+ 
+ // ---- config.ini [Solar] ------------------------------------------------------
+@@ -723,6 +726,8 @@ inline int gbarecomp_launcher_preboot(std::vector<std::string>& args,
+         // Boot straight in, but still honor the persisted settings.
+         if (opts.launcher_edition_chosen && opts.launcher_edition_label)
+             opts.launcher_edition_chosen(cfg.edition_enabled);
++        if (opts.launcher_companion_enabled && opts.launcher_companion_toggle_label)
++            opts.launcher_companion_enabled(cfg.companion_enabled != 0);
+         if (opts.launcher_companion_chosen && opts.launcher_companion_label)
+             opts.launcher_companion_chosen(cfg.companion_path.c_str());
+         seam_append_setting_args(args, cfg, opts);
+@@ -820,6 +825,7 @@ inline int gbarecomp_launcher_preboot(std::vector<std::string>& args,
+     ls.edition_enabled = opts.launcher_edition_label ? cfg.edition_enabled : 0;
+     std::snprintf(ls.companion_path, sizeof(ls.companion_path), "%s",
+                   cfg.companion_path.c_str());
++    ls.companion_enabled = cfg.companion_enabled;
+     std::snprintf(ls.rom_patch_path, sizeof(ls.rom_patch_path), "%s",
+                   cfg.rom_patch_path.c_str());
+     gbarecomp_seam::set_gyro_sensitivity(ls, cfg.gyro_sensitivity);
+@@ -851,6 +857,7 @@ inline int gbarecomp_launcher_preboot(std::vector<std::string>& args,
+     gi.companion_label = opts.launcher_companion_label;
+     gi.companion_note = opts.launcher_companion_note;
+     gi.companion_status = opts.launcher_companion_status;
++    gi.companion_toggle_label = opts.launcher_companion_toggle_label;
+     gi.region = opts.launcher_region;
+     // SHA-1 is gbarecomp's real ROM identity gate — hand the launcher the
+     // SAME fingerprint so its "verified" check agrees with the runtime (a
+@@ -988,6 +995,7 @@ inline int gbarecomp_launcher_preboot(std::vector<std::string>& args,
+     cfg.rom_patch_enabled = ls.rom_patch_enabled ? 1 : 0;
+     if (opts.launcher_edition_label) cfg.edition_enabled = ls.edition_enabled ? 1 : 0;
+     if (opts.launcher_companion_label) cfg.companion_path = ls.companion_path;
++    if (opts.launcher_companion_toggle_label) cfg.companion_enabled = ls.companion_enabled ? 1 : 0;
+     cfg.rom_patch_path = ls.rom_patch_path;
+     seam_config_save(config_path, cfg);
+     // Only rewrite [Solar] when this recomp-ui pin actually surfaced the panel;
+@@ -1021,6 +1029,8 @@ inline int gbarecomp_launcher_preboot(std::vector<std::string>& args,
+     }
+     if (opts.launcher_edition_chosen && opts.launcher_edition_label)
+         opts.launcher_edition_chosen(cfg.edition_enabled);
++    if (opts.launcher_companion_enabled && opts.launcher_companion_toggle_label)
++        opts.launcher_companion_enabled(cfg.companion_enabled != 0);
+     if (opts.launcher_companion_chosen && opts.launcher_companion_label)
+         opts.launcher_companion_chosen(cfg.companion_path.c_str());
+     seam_append_setting_args(args, cfg, opts);

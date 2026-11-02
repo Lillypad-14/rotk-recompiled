@@ -93,6 +93,14 @@ when the host can start it and hands the window over:
    and a return waited for it to quit. The present hook only runs with a window: headless runs
    never reach the handoff.
 
+**Launcher checkbox** (the user, 2026-11-02): the Two Towers ROM row has a "Two Towers features"
+checkbox (patches `launcher-companion-toggle.patch` and `recomp-ui-companion-toggle.patch`: RunOptions
+`launcher_companion_toggle_label`/`launcher_companion_enabled`, Settings `companion_enabled`, saved as
+`companion_enabled` in config.ini, on by default). Off, ROTK sets `ROTK_PC_TWO_TOWERS=0` and
+`twoTowersFind` acts as without the ROM: no data block (legacy items, hero import), no The Two Towers
+row or background copy. The mod's legacy skills page also needs the data block on a PC host
+(`optionOn` in legacy_skills.c), so it goes too; on GBA it is unchanged.
+
 Two processes, one window at a time: gbarecomp can't hold two different cartridges in one process
 (the generated code and the runtime are per cartridge). On a real GBA the two could not share a
 cartridge either beyond a reset menu: 32 MB is the cartridge window (stock ROTK and The Two Towers

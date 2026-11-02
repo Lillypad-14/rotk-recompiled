@@ -93,6 +93,18 @@ const char* companionStatus(const char* path)
                               : "Not The Two Towers (USA, Europe), game code ALPE: pick another ROM";
 }
 
+// The launcher's Two Towers checkbox: off, this game runs as without The Two Towers' ROM
+// (ROTK_PC_TWO_TOWERS=0, read by twoTowersFind, and by the Expanded build it may start).
+void companionEnabled(bool on)
+{
+#if defined(_WIN32)
+    SetEnvironmentVariableA("ROTK_PC_TWO_TOWERS", on ? nullptr : "0");
+#else
+    if (on) unsetenv("ROTK_PC_TWO_TOWERS");
+    else setenv("ROTK_PC_TWO_TOWERS", "0", 1);
+#endif
+}
+
 void companionChosen(const char* path)
 {
     if (!checkedValid(path)) return;
@@ -398,6 +410,8 @@ void superGameRegister(gbarecomp::RunOptions& options)
         "for importing its heroes. Without a pick, a copy beside this game's ROM is used.";
     options.launcher_companion_status = companionStatus;
     options.launcher_companion_chosen = companionChosen;
+    options.launcher_companion_toggle_label = "Two Towers features (skills, item and hero import, switching)";
+    options.launcher_companion_enabled = companionEnabled;
 }
 
 void superGameFind(const std::vector<std::string>& args)

@@ -1,0 +1,61 @@
+diff --git a/src/recomp_launcher.h b/src/recomp_launcher.h
+--- a/src/recomp_launcher.h
++++ b/src/recomp_launcher.h
+@@ -1577,6 +1577,9 @@ struct RecompLauncherCSettings {
+     /* The companion ROM the player picked (GameInfo.companion_label), "" for
+      * none. Appended additively. */
+     char companion_path[512];
++    /* Whether what the companion ROM brings is on (GameInfo.companion_toggle_label),
++     * 1 by default. Appended additively. */
++    int  companion_enabled;
+ };
+ #define RECOMP_LAUNCHER_HAS_ZAPPER_SETTINGS 1
+ 
+@@ -2402,6 +2405,10 @@ typedef struct RecompLauncherCGameInfo {
+     const char*        companion_label;
+     const char*        companion_note;
+     const char*        (*companion_status)(const char* path);
++    /* A checkbox on the companion row turning what it brings on and off
++     * (Settings.companion_enabled); NULL = no checkbox. Appended for ABI
++     * stability. */
++    const char*        companion_toggle_label;
+ } RecompLauncherCGameInfo;
+ 
+ /* RecompLauncherCGameInfo carries texture_filter_labels / _values. */
+diff --git a/src/common/launcher_model.h b/src/common/launcher_model.h
+--- a/src/common/launcher_model.h
++++ b/src/common/launcher_model.h
+@@ -182,6 +182,7 @@ typedef struct {
+     const char* companion_label;
+     const char* companion_note;
+     const char* (*companion_status)(const char* path);
++    const char* companion_toggle_label;
+     bool        saves_supported;     // sram_path != NULL -> show the SAVES panel
+     const char* sram_path;           // borrowed; NULL when the game has no SRAM
+ 
+diff --git a/src/common/launcher_model.c b/src/common/launcher_model.c
+--- a/src/common/launcher_model.c
++++ b/src/common/launcher_model.c
+@@ -367,6 +367,7 @@ void launcher_model_init(LauncherModel* m,
+         m->companion_label      = game->companion_label;
+         m->companion_note       = game->companion_note;
+         m->companion_status     = game->companion_status;
++        m->companion_toggle_label = game->companion_toggle_label;
+         m->saves_supported      = game->sram_path != NULL;
+         m->sram_path            = game->sram_path;
+         m->has_solar_sensor     = game->has_solar_sensor != 0;
+diff --git a/src/common/backends/imgui/launcher_imgui.cpp b/src/common/backends/imgui/launcher_imgui.cpp
+--- a/src/common/backends/imgui/launcher_imgui.cpp
++++ b/src/common/backends/imgui/launcher_imgui.cpp
+@@ -2425,6 +2425,11 @@ void draw_game_panel(LauncherModel* m, const LauncherTheme& th, bool fill_h = fa
+                               ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
+             const float inner_w = ImGui::GetContentRegionAvail().x;
+             ImGui::TextUnformatted(m->companion_label);
++            if (m->companion_toggle_label && m->companion_toggle_label[0]) {
++                bool on = m->s.companion_enabled != 0;
++                if (ImGui::Checkbox(ui_text(m->companion_toggle_label), &on))
++                    m->s.companion_enabled = on ? 1 : 0;
++            }
+             const char* picked = m->s.companion_path;
+             const char* name = picked;
+             for (const char* c = picked; *c; ++c)
