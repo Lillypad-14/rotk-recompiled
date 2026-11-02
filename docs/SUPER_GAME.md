@@ -543,111 +543,144 @@ Findings so far (prototype `rotk/two-towers/tools/rotk_hero_sprites.py` converts
   hero palette reads answered from host RAM through gba::g_rom_read32_override, and the facing order
   checked (both games store 5 facings).
 
-### Phase 5 status and next session (2026-11-02)
+### Phase 5 status and next session (updated 2026-11-02, end of session)
 
-The user tried it in a window and called it "real unfinished"; the one concrete report was Aragorn
-holding a bow. Committed: 17da709 (bodies), 786c711 (weapons), 7ef6848 (skill animations).
+**Start here.** Phase 5 is the PC-only option that draws The Two Towers' heroes with ROTK's sprites.
+The user first called it "real unfinished" (Aragorn held a bow). Since then everything under
+"Done" was fixed and checked headless (no window); the user has not looked in a window since.
+
+Next session, in order:
+1. Ask the user to look in a window (`ROTK_TTT_ROTK_SPRITES=1` + `ROTK_TTT_ROTK_ROM`, then
+   PlayTwoTowers.cmd): mash B for the combo, use skills, talk at the start of Helm's Deep for the
+   portraits. Their report decides what comes next.
+2. Gimli: unchecked everywhere (weapon, combo, Axe Throw 0x08329584, Whirlwind 0x08329598, idle at
+   3). Hero select needs a third Right/Left press (see "Other heroes" below); make a state at 5560
+   for him like the others.
+3. Hero select screen: its big hero render (BG art, "ARAGORN" panel) is the Two Towers'. ROTK's
+   stat-screen hero portraits (carved/data/hero_portraits, 8x6 tiles, 8bpp, HeroPortraits at
+   0x08B91FD4) are the nearest ROTK art; find how the select scene loads its render first.
+4. Menus: the backpack/stat screens and the skill screen still show Two Towers art (silhouette,
+   skill icons). The ROTK side already ports TTT skill icons the other way (src/two_towers.cpp).
+5. Aragorn's two pose variants (0x0832946C, 0x083293E0, see Done 5) never seen in play.
+6. Optional: a real combo (ROTK recovery poses and timing); it is looks only now.
+
+Commits this phase: 17da709 bodies, 786c711 weapons, 7ef6848 skill animations, 28aa44c weapon
+kinds, b139e21 hits, 921cbbf weapon colors, 22f1aa5 combo, fdca774 specials (build after the cart
+is mapped), fc90598 idle speed, 3e9c339 + 79b5987 dialog portraits. Uncommitted elsewhere: the
+rotk repo's two-towers/tools/rotk_hero_sprites.py hotspot/box order fix (the user has not said
+whether to commit it).
 
 How to run it:
 - Launcher: feature "ROTK heroes in The Two Towers" (rotk.pc, off by default); switch from ROTK's
   main menu. ROTK dumps its ROM to %TEMP%/rotk-recompiled-rom.gba and sets ROTK_TTT_ROTK_SPRITES=1
   and ROTK_TTT_ROTK_ROM for the child (src/super_game.cpp).
 - Direct: set those two variables (ROM = .private/rotk.gba) and run PlayTwoTowers.cmd.
-- Headless check: `GBARECOMP_INPUT_REPLAY=tools/ttt_helms_deep_route.csv` reaches Helm's Deep, walks
-  (frame 5500), attacks (5720..6100, A) and presses B (6120..6400). Add `--no-window --frames 6450`
-  and `GBARECOMP_FRAMEDUMP_DIR=<dir> GBARECOMP_FRAMEDUMP_START=5560 GBARECOMP_FRAMEDUMP_COUNT=840`
-  (headless dumps need patches/headless-framedump.patch), then `python tools/frame_sheet.py <dir>
-  out.png --crop 10,0,90,80 --scale 2`. The hero stands near x 40, y 30 in those frames.
-- Offline: rotk/two-towers/tools/rotk_hero_sprites.py renders any ROTK hero animation converted.
-- Fight check (fast): run the route to frame 5560 with `--dump-state helms.state`, then rerun from
-  it with `--load-state helms.state` and a short route. Replay frames stay absolute (5560 + n). From
-  there, holding Down (0x37F) for about 410 frames reaches a group of Uruk-hai at a rock. Then tap B
-  (attack, 0x3FD; A is the skill) every 20 frames and turn toward them now and then. They die by
-  about frame 6400 and the XP bar gains pips. With no attacks they live, so kills mean hits.
-- Other heroes: in the route, drop the Start at 1375/1379 and press Right (0x3EF) or Left (0x3DF)
-  for 5 frames at 1377 + 9n; the A at 1400 confirms. Right: Gandalf, then Frodo; Left: Eowyn, then
-  Legolas (Gimli is a third press, not tried). Only Gandalf starts in Aragorn's level (he stalls
-  before the Uruk-hai); Frodo's and Eowyn's states at 5560 have the backpack open (Start closes it).
-  Checked 2026-11-02 from those states: every hero swings its ROTK weapon in ROTK colors with
-  the combo, and Legolas's shots kill.
+- Never run TTT-Recompiled.exe with `--help`: it starts the game (in a window). Headless runs use
+  `--no-window`, absolute paths, and one run at a time (parallel runs fight over the mod state
+  file: "cannot publish mod state").
 
-What src/rotk_sprites.cpp does (TTT plain host): converts ROTK animations (ROTK LZ77, packed pieces,
-6-byte boxes) to the Two Towers' format in host RAM at 0x12100000, then answers ROM reads through
-gba::g_rom_read32_override:
+Headless testing:
+- Base command (from a fresh run directory, paths absolute):
+  `GBARECOMP_INPUT_REPLAY=<route.csv> ROTK_TTT_ROTK_SPRITES=1 ROTK_TTT_ROTK_ROM=<repo>/.private/rotk.gba
+  GBARECOMP_FRAMEDUMP_DIR=<dir> GBARECOMP_FRAMEDUMP_START=<f> GBARECOMP_FRAMEDUMP_COUNT=<n>
+  build/host-ttt/TTT-Recompiled.exe --config .private/ttt/game.toml --no-window --frames <N>
+  --save-path <run>/ttt.eeprom --state-dir <run>/states [--load-state <state>]`. The log ends
+  with `unmapped=` (code run outside the compiled set; 0 is clean) and has the build line
+  `[ttt] ROTK hero sprites: <n> KiB, 24 special literals` (24 means the build saw the cart).
+  Then `python tools/frame_sheet.py <dir> out.png --start a --end b --every k [--crop x,y,w,h]`.
+- Route: tools/ttt_helms_deep_route.csv boots to Helm's Deep (Aragorn). Dialogs with portraits at
+  frames 3240..3700; walking at 5500. Replay frames are absolute; key masks are active low
+  (A 0x3FE skill, B 0x3FD attack, Start 0x3F7, Right 0x3EF, Left 0x3DF, Down 0x37F, none 0x3FF).
+- States: run the route to 5560 with `--dump-state <file>`, then rerun from it with `--load-state`
+  and a short route. Use a fresh run directory (fresh recomp_cache) before judging coverage.
+- Fight check: from the 5560 state hold Down (0x37F) for about 410 frames to reach Uruk-hai at a
+  rock, then tap B every 20 frames, turning toward them now and then. Kills (the XP bar, around
+  y 140..160, gains green pixels) mean hits land; with no attacks they live.
+- Other heroes: in the route, drop the Start at 1375/1379 and press Right or Left for 5 frames at
+  1377 + 9n; the A at 1400 confirms. Right: Gandalf, then Frodo; Left: Eowyn, then Legolas (Gimli
+  is a third press, not tried). Only Gandalf starts in Aragorn's level; Frodo's and Eowyn's states
+  at 5560 have the backpack open and a level intro (Start closes the backpack; taps before about
+  frame 5650 are lost).
+- Skills: `ROTK_TTT_SKILL_TEST=N` (player 0 knows and selects skill N, spirit kept full, the
+  casting block cleared), `ROTK_TTT_SKILL_TEST_SHIELD=1` (wears a shield, for Shield Bash), then
+  tap A every 60 frames. `ROTK_TTT_TRACE_SPECIAL=1` logs each special animation read
+  (`[special] <literal> at <game frame>`), `ROTK_TTT_TRACE_WEAPON=1` each weapon kind/pose first
+  read, `ROTK_TTT_DUMP_PLAYER=<frame>` prints player records 0 and 1 at that frame.
+- Offline: rotk/two-towers/tools/rotk_hero_sprites.py renders ROTK hero animations converted;
+  ttt_sprite.py renders Two Towers ones (set TTT_ROM to .private/ttt.gba).
+
+What src/rotk_sprites.cpp does (TTT plain host): converts ROTK art to the Two Towers' formats in
+host RAM at 0x12100000 and answers ROM reads through gba::g_rom_read32_override. **It builds on
+the first ROM read** (`romRead32`), not in the reset callback: at reset the cart is not mapped and
+every read gives 0 (that bug hid the specials and the Two Towers' boxes until fdca774). The
+image's second word is its hash, so a save state holding another build's image is rewritten.
 - pose table 0x08329664 (hero * 6 + pose) with ROTK body animations (kSources: walk = move 6,
   stand = move 4, attack = melee 0, death = move 1, flinch = move 3, cast = cast 0); the attack gets
-  the Two Towers' body attack box (slot 1) on the matching frame, scaled to the ROTK frame count;
+  the Two Towers' body attack box (slot 1) on the matching frame, scaled to the ROTK frame count.
+  The attack entry is answered per hero by `comboAttack` (Done 4);
 - hero palettes 0x0832B248 + (hero + 0x33) * 4 with ROTK's ObjPalettes[0x21 + hero];
 - weapon table 0x083314A0 (kind * 6 + pose) with ROTK weapon parts (frames padded to the body's,
   in ROTK's weapons palette, bank 2, drawn through the renderer's palette provider: hooks on
   sprite_composeOam 0x08001EB8 (actor+0x24 is one of the converted weapon records), sprite_pushOam
   0x0802FA68 and 0x08032708 note each OAM index, and 0x0800E270, which the VBlank handler calls
-  right after it copies the OAM shadow, makes them live; the hooks are listed in config/ttt.toml,
-  as the generator only compiles in listed ones); kinds without art get a
-  blank animation (at least 64 frames). **The weapon actor's box deals the melee damage** (hit
-  callback 0x08010ED4, installed by the weapon spawner): each weapon animation has one box slot,
-  holding ROTK's own strike box when the part has one (all melee heroes' attack: type 1, one frame,
-  every facing) and otherwise the Two Towers' box for that kind and pose, scaled. Stock kinds box
-  the attack (pose 2) and the cast (pose 5), off hands included;
+  right after it copies the OAM shadow, makes them live). **TTT function hooks only fire if listed
+  as [[mod_function_hook]] in config/ttt.toml** (then `lab.py prepare` and `build --target ttt`),
+  and the reset callback must re-enable them. Kinds without art get a blank animation (at least
+  64 frames). **The weapon actor's box deals the melee damage** (hit callback 0x08010ED4): each
+  weapon animation has one box slot, ROTK's own strike box when the part has one, otherwise the
+  Two Towers' box for that kind and pose, scaled;
 - ROTK frames are hotspots, then 6-byte boxes, then pieces (SPRITE_FRAME_RECORD in the ROTK
   decomp), the same order as the Two Towers';
-- the image's second word is its hash, so a save state holding another build's image is rewritten;
-- 23 skill animations the heroes' code loads as literals (kSpecials, 24 literals), each mapped by eye to a ROTK
-  melee or cast pose.
+- 23 skill animations the heroes' code loads as code literals (kSpecials; 24 literals in code),
+  each mapped by eye to a ROTK melee or cast pose, checked in play (Done 5);
+- the compose hook also sets idle animations to ROTK's ticks per frame (Done 6);
+- the per-line dialog portrait table with ROTK's portraits (Done 7).
 
-Known problems, in order:
-1. Weapons (fixed 2026-11-01, uncommitted): kinds come from the weapon-spawn code (player
-   0x0802F3BC, Gandalf the Grey's hat 0x0802F720, NPC heroes' main hand 0x08042310 and off hand
-   0x08043238), mapped in `kWeaponSources`: 1 Frodo, 2 Legolas, 3 Aragorn, 7 Gandalf's sword (NPC),
-   8 Gandalf's staff, 9 Eowyn, 11 Gimli each get their hero's ROTK part (Gandalf: part 1 sword,
-   part 2 staff). Hands, fists, Aragorn's NPC off-hand long sword (5), the hat (6) and 13 are blank.
-   Checked headless on the route: Aragorn walks and swings with his sword. The other heroes' weapons
-   are not checked in a frame yet.
-2. Hits (fixed 2026-11-02): melee hits come from the weapon's box, and the converter used to read
-   ROTK's boxes and hotspots in the wrong order, so the weapon had no valid strike box. Checked with
-   the fight check above for Aragorn: kills with the weapon boxes, none without. The other heroes,
-   Legolas's bow (no ROTK box, uses the Two Towers' boxes) and casts are not checked in play.
-3. Weapon colors (fixed 2026-11-02): weapons draw in ROTK's own weapons palette instead of the
-   nearest hero colors (see the weapon table above). Checked for Aragorn's sword: the blade has
-   ROTK's three greys where it had one. Other heroes' weapons not looked at yet.
-4. Combo (done 2026-11-02, looks only): an attack that starts within 50 frames of the hero's last one
+Done (each checked headless):
+1. Weapons (28aa44c): kinds come from the weapon-spawn code (player 0x0802F3BC, Gandalf the Grey's
+   hat 0x0802F720, NPC heroes' main hand 0x08042310 and off hand 0x08043238), mapped in
+   `kWeaponSources`: 1 Frodo, 2 Legolas, 3 Aragorn, 7 Gandalf's sword (NPC), 8 Gandalf's staff,
+   9 Eowyn, 11 Gimli each get their hero's ROTK part (Gandalf: part 1 sword, part 2 staff). Hands,
+   fists, Aragorn's NPC off-hand long sword (5), the hat (6) and 13 are blank. Every hero but Gimli
+   seen swinging its ROTK weapon.
+2. Hits (b139e21): melee hits come from the weapon's box; the converter used to read ROTK's boxes
+   and hotspots in the wrong order. Fight check: Aragorn kills with the weapon boxes, none without;
+   Legolas's shots kill. Rechecked after fdca774 (the Two Towers' boxes now present): still kills.
+3. Weapon colors (921cbbf): ROTK's weapons palette instead of the nearest hero colors (Aragorn's
+   blade has ROTK's three greys where it had one).
+4. Combo (22f1aa5, looks only): an attack that starts within 50 frames of the hero's last one
    plays ROTK's next swing (melee 0, 2, 4, then back to 0), body and weapon, each with its own
-   strike box (`comboAttack`). The game reads the body's attack entry once per attack and the
-   weapon's every tick, and the attack still lasts the Two Towers' 20 frames, so ROTK's recoveries
-   (melee 1/3) and its longer third swing are not played out. Each swing forced alone killed in
-   the fight check; the kill times vary with how the fight goes, not with the swing.
-5. Specials (fixed and checked 2026-11-02): the converter used to run in the reset callback,
-   before the cart is mapped, so every Two Towers read in build() gave 0: no special literal was
-   found (the skills drew the Two Towers' own art in ROTK colors) and the Two Towers' attack
-   boxes in the body and weapon plans were empty. The image is now built on the first ROM read.
-   The skills' cast functions, reached only through the skill cast table 0x08057AB0, are now
-   extra_funcs in config/ttt.toml. Checked headless with `ROTK_TTT_SKILL_TEST=N` (player 0 knows
-   and selects skill N, spirit full, casting unblocked; `ROTK_TTT_SKILL_TEST_SHIELD=1` adds a
-   shield) and `ROTK_TTT_TRACE_SPECIAL=1` (logs each special read), from the hero states, tapping
-   A every 60 frames: every mapped special of Frodo, Legolas, Aragorn, Gandalf and Eowyn plays
-   ROTK art in ROTK colors with no unmapped code (Legolas's White Knives: 2 unmapped reads). Which
-   skill plays which: Frodo escape 0x08329250/64 + 0x08329278, charge 0x083292DC/F0, knife throw
-   0x0832923C, snare 0x083292C8; Legolas overdraw 0x08329390, white knives 0x0832937C; Aragorn
-   sword throw 0x08329444, sweep 0x08329458; Gandalf skills 5, 6, 8 0x0832950C (a spin), 7, 9, 10
-   0x083294F8 (a ground slam); Eowyn shield bash 0x08329624, double strike 0x08329638. Player
-   record (0x03003640 + 0x128 * player): +0x0A spirit, +0x6E its maximum, +0x19 bit 3 shield,
-   +0x1E selected skill, +0x1F skill being cast, +0x21 bit 1 blocks casting (set in Frodo's and
-   Eowyn's starting levels), skill levels at +0x25 + N and +0x30 + N. Not checked: Gimli (no
-   state), Aragorn's two pose variants 0x0832946C (state 0x1B when player +0x9E bit 0) and
-   0x083293E0 (his pose 2 when the hero record's +0x19 has bits 2 and 4). Frodo's 0x0832928C/A0/B4
-   are never referenced. The mapping still is by eye; the motions match the skills.
-6. Dialog portraits (done 2026-11-02): the Two Towers' per-line speaker table 0x0832B524 (8 bytes
-   per text line, BG asset first; drawn as a 6x6-tile map) is answered with ROTK's hero dialog
-   portraits (ROTK's pucrunch unpacked on the host, a 48x48 crop at 4,4 of ROTK's 56x64, raw
-   tiles, flags 0x12) wherever it names one of the Two Towers' six hero portraits (Gandalf the
-   Grey's and the White's both get ROTK's Gandalf). ROTK's teal backdrop is color 0, so the
-   scene shows behind the face; the Two Towers' gold ring is gone. Checked headless on the Helm's
-   Deep route (frames 3240..3700): Eowyn and Aragorn speak with ROTK's faces. Sam, Smeagol (a
-   silhouette in the Two Towers), Eomer and Theoden get ROTK's too (speakers told apart by their
-   lines; crops checked offline, not reached in play). Other speakers keep the Two Towers' art.
-   Not converted: the hero select screen's render, menus, other characters. Animation timing: ROTK walk and swing play
-   at the Two Towers' 1 tick per frame (as ROTK; ROTK's Eowyn and Gimli walk at 2). Idle (fixed
-   2026-11-02): the Two Towers idles at 3 ticks per frame; the compose hook now sets the actor's
-   ticks per frame (+0x21, countdown +0x20, actor_tickAnimation 0x08001CB0) to ROTK's own
-   (SpriteAnimation +12: 2 for Frodo, Aragorn, Gandalf; 3 for Legolas, Eowyn, Gimli). Checked
-   headless for Aragorn: his idle changes every 4 video frames.
+   strike box. The game reads the body's attack entry once per attack and the weapon's every tick,
+   and the attack still lasts the Two Towers' 20 frames, so ROTK's recoveries (melee 1/3) and its
+   longer third swing are not played out. Each swing forced alone killed in the fight check.
+5. Specials (fdca774): build moved to the first ROM read (see above); the skills' cast functions,
+   reached only through the skill cast table 0x08057AB0, are extra_funcs in config/ttt.toml (they
+   used to run through the interpreter, which also bypassed the override). With the skill
+   switches, every mapped special of Frodo, Legolas, Aragorn, Gandalf and Eowyn plays ROTK art in
+   ROTK colors with no unmapped code (Legolas's White Knives: 2 unmapped reads). Which skill plays
+   which: Frodo escape 0x08329250/64 + 0x08329278, charge 0x083292DC/F0, knife throw 0x0832923C,
+   snare 0x083292C8; Legolas overdraw 0x08329390, white knives 0x0832937C; Aragorn sword throw
+   0x08329444, sweep 0x08329458 (ROTK spin, the Two Towers' blue arc on top); Gandalf skills 5, 6,
+   8 0x0832950C (a spin), 7, 9, 10 0x083294F8 (a ground slam, as the original); Eowyn shield bash
+   0x08329624, double strike 0x08329638. Skill indices per hero: rotk/build/ttt/skills/*.md
+   ("Hero h, skill index n"). Player record (0x03003640 + 0x128 * player): +0x0A spirit, +0x6E
+   its maximum, +0x19 bit 3 shield, +0x1A hero, +0x1E selected skill, +0x1F skill being cast,
+   +0x21 bit 1 blocks casting (set in Frodo's and Eowyn's starting levels), skill levels at
+   +0x25 + N and +0x30 + N. Not seen: Gimli's two, Aragorn's pose variants 0x0832946C (state 0x1B
+   when player +0x9E bit 0) and 0x083293E0 (his pose 2 when the hero record's +0x19 has bits 2
+   and 4). Frodo's 0x0832928C/A0/B4 are never referenced.
+6. Idle speed (fc90598): the Two Towers idles at 3 ticks per frame; the compose hook sets the
+   actor's ticks per frame (+0x21, countdown +0x20, actor_tickAnimation 0x08001CB0) to ROTK's
+   (SpriteAnimation +12: 2 for Frodo, Aragorn, Gandalf; 3 for Legolas, Eowyn, Gimli). Aragorn's
+   idle now changes every 4 video frames. Walk and swing were already at ROTK's 1 (ROTK's Eowyn
+   and Gimli walk at 2; left alone, the walk is tied to movement).
+7. Dialog portraits (3e9c339, 79b5987): the Two Towers' per-line speaker table 0x0832B524 (8 bytes
+   per text line, BG asset first; scene_inGameDialog 0x08013498 loads it, drawn as a 6x6-tile map;
+   no "active hero" fallback, unlike ROTK) is answered with ROTK's DialogPortraits (0x08D3DCE0,
+   back to back, 4-aligned: 0..5 heroes, 6 Sam, 7 Smeagol, 8 Saruman, 9 Eomer, 10 Theoden). ROTK's
+   pucrunch (not the Two Towers' C64 variant) is unpacked on the host, cropped 48x48 at 4,4 from
+   ROTK's 56x64 and stored raw (flags 0x12). Swapped (`kPortraitSwaps`, speakers told apart by
+   their lines): the six heroes (both Gandalfs get ROTK's), Sam, Smeagol (a silhouette in the Two
+   Towers), Eomer, Theoden. ROTK's teal backdrop is color 0, so the scene shows behind the face;
+   the Two Towers' gold ring is gone. Seen in play: Eowyn and Aragorn (Helm's Deep route); the
+   others' crops checked offline. Other speakers (Boromir, soldiers, orcs) keep the Two Towers' art.
