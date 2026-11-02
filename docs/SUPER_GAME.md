@@ -573,7 +573,11 @@ gba::g_rom_read32_override:
   the Two Towers' body attack box (slot 1) on the matching frame, scaled to the ROTK frame count;
 - hero palettes 0x0832B248 + (hero + 0x33) * 4 with ROTK's ObjPalettes[0x21 + hero];
 - weapon table 0x083314A0 (kind * 6 + pose) with ROTK weapon parts (frames padded to the body's,
-  colors remapped from ROTK's weapons palette, bank 2, to the hero palette); kinds without art get a
+  in ROTK's weapons palette, bank 2, drawn through the renderer's palette provider: hooks on
+  sprite_composeOam 0x08001EB8 (actor+0x24 is one of the converted weapon records), sprite_pushOam
+  0x0802FA68 and 0x08032708 note each OAM index, and 0x0800E270, which the VBlank handler calls
+  right after it copies the OAM shadow, makes them live; the hooks are listed in config/ttt.toml,
+  as the generator only compiles in listed ones); kinds without art get a
   blank animation (at least 64 frames). **The weapon actor's box deals the melee damage** (hit
   callback 0x08010ED4, installed by the weapon spawner): each weapon animation has one box slot,
   holding ROTK's own strike box when the part has one (all melee heroes' attack: type 1, one frame,
@@ -597,8 +601,9 @@ Known problems, in order:
    ROTK's boxes and hotspots in the wrong order, so the weapon had no valid strike box. Checked with
    the fight check above for Aragorn: kills with the weapon boxes, none without. The other heroes,
    Legolas's bow (no ROTK box, uses the Two Towers' boxes) and casts are not checked in play.
-3. Weapon colors are approximate (nearest hero color). On PC they can use their own palette:
-   port host palettes (src/host_palettes.cpp) to the TTT host, keyed by the weapon actor's pieces.
+3. Weapon colors (fixed 2026-11-02): weapons draw in ROTK's own weapons palette instead of the
+   nearest hero colors (see the weapon table above). Checked for Aragorn's sword: the blade has
+   ROTK's three greys where it had one. Other heroes' weapons not looked at yet.
 4. One swing only; ROTK's combo (melee 0/2/4 with recoveries 1/3) not used.
 5. The specials mapping is a guess per animation; verify each skill in play.
 6. Not converted: HUD portraits, menus, other characters. Animation timing: ROTK walk and swing play

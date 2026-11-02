@@ -12,6 +12,8 @@
 #include <vector>
 
 #include "gba_bus.h"
+#include "gba_ppu.h"
+#include "mod_function_hooks.h"
 #include "mod_runtime.h"
 #include "runtime_arm.h"
 
@@ -35,8 +37,8 @@ constexpr std::uint32_t kBlankFrames = 64;
 // Each weapon kind's hero and ROTK hand part (0: no art). The Two Towers picks the kind per hero
 // when it spawns the weapon actor (player 0x0802F3BC, Gandalf's hat 0x0802F720, NPC heroes' main
 // hand 0x08042310 and off hand 0x08043238), so a kind is always drawn with its hero's body. Hands,
-// fists and the hat are part of ROTK's body art. Drawn in ROTK's weapons palette (OBJ bank 2)
-// remapped to the hero's colors, as the Two Towers draws the weapon part in the hero's palette.
+// fists and the hat are part of ROTK's body art. The Two Towers draws the weapon in the hero's
+// OBJ bank; these keep ROTK's weapons palette (bank 2) through the renderer's palette provider.
 // The weapon actor's box makes the melee hits (callback 0x08010ED4), so every kind keeps one.
 struct WeaponSource {
     int hero;
@@ -60,6 +62,15 @@ constexpr WeaponSource kWeaponSources[] = {
 };
 static_assert(std::size(kWeaponSources) * 6 == kWeaponEntries);
 constexpr std::uint32_t kWeaponsPalette = 2;
+// Drawing: sprite_composeOam(actor) pushes an actor's pieces through sprite_pushOam(index, oam);
+// 0x08032708 pushes one piece of no actor. The VBlank handler copies the OAM shadow and then calls
+// 0x0800E270 (its only caller). Actor+0x24 is the current {tiles, frame set} record.
+constexpr std::uint32_t kComposeOam = 0x08001EB8u, kPushOam = 0x0802FA68u, kPushLoose = 0x08032708u;
+constexpr std::uint32_t kAfterOamCopy = 0x0800E270u;
+constexpr std::uint32_t kActorRecord = 0x24u;
+constexpr std::uint32_t kOamEntries = 128;
+constexpr const char* kHookIds[] = {"ttt.rotk-sprites-compose", "ttt.rotk-sprites-push", "ttt.rotk-sprites-loose",
+                                    "ttt.rotk-sprites-oam-copy"};
 enum Pose { kWalk, kStand, kAttack, kDeath, kFlinch, kCast };
 
 // ROTK: per hero a bank of part * 7 + pose entries, each 5 inline 16-byte SpriteAnimation records.
@@ -122,6 +133,12 @@ struct State {
     // code literals that load a special animation, and the converted facing array each answers with
     std::vector<std::pair<std::uint32_t, std::uint32_t>> literals;
     std::uint32_t literalsLow = ~0u, literalsHigh = 0;
+    // the records of weapons with ROTK art (sorted), drawn in weaponColors
+    std::vector<std::uint32_t> weaponRecords;
+    std::array<std::uint8_t, 32> weaponColors = {};
+    // per OAM index: drawn in weaponColors, as pushed and as last copied to OAM
+    bool actorWeapon = false;
+    std::array<bool, kOamEntries> pending = {}, displayed = {};
 };
 State g_state;
 
@@ -265,10 +282,8 @@ std::vector<std::vector<Box>> planBoxes(const Bytes& rom, std::uint32_t frameSet
 }
 
 // A ROTK animation in the Two Towers' format (raw tiles, 12-byte pieces, 8-byte boxes), boxes as
-// planned, its colors through remap when given (16 entries) and at least minFrames frames (the last
-// repeated).
-Converted convert(const Bytes& rom, std::uint32_t animation, const BoxPlan& plan,
-                  const std::uint8_t* remap = nullptr, std::uint32_t minFrames = 0)
+// planned and at least minFrames frames (the last repeated).
+Converted convert(const Bytes& rom, std::uint32_t animation, const BoxPlan& plan, std::uint32_t minFrames = 0)
 {
     Converted out;
     const std::uint32_t tilesBase = r32(rom, animation), frameSet = r32(rom, animation + 4);
@@ -287,8 +302,6 @@ Converted convert(const Bytes& rom, std::uint32_t animation, const BoxPlan& plan
                                        : Bytes(rom.begin() + std::min<std::size_t>(source, rom.size()),
                                                rom.begin() + std::min<std::size_t>(source + tileBytes, rom.size()));
         data.resize(tileBytes, 0);
-        if (remap)
-            for (std::uint8_t& byte : data) byte = static_cast<std::uint8_t>(remap[byte & 15] | remap[byte >> 4] << 4);
         const std::uint32_t offset = static_cast<std::uint32_t>(out.tiles.size());
         out.tiles.insert(out.tiles.end(), data.begin(), data.end());
         align4(out.tiles);
@@ -363,30 +376,6 @@ std::uint32_t convertFacings(Bytes& image, const Bytes& rom, std::uint32_t entry
     return append(image, facings);
 }
 
-std::array<int, 3> rgb(const Bytes& rom, std::uint32_t palette, int index)
-{
-    const std::uint32_t c = r16(rom, palette + index * 2);
-    return {static_cast<int>(c & 31), static_cast<int>(c >> 5 & 31), static_cast<int>(c >> 10 & 31)};
-}
-
-// Each color of one ROTK palette as the nearest color of another (0 stays clear).
-std::array<std::uint8_t, 16> nearestColors(const Bytes& rom, std::uint32_t from, std::uint32_t to)
-{
-    std::array<std::uint8_t, 16> map = {};
-    for (int c = 1; c < 16; ++c) {
-        const auto want = rgb(rom, from, c);
-        int best = 1, bestDistance = 1 << 30;
-        for (int t = 1; t < 16; ++t) {
-            const auto have = rgb(rom, to, t);
-            const int d = (want[0] - have[0]) * (want[0] - have[0]) + (want[1] - have[1]) * (want[1] - have[1]) +
-                          (want[2] - have[2]) * (want[2] - have[2]);
-            if (d < bestDistance) best = t, bestDistance = d;
-        }
-        map[c] = static_cast<std::uint8_t>(best);
-    }
-    return map;
-}
-
 // A transparent animation (one clear 8x8 piece per frame), a frame per box, each with its box.
 Converted blankAnimation(const std::vector<Box>& boxes)
 {
@@ -422,6 +411,9 @@ void build()
     const Bytes& rom = g_state.rotk;
     Bytes& image = g_state.image;
     image.clear();
+    g_state.weaponRecords.clear();
+    const std::uint32_t weaponsPalette = r32(rom, kObjPalettes + kWeaponsPalette * 4u);
+    for (std::uint32_t i = 0; i < 32; ++i) g_state.weaponColors[i] = static_cast<std::uint8_t>(r8(rom, weaponsPalette + i));
     put32(image, kMagic);
     put32(image, 0);  // the image's hash, set when it is complete
     Bytes poseTable(kHeroes * kPoses * 4, 0), palettes;
@@ -445,7 +437,6 @@ void build()
         }
         const std::uint32_t palette = r32(rom, kObjPalettes + (kHeroPaletteBase + hero) * 4u);
         // the weapon kinds drawn with this hero, as many frames as the body has in each pose
-        const auto remap = nearestColors(rom, r32(rom, kObjPalettes + kWeaponsPalette * 4u), palette);
         for (int kind = 0; kind < static_cast<int>(std::size(kWeaponSources)); ++kind) {
             if (kWeaponSources[kind].hero != hero) continue;
             for (int pose = 0; pose < kPoses; ++pose) {
@@ -462,12 +453,14 @@ void build()
                     BoxPlan plan;
                     plan.weapon = true;
                     plan.tt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 0);
-                    const Converted c = art ? convert(rom, entry + facing * kRecordSize, plan, remap.data(), bodyFrames)
+                    const Converted c = art ? convert(rom, entry + facing * kRecordSize, plan, bodyFrames)
                                             : blankAnimation(blankBoxes(scaleBoxes(plan.tt, bodyFrames)));
                     Bytes record;
                     put32(record, append(image, c.tiles));
                     put32(record, append(image, c.frameSet));
-                    put32(facings, append(image, record));
+                    const std::uint32_t at = append(image, record);
+                    if (art) g_state.weaponRecords.push_back(at);
+                    put32(facings, at);
                 }
                 g_state.weaponTable[kind * kPoses + pose] = append(image, facings);
             }
@@ -496,6 +489,7 @@ void build()
                 g_state.literalsHigh = std::max(g_state.literalsHigh, a);
             }
     }
+    std::sort(g_state.weaponRecords.begin(), g_state.weaponRecords.end());
     g_state.poseTable = append(image, poseTable);
     g_state.palettes = append(image, palettes);
     // FNV-1a of the image after its stamp, so a save state holding another build's image is replaced
@@ -551,6 +545,38 @@ int romRead32(std::uint32_t address, std::uint32_t, std::uint32_t* out)
     return 0;
 }
 
+int composeEntry(std::uint32_t, int, ArmCpuState* cpu)
+{
+    const std::uint32_t record = bus_read_u32(cpu->R[0] + kActorRecord);
+    g_state.actorWeapon = std::binary_search(g_state.weaponRecords.begin(), g_state.weaponRecords.end(), record);
+    return 0;
+}
+
+int pushEntry(std::uint32_t, int, ArmCpuState* cpu)
+{
+    const std::uint32_t index = cpu->R[0] & 0xFFu;
+    if (index < kOamEntries) g_state.pending[index] = g_state.actorWeapon;
+    return 0;
+}
+
+int looseEntry(std::uint32_t, int, ArmCpuState*)
+{
+    g_state.actorWeapon = false;
+    return 0;
+}
+
+int oamCopyEntry(std::uint32_t, int, ArmCpuState*)
+{
+    g_state.displayed = g_state.pending;
+    g_state.pending.fill(false);
+    return 0;
+}
+
+const std::uint8_t* paletteProvider(std::uint32_t index)
+{
+    return index < kOamEntries && g_state.displayed[index] ? g_state.weaponColors.data() : nullptr;
+}
+
 void reset()
 {
     // built from the Two Towers' own tables, so before the override answers for them
@@ -558,6 +584,11 @@ void reset()
     if (!g_state.enabled) return;
     if (g_state.image.empty()) build();
     gba::g_rom_read32_override = romRead32;
+    g_state.actorWeapon = false;
+    g_state.pending.fill(false);
+    g_state.displayed.fill(false);
+    gba::g_obj_palette_provider = paletteProvider;
+    for (const char* id : kHookIds) gba_mod_set_function_hook_enabled(id, 1);
 }
 
 }  // namespace
@@ -574,6 +605,10 @@ void rotkSpritesRegister()
         return;
     }
     g_state.enabled = true;
+    gba_mod_register_function_entry_plugin(kHookIds[0], kComposeOam, 1, composeEntry);
+    gba_mod_register_function_entry_plugin(kHookIds[1], kPushOam, 1, pushEntry);
+    gba_mod_register_function_entry_plugin(kHookIds[2], kPushLoose, 1, looseEntry);
+    gba_mod_register_function_entry_plugin(kHookIds[3], kAfterOamCopy, 1, oamCopyEntry);
     gba_mod_register_reset_callback(reset);
 }
 

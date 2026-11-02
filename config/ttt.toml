@@ -216,6 +216,26 @@ addr = 0x0803F0FC
 mode = "thumb"
 note = "The main menu confirm: Return of the King hands the window back to ROTK."
 
+[[mod_function_hook]]
+addr = 0x08001EB8
+mode = "thumb"
+note = "sprite_composeOam(actor): ROTK hero sprites note whether the actor is a ROTK weapon (src/rotk_sprites.cpp)."
+
+[[mod_function_hook]]
+addr = 0x0802FA68
+mode = "thumb"
+note = "sprite_pushOam(index, oam): ROTK hero sprites draw a weapon's pieces in ROTK's weapons palette."
+
+[[mod_function_hook]]
+addr = 0x08032708
+mode = "thumb"
+note = "Pushes one piece of no actor: not a ROTK weapon's."
+
+[[mod_function_hook]]
+addr = 0x0800E270
+mode = "thumb"
+note = "Called by the VBlank handler right after it copies the OAM shadow: the pieces' colors go live."
+
 # Play session 2026-11-01 20:47 (self-heal misses; the 0x0800FE78.. and 0x0800FF64.. runs are branch
 # targets after literal pools and a function start at 0x0800FF74, not switch tables).
 
