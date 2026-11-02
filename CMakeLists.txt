@@ -58,7 +58,7 @@ if(ROTK_PLAIN_HOST)
     set(ROTK_HOST_SOURCES src/plain_main.cpp src/color_vision.cpp)
 else()
     set(ROTK_HOST_SOURCES src/main.cpp src/widescreen.cpp src/hd_audio.cpp src/hd_icons.cpp src/local_coop.cpp
-        src/smooth_motion.cpp src/transparency.cpp src/combat_info.cpp src/duel_hud.cpp src/rumble.cpp src/color_vision.cpp
+        src/smooth_motion.cpp src/host_palettes.cpp src/transparency.cpp src/combat_info.cpp src/duel_hud.cpp src/rumble.cpp src/color_vision.cpp
         src/bug_report.cpp src/sample_packs.cpp src/minimap.cpp src/profiler.cpp src/controls_menu.cpp src/bps_patch.cpp
         src/expanded_edition.cpp src/two_towers.cpp src/legacy_item_tables.cpp src/super_game.cpp)
 endif()

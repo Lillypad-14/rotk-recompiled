@@ -1,0 +1,47 @@
+--- a/src/runtime/runtime.cpp
++++ b/src/runtime/runtime.cpp
+@@ -4974,11 +4974,36 @@
+         !args.window && args.frames >= 0 && args.tcp_port <= 0 &&
+         !demo_input && !input_replay_requested && present_in_place &&
+         !diag.playing();
++    // GBARECOMP_FRAMEDUMP_DIR headless: each new frame from START is drawn and written, as the
++    // windowed present block does, up to COUNT (then the run ends).
++    uint64_t headless_framedump_last = ~uint64_t{0};
++    auto headless_framedump = [&]() {
++        if (args.window || !framedump_dir) return;
++        const uint64_t frame = ppu.frame_count();
++        if (frame == headless_framedump_last || frame < framedump_start ||
++            framedump_written >= framedump_max)
++            return;
++        headless_framedump_last = frame;
++        std::vector<uint8_t> fb(ppu.render_bytes(), 0);
++        if (ppu.has_latched_framebuffer()) {
++            std::memcpy(fb.data(), ppu.latched_framebuffer(), fb.size());
++        } else {
++            ppu.render(fb.data(), bus.io().read16(0x000), bus.io().raw(),
++                       bus.vram_ptr(), bus.oam_ptr(), bus.pal_ptr());
++        }
++        char p[512];
++        std::snprintf(p, sizeof(p), "%s/f_%06llu.png", framedump_dir,
++                      static_cast<unsigned long long>(frame));
++        write_png(p, fb.data(), ppu.render_width(), ppu.render_height());
++        if (++framedump_written >= framedump_max) host_quit = true;
++    };
+     if (passive_headless_present_in_place) {
+         std::fprintf(stderr, "[gbarecomp:runtime] headless present-in-place ON "
+                      "(unwind at final frame only; "
+                      "GBARECOMP_PRESENT_IN_PLACE=0 to disable)\n");
+         runtime_set_frame_present_hook([&]() -> bool {
++            headless_framedump();
++            if (host_quit) return true;
+             return ppu.frame_count() - headless_base_frame >=
+                    static_cast<uint64_t>(args.frames);
+         });
+@@ -5161,6 +5186,7 @@
+                 }
+             }
+         }
++        headless_framedump();
+         // Differential-oracle WRAM trace fires on frame advance in BOTH windowed
+         // and headless modes (the present block above only runs windowed).
+         if (wram_trace_log) {

@@ -25,6 +25,7 @@
 #include "rumble.h"
 #include "local_coop.h"
 #include "smooth_motion.h"
+#include "host_palettes.h"
 #include "transparency.h"
 #include "mod_function_hooks.h"
 #include "mod_runtime.h"
@@ -101,6 +102,7 @@ enum PcInfoField : std::uint32_t {
     kInfoItemTypeInfos = 0x2C,  // the legacy item tables' ItemTypeInfos copy
     kInfoLegacyScratch = 0x30,  // 4 KB of host RAM for the mod's legacy item bookkeeping
     kInfoSuperGame = 0x34,  // PC_HOST_SUPER_GAME_* bits: available (host), switch (mod)
+    kInfoFeatures = 0x38,  // PC_HOST_FEATURE_* bits (version 6)
 };
 
 // ROM literal-pool words that hold the base of a per-actor queue. The same addresses in the stock
@@ -231,7 +233,7 @@ void writeInfoBlock()
     const PcLayout& pc = layout();
     const std::uint32_t info = gba::kHostRamBase;
     static bool stressArmed = false;
-    bus_write_u32(info + kInfoVersion, 5u);
+    bus_write_u32(info + kInfoVersion, 6u);
     bus_write_u32(info + kInfoMainActors, pc.mainActors);
     bus_write_u32(info + kInfoOverlayActors, pc.overlayActors);
     bus_write_u32(info + kInfoMainPool, pc.mainPool);
@@ -253,6 +255,8 @@ void writeInfoBlock()
     bus_write_u32(info + kInfoItemTypeInfos, pc.itemTables ? rotk::legacyItemTablesInfos(pc.itemTables) : 0u);
     bus_write_u32(info + kInfoLegacyScratch, pc.itemTables);
     bus_write_u32(info + kInfoSuperGame, rotk::superGameAvailable() ? 1u : 0u);
+    // bit 0: host palettes (sprites whose animation palette is in host RAM draw in it)
+    bus_write_u32(info + kInfoFeatures, rotk::hostPalettesActive() ? 1u : 0u);
     bus_write_u32(info + kInfoMagic, kPcInfoMagic);
 }
 
@@ -477,6 +481,7 @@ int pcPushOam(std::uint32_t, int, ArmCpuState* cpu)
         extra.lastPushExtra = false;
         rotk::widescreenNotePiece(buffer, count);
         rotk::smoothNotePiece(buffer, count);
+        rotk::hostPalettesNotePiece(buffer, count);
         return 0;
     }
     if (extra.counts[buffer] >= extra.capacity) {
@@ -492,6 +497,7 @@ int pcPushOam(std::uint32_t, int, ArmCpuState* cpu)
     }
     rotk::widescreenNotePiece(buffer, kHardwareObjects + extra.counts[buffer]);
     rotk::smoothNotePiece(buffer, kHardwareObjects + extra.counts[buffer]);
+    rotk::hostPalettesNotePiece(buffer, kHardwareObjects + extra.counts[buffer]);
     const std::uint32_t slot = extra.counts[buffer]++ * 8u;
     for (std::uint32_t i = 0; i < 8u; ++i) {
         const std::uint8_t value = bus_read_u8(cpu->R[1] + i);
@@ -553,6 +559,7 @@ void pcObserveDma(int, std::uint32_t source, std::uint32_t destination, std::uin
     }
     rotk::widescreenSetDisplayedBuffer(extra.displayedBuffer);
     rotk::smoothSetDisplayedBuffer(extra.displayedBuffer);
+    rotk::hostPalettesSetDisplayed(extra.displayedBuffer);
     rotk::transparencySetDisplayed(extra.displayedBuffer, extra.displayedHalf);
 }
 
@@ -618,8 +625,9 @@ void applyPcSettings()
     applyStereoDefault();
     rotk::smoothMotionApply();
     rotk::transparencyApply();
+    rotk::hostPalettesApply(layout().twoTowers != 0);
     const bool extra = extraObjects().capacity != 0;
-    const bool observePieces = extra || rotk::smoothMotionActive();
+    const bool observePieces = extra || rotk::smoothMotionActive() || rotk::hostPalettesActive();
     gba_mod_set_function_hook_enabled(kHeapHookId, layout().heap);
     gba_mod_set_function_hook_enabled(kPoolHookId, layout().actors);
     gba_mod_set_function_hook_enabled(kSortHookId,
@@ -736,6 +744,7 @@ int main(int argc, char** argv)
         gba_mod_register_activation_plugin(plugin, featureActivated);
     rotk::hdAudioRegister();
     rotk::smoothMotionRegister();
+    rotk::hostPalettesRegister();
     rotk::transparencyRegister();
     g_stereoFromEnv = std::getenv("GBARECOMP_AUDIO_STEREO") != nullptr;
     gba_mod_register_activation_plugin("rotk.pc.stereo", stereoActivated);

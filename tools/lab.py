@@ -40,6 +40,8 @@ FRAMEWORK_PATCHES = [
     ROOT / "patches/window-handoff.patch",
     ROOT / "patches/launcher-companion-rom.patch",
     ROOT / "patches/host-fast-forward.patch",
+    ROOT / "patches/headless-framedump.patch",
+    ROOT / "patches/host-palettes.patch",
 ]
 
 # recomp-ui (launcher) patches, applied the same way to external/recomp-ui.
