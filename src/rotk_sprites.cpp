@@ -134,14 +134,14 @@ constexpr std::uint32_t kCodeStart = 0x08000000u, kCodeEnd = 0x08060000u;
 // speaker's BG asset first; scene_inGameDialog 0x08013498 loads it, a 6x6-tile map). Its
 // portraits are 16-color, LZ77 (flags 0x52), a gold ring drawn into the art.
 constexpr std::uint32_t kLinePortraits = 0x0832B524u, kLinePortraitCount = 1436;
-// ROTK: 7x8 tiles, 16 colors, ROTK's pucrunch (flags 0x72): the active hero's, per hero, are code
-// literals in scene_inGameDialog_enter 0x0801AB44 + 8 * hero.
-constexpr std::uint32_t kRotkHeroPortraits = 0x0801AB44u;
+// ROTK: DialogPortraits, 7x8 tiles, 16 colors, ROTK's pucrunch (flags 0x72), back to back in ROM
+// (each 4-aligned): 0..5 the heroes, 6 Sam, 7 Smeagol, 8 Saruman, 9 Eomer, 10 Theoden.
+constexpr std::uint32_t kRotkPortraits = 0x08D3DCE0u;
 constexpr int kRotkPortraitWide = 7, kPortraitTiles = 6;
 constexpr int kPortraitCropX = 4, kPortraitCropY = 4;  // ROTK's face in a 48x48 square
 struct PortraitSwap {
-    std::uint32_t tt;  // a Two Towers hero portrait
-    int hero;
+    std::uint32_t tt;  // a Two Towers portrait
+    int rotk;          // the DialogPortraits index drawn instead
 };
 constexpr PortraitSwap kPortraitSwaps[] = {
     {0x08CA97A8u, 0},                     // Frodo
@@ -150,6 +150,10 @@ constexpr PortraitSwap kPortraitSwaps[] = {
     {0x08CAA444u, 3}, {0x08CAA874u, 3},   // Gandalf the Grey, the White
     {0x08CAB018u, 4},                     // Eowyn
     {0x08CA8EFCu, 5},                     // Gimli
+    {0x08CA9FF0u, 6},                     // Sam
+    {0x08CAAD00u, 7},                     // Smeagol (a silhouette in the Two Towers)
+    {0x08CABCC8u, 9},                     // Eomer
+    {0x08CAB448u, 10},                    // Theoden
 };
 
 // Converted data in host RAM, past the plain host's own use of its first page.
@@ -512,11 +516,12 @@ Bytes unpackRotk(const Bytes& rom, std::uint32_t at)
     return out;
 }
 
-// A hero's ROTK dialog portrait as a Two Towers one: its palette and 6x6 raw tiles (flags 0x12),
-// cropped from ROTK's 7x8.
-Bytes convertPortrait(const Bytes& rom, int hero)
+// A ROTK dialog portrait as a Two Towers one: its palette and 6x6 raw tiles (flags 0x12), cropped
+// from ROTK's 7x8.
+Bytes convertPortrait(const Bytes& rom, int index)
 {
-    const std::uint32_t asset = r32(rom, kRotkHeroPortraits + 8u * hero);
+    std::uint32_t asset = kRotkPortraits;
+    for (int i = 0; i < index; ++i) asset = (asset + 2 + 32 + 2 + r16(rom, asset + 34) + 3) & ~3u;
     const Bytes tiles = unpackRotk(rom, asset + 2 + 32 + 2);
     auto pixel = [&](int x, int y) {
         const std::size_t at = static_cast<std::size_t>((y / 8 * kRotkPortraitWide + x / 8) * 32 + y % 8 * 4 + x % 8 / 2);
@@ -632,7 +637,7 @@ void build()
             }
     }
     for (std::size_t i = 0; i < std::size(kPortraitSwaps); ++i)
-        g_state.portraits[i] = append(image, convertPortrait(rom, kPortraitSwaps[i].hero));
+        g_state.portraits[i] = append(image, convertPortrait(rom, kPortraitSwaps[i].rotk));
     std::sort(g_state.weaponRecords.begin(), g_state.weaponRecords.end());
     std::sort(g_state.idleTicks.begin(), g_state.idleTicks.end());
     g_state.poseTable = append(image, poseTable);

@@ -642,8 +642,9 @@ Known problems, in order:
    tiles, flags 0x12) wherever it names one of the Two Towers' six hero portraits (Gandalf the
    Grey's and the White's both get ROTK's Gandalf). ROTK's teal backdrop is color 0, so the
    scene shows behind the face; the Two Towers' gold ring is gone. Checked headless on the Helm's
-   Deep route (frames 3240..3700): Eowyn and Aragorn speak with ROTK's faces. Other speakers keep
-   the Two Towers' art (ROTK also has Sam, Smeagol, Saruman, Eomer and Theoden).
+   Deep route (frames 3240..3700): Eowyn and Aragorn speak with ROTK's faces. Sam, Smeagol (a
+   silhouette in the Two Towers), Eomer and Theoden get ROTK's too (speakers told apart by their
+   lines; crops checked offline, not reached in play). Other speakers keep the Two Towers' art.
    Not converted: the hero select screen's render, menus, other characters. Animation timing: ROTK walk and swing play
    at the Two Towers' 1 tick per frame (as ROTK; ROTK's Eowyn and Gimli walk at 2). Idle (fixed
    2026-11-02): the Two Towers idles at 3 ticks per frame; the compose hook now sets the actor's
