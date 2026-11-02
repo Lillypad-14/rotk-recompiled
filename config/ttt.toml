@@ -215,3 +215,81 @@ note = "scene_mainMenu_moveCursor: the cursor wraps over the five rows."
 addr = 0x0803F0FC
 mode = "thumb"
 note = "The main menu confirm: Return of the King hands the window back to ROTK."
+
+# Play session 2026-11-01 20:47 (self-heal misses; the 0x0800FE78.. and 0x0800FF64.. runs are branch
+# targets after literal pools and a function start at 0x0800FF74, not switch tables).
+
+[[extra_func]]
+addr = 0x0800959A
+mode = "thumb"
+note = "self-heal miss, bridged x2"
+
+[[extra_func]]
+addr = 0x0800FCB8
+mode = "thumb"
+note = "self-heal miss, bridged x1"
+
+[[extra_func]]
+addr = 0x0800FD90
+mode = "thumb"
+note = "self-heal miss, bridged x9"
+
+[[extra_func]]
+addr = 0x0800FDAA
+mode = "thumb"
+note = "self-heal miss, bridged x10"
+
+[[extra_func]]
+addr = 0x0800FE78
+mode = "thumb"
+note = "self-heal miss, bridged x15"
+
+[[extra_func]]
+addr = 0x0800FE8C
+mode = "thumb"
+note = "self-heal miss, bridged x2"
+
+[[extra_func]]
+addr = 0x0800FE9C
+mode = "thumb"
+note = "self-heal miss, bridged x1"
+
+[[extra_func]]
+addr = 0x0800FF64
+mode = "thumb"
+note = "self-heal miss, bridged x8"
+
+[[extra_func]]
+addr = 0x0800FF74
+mode = "thumb"
+note = "self-heal miss, bridged x9"
+
+[[extra_func]]
+addr = 0x0800FFEA
+mode = "thumb"
+note = "self-heal miss, bridged x14"
+
+[[extra_func]]
+addr = 0x0801000A
+mode = "thumb"
+note = "self-heal miss, bridged x2"
+
+[[extra_func]]
+addr = 0x08010014
+mode = "thumb"
+note = "self-heal miss, bridged x16"
+
+[[extra_func]]
+addr = 0x0801001C
+mode = "thumb"
+note = "self-heal miss, bridged x21"
+
+[[extra_func]]
+addr = 0x08033DC4
+mode = "thumb"
+note = "self-heal miss, bridged x2"
+
+[[extra_func]]
+addr = 0x08033DD0
+mode = "thumb"
+note = "self-heal miss, bridged x1"
