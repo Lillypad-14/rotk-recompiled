@@ -40,11 +40,11 @@ struct Piece {
 constexpr Piece kMiddle = {0x08781CD4u, 11, 18, 0x01};   // 8x1, 4 tiles
 constexpr Piece kMessage = {0x08781D8Cu, 3, 19, 0x05};   // 24x1, 10 tiles
 // ROTK's compass (player_tickHud 0x08028C32..): 8 frames of a 3x3 circle at 27, 17 from table
-// 0x08282B44 (frame 0 0x0877F9EC carries the map, the rest are tiles-only), clockwise from south:
-// S, SW, W, NW, N, NE, E, SE. ROTK aims it at a level's marker actor and spins it without one.
+// 0x08282B44 (frame 0 0x0877F9EC carries the map, the rest are tiles-only), indexed by
+// math_vector2_direction8: 0 north (screen up), clockwise. ROTK aims it at a level's marker actor and spins it without one.
 // The Two Towers keeps an objective too: its hint arrow (an actor ticked by 0x08012034, shown after
 // standing still 90 frames) holds the player at +0x0C and the objective actor at +0x08; its 8
-// directions (0x0804EEF0 offsets) run clockwise from north, so ROTK frame = (direction + 4) & 7.
+// directions (0x0804EEF0 offsets) run clockwise from north, the same order, so the frame is the direction.
 constexpr std::uint32_t kCompassFrames = 0x08282B44u, kCompassX = 27, kCompassY = 17;
 constexpr std::uint32_t kCompassSlots[9] = {0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x20};  // 0x50.. is the skill icon
 constexpr std::uint32_t kActorList = 0x03002780u;  // first actor; each actor's +0x00 is the next
@@ -78,10 +78,13 @@ constexpr std::uint32_t kHudText = 0x0800DE14u, kHudTextCallerFrom = 0x08021388u
 constexpr std::uint32_t kHudString = 0x080151F4u;
 constexpr std::uint32_t kCanvasSlot = 0x28, kCanvasTiles = 20, kCanvasX = 5, kStripRow = 19;
 constexpr std::uint32_t kMessageRow = 18;
-// The painter fills each tile it touches with its own bar background (colors 1-3, 6-9, and 4 in its
-// border rows) and the letters in color 4 on rows 1-5 (it always gets y 0x90); those become ROTK's
-// light yellow (2), the rest shows the strip.
-constexpr std::uint32_t kTextColor = 4, kTextTop = 1, kTextBottom = 5, kRotkTextColor = 2;
+// The painter (font_rasterizeString 0x08015300) starts each cell column from what the screen shows
+// there (font_readCellColumn, the font context 0x03000478 +0x08 being -1), so with ROTK's bars on
+// row 18 it painted over their pixels. stringEntry sets +0x08 to 0 (font_fillTiles then fills with
+// color 0) for the paint: the cells hold 0 plus glyph pixels base + 1..3 (base = context +0x04),
+// mapped to ROTK colors here.
+constexpr std::uint32_t kFontContext = 0x03000478u;
+constexpr std::uint8_t kRotkGlyphColors[4] = {0, 2, 3, 5};  // glyph 1..3: light yellow, orange, brown
 constexpr std::uint32_t kOffscreenRow = 30;  // of 32: rows 20+ never show on the 160-line screen
 constexpr std::uint32_t kAfterOamCopy = 0x0800E270u;
 constexpr std::uint32_t kHudSetup = 0x080208A8u;
@@ -114,6 +117,9 @@ struct State {
     bool drawnStatic = false;  // the palette and bank written since the game last laid its HUD out
     int lastHealth = -1, lastSpirit = -1, lastVial = -1;
     bool messageDirty = false;  // a new pickup line, not yet taken and composed over the strip
+    std::uint32_t glyphBase = 0;
+    std::uint32_t fontBackground = 0, fontMap = 0;  // the font context's background (-1: read the screen) while we lend 0
+    bool fontBackgroundSaved = false;  // the painter's first glyph color minus 1
     std::uint16_t messageCells[20] = {};  // its painted cells (0: none), until the bar clears it
 } g_state;
 
@@ -210,12 +216,25 @@ std::uint32_t pixel(const Bytes& tiles, std::uint32_t tile, std::uint32_t x, std
 // fresh tiles for each line); the cells then go in the strip row every VBlank until the bar clears.
 void takeMessage()
 {
+    if (g_state.fontBackgroundSaved) {
+        bus_write_u32(kFontContext + 8, g_state.fontBackground);
+        bus_write_u32(kFontContext + 0x14, g_state.fontMap);
+        g_state.fontBackgroundSaved = false;
+    }
     if (!g_state.messageDirty) return;
     g_state.messageDirty = false;
+    if (std::getenv("ROTK_TTT_TRACE_HUD")) {
+        std::fprintf(stderr, "[hud] painted cells:");
+        for (std::uint32_t i = 0; i < 32 * 32; ++i) {
+            const std::uint32_t e = bus_read_u16(kMap + i * 2) & 0x3FFu;
+            if (e >= kCanvasSlot && e < kCanvasSlot + kCanvasTiles) std::fprintf(stderr, " %u,%u", i % 32, i / 32);
+        }
+        std::fprintf(stderr, "\n");
+    }
     std::uint16_t* cells = g_state.messageCells;
     bool any = false;
     for (std::uint32_t t = 0; t < kCanvasTiles; ++t) {
-        cells[t] = static_cast<std::uint16_t>(bus_read_u16(kMap + (kMessageRow * 32 + kCanvasX + t) * 2));
+        cells[t] = static_cast<std::uint16_t>(bus_read_u16(kMap + (kOffscreenRow * 32 + kCanvasX + t) * 2));
         const std::uint32_t tile = cells[t] & 0x3FFu;
         if (tile < kCanvasSlot || tile >= kCanvasSlot + kCanvasTiles) cells[t] = 0;
         else any = true;
@@ -242,10 +261,9 @@ void takeMessage()
                 for (std::uint32_t x = 0; x < 8; ++x) {
                     std::uint32_t v = pixel(canvas, c, x, y);
                     ++counts[v];
-                    // row 6 is the painter's border row too: a letter pixel there continues a stroke
-                    const bool tail = y == kTextBottom + 1 && pixel(canvas, c, x, y - 1) == kTextColor;
-                    v = v == kTextColor && ((y >= kTextTop && y <= kTextBottom) || tail)
-                            ? kRotkTextColor
+                    const std::uint32_t glyph = (v - g_state.glyphBase) & 0x0Fu;
+                    v = v != 0 && glyph >= 1 && glyph <= 3
+                            ? kRotkGlyphColors[glyph]
                             : pixel(g_state.message.tiles, e & 0x3FFu, e & 0x400u ? 7 - x : x, e & 0x800u ? 7 - y : y);
                     std::uint8_t& b = canvas[c * 32 + y * 4 + x / 2];
                     b = static_cast<std::uint8_t>(x & 1 ? (b & 0x0F) | v << 4 : (b & 0xF0) | v);
@@ -292,7 +310,7 @@ void drawCompass()
         if (std::abs(dx) > 8 || std::abs(dy) > 8) {
             const double turns = std::atan2(static_cast<double>(dx), static_cast<double>(-dy)) / (2 * 3.14159265358979);
             const int direction = static_cast<int>(std::lround(turns * 8)) & 7;  // 0 north, clockwise
-            g_state.compassFrame = (direction + 4) & 7;
+            g_state.compassFrame = direction;
         }
     } else {
         g_state.compassFrame = (g_state.compassFrame + 1) & 7;
@@ -432,11 +450,20 @@ int textEntry(std::uint32_t, int, ArmCpuState* cpu)
 int stringEntry(std::uint32_t, int, ArmCpuState* cpu)
 {
     if (!hudCaller(cpu)) return 0;
-    if (std::getenv("ROTK_TTT_TRACE_HUD")) {
-        std::fprintf(stderr, "[hudstr] from %08X r0 %X x %u y %u, tile 0x28 before:", (cpu->R[14] & ~1u) - 4, cpu->R[0], cpu->R[1], cpu->R[2]);
-        for (std::uint32_t i = 0; i < 32; ++i) std::fprintf(stderr, " %02X", bus_read_u8(kTiles + kCanvasSlot * 32 + i));
-        std::fprintf(stderr, "\n");
+    // a clean background: the painter fills its cells with color 0 instead of reading the screen
+    // (ROTK's bars); takeMessage puts the game's setting back next VBlank
+    // and paints off screen: its row is its map address (+0x14), moved down to row 30 for the paint
+    if (!g_state.fontBackgroundSaved) {
+        g_state.fontBackground = bus_read_u32(kFontContext + 8);
+        g_state.fontMap = bus_read_u32(kFontContext + 0x14);
+        g_state.fontBackgroundSaved = true;
     }
+    bus_write_u32(kFontContext + 8, 0);
+    bus_write_u32(kFontContext + 0x14, g_state.fontMap + (kOffscreenRow - kMessageRow) * 0x40);
+    g_state.glyphBase = bus_read_u32(kFontContext + 4) & 0x0Fu;
+    if (std::getenv("ROTK_TTT_TRACE_HUD"))
+        std::fprintf(stderr, "[hudstr] from %08X, glyph base %u, background %08X\n", (cpu->R[14] & ~1u) - 4, g_state.glyphBase,
+                     bus_read_u32(kFontContext + 8));
     g_state.messageDirty = true;
     return 0;
 }
