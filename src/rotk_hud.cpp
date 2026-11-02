@@ -1,6 +1,7 @@
 #include "rotk_hud.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -38,9 +39,16 @@ struct Piece {
 };
 constexpr Piece kMiddle = {0x08781CD4u, 11, 18, 0x01};   // 8x1, 4 tiles
 constexpr Piece kMessage = {0x08781D8Cu, 3, 19, 0x05};   // 24x1, 10 tiles
-// not drawn: ROTK's indicator circle (0x0877F9EC at 27, 17, 3x3) reads as a skill icon there, and
-// The Two Towers shows its own selected skill (top left); the user keeps that one
-constexpr Piece kCircle = {0x0877F9ECu, 27, 17, 0x50};
+// ROTK's compass (player_tickHud 0x08028C32..): 8 frames of a 3x3 circle at 27, 17 from table
+// 0x08282B44 (frame 0 0x0877F9EC carries the map, the rest are tiles-only), clockwise from south:
+// S, SW, W, NW, N, NE, E, SE. ROTK aims it at a level's marker actor and spins it without one.
+// The Two Towers keeps an objective too: its hint arrow (an actor ticked by 0x08012034, shown after
+// standing still 90 frames) holds the player at +0x0C and the objective actor at +0x08; its 8
+// directions (0x0804EEF0 offsets) run clockwise from north, so ROTK frame = (direction + 4) & 7.
+constexpr std::uint32_t kCompassFrames = 0x08282B44u, kCompassX = 27, kCompassY = 17;
+constexpr std::uint32_t kCompassSlots[9] = {0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x20};  // 0x50.. is the skill icon
+constexpr std::uint32_t kActorList = 0x03002780u;  // first actor; each actor's +0x00 is the next
+constexpr std::uint32_t kHintArrowTick = 0x08012035u;   // actor +0x14
 // fill tables of tiles-only assets; the map is laid once from the bar's own asset (as ROTK's setup)
 constexpr Piece kHealth = {0x08282998u, 3, 18, 0x0F};    // 31 steps, 8x1, 8 tiles
 constexpr Piece kSpirit = {0x08282A14u, 19, 18, 0x17};   // 31 steps, 8x1, 8 tiles
@@ -96,7 +104,9 @@ struct Asset {
 struct State {
     bool enabled = false;
     Bytes rom;
-    Asset middle, message, circle, healthMap, spiritMap, vialMap;
+    Asset middle, message, compassMap, healthMap, spiritMap, vialMap;
+    std::vector<Asset> compass;
+    int compassFrame = 0;
     std::vector<Asset> health, spirit, vial;
     std::uint16_t palette[16] = {};
     int bank = -1;                    // The Two Towers' HUD palette bank, read from its map
@@ -264,6 +274,46 @@ void drawMessage()
                           static_cast<std::uint16_t>((cells[t] & 0x0FFFu) | static_cast<std::uint32_t>(g_state.bank) << 12));
 }
 
+// The compass: toward The Two Towers' objective, held when the player is on it, spinning (as ROTK
+// does) while there is none.
+void drawCompass()
+{
+    std::uint32_t player = 0, target = 0;
+    std::uint32_t a = bus_read_u32(kActorList);
+    for (int n = 0; a && n < 256; ++n, a = bus_read_u32(a))
+        if (bus_read_u32(a + 0x14) == kHintArrowTick) {
+            player = bus_read_u32(a + 0x0C);
+            target = bus_read_u32(a + 0x08);
+            break;
+        }
+    if (player && target) {
+        const int dx = (static_cast<int>(bus_read_u32(target + 0xAC)) >> 16) - (static_cast<int>(bus_read_u32(player + 0xAC)) >> 16);
+        const int dy = (static_cast<int>(bus_read_u32(target + 0xB0)) >> 16) - (static_cast<int>(bus_read_u32(player + 0xB0)) >> 16);
+        if (std::abs(dx) > 8 || std::abs(dy) > 8) {
+            const double turns = std::atan2(static_cast<double>(dx), static_cast<double>(-dy)) / (2 * 3.14159265358979);
+            const int direction = static_cast<int>(std::lround(turns * 8)) & 7;  // 0 north, clockwise
+            g_state.compassFrame = (direction + 4) & 7;
+        }
+    } else {
+        g_state.compassFrame = (g_state.compassFrame + 1) & 7;
+    }
+    const Asset& frame = g_state.compass[static_cast<std::size_t>(g_state.compassFrame)];
+    const Asset& layout = g_state.compassMap;
+    for (std::uint32_t i = 0; i < layout.map.size() && i < 9; ++i) {
+        const std::uint16_t e = layout.map[i];
+        const std::uint32_t tile = e & 0x3FFu;
+        if (tile >= 9) continue;
+        for (std::uint32_t b = 0; b < 32; b += 4) {
+            std::uint32_t v = 0;
+            if (tile * 32 + b + 3 < frame.tiles.size()) std::memcpy(&v, frame.tiles.data() + tile * 32 + b, 4);
+            bus_write_u32(kTiles + kCompassSlots[i] * 32 + b, v);
+        }
+        const std::uint32_t x = kCompassX + i % layout.w, y = kCompassY + i / layout.w;
+        bus_write_u16(kMap + (y * 32 + x) * 2,
+                      static_cast<std::uint16_t>(kCompassSlots[i] | (e & 0x0C00u) | static_cast<std::uint32_t>(g_state.bank) << 12));
+    }
+}
+
 void draw()
 {
     const std::uint32_t player = bus_read_u8(kPlayers + 1);
@@ -298,6 +348,7 @@ void draw()
         writeMap(g_state.vialMap, kVial);
     }
     drawMessage();
+    drawCompass();
     const int health = fill(static_cast<std::int16_t>(bus_read_u16(p + 0x08)),
                             static_cast<std::int16_t>(bus_read_u16(p + 0x6C)), kHealthSteps);
     const int spirit = fill(static_cast<std::int16_t>(bus_read_u16(p + 0x0A)),
@@ -445,7 +496,8 @@ void rotkHudRegister()
     }
     g_state.middle = parse(kMiddle.asset);
     g_state.message = parse(kMessage.asset);
-    g_state.circle = parse(kCircle.asset);
+    for (std::uint32_t i = 0; i < 8; ++i) g_state.compass.push_back(parse(r32(kCompassFrames + i * 4)));
+    g_state.compassMap = g_state.compass[0];
     g_state.healthMap = parse(kHealthMap);
     g_state.spiritMap = parse(kSpiritMap);
     g_state.vialMap = parse(kVialMap);
