@@ -130,6 +130,28 @@ constexpr Special kSpecials[] = {
 };
 constexpr std::uint32_t kCodeStart = 0x08000000u, kCodeEnd = 0x08060000u;
 
+// Dialog portraits. The Two Towers: DialogLineInfos-like table (8 bytes per text line, the
+// speaker's BG asset first; scene_inGameDialog 0x08013498 loads it, a 6x6-tile map). Its
+// portraits are 16-color, LZ77 (flags 0x52), a gold ring drawn into the art.
+constexpr std::uint32_t kLinePortraits = 0x0832B524u, kLinePortraitCount = 1436;
+// ROTK: 7x8 tiles, 16 colors, ROTK's pucrunch (flags 0x72): the active hero's, per hero, are code
+// literals in scene_inGameDialog_enter 0x0801AB44 + 8 * hero.
+constexpr std::uint32_t kRotkHeroPortraits = 0x0801AB44u;
+constexpr int kRotkPortraitWide = 7, kPortraitTiles = 6;
+constexpr int kPortraitCropX = 4, kPortraitCropY = 4;  // ROTK's face in a 48x48 square
+struct PortraitSwap {
+    std::uint32_t tt;  // a Two Towers hero portrait
+    int hero;
+};
+constexpr PortraitSwap kPortraitSwaps[] = {
+    {0x08CA97A8u, 0},                     // Frodo
+    {0x08CA8AA8u, 1},                     // Legolas
+    {0x08CA8690u, 2},                     // Aragorn
+    {0x08CAA444u, 3}, {0x08CAA874u, 3},   // Gandalf the Grey, the White
+    {0x08CAB018u, 4},                     // Eowyn
+    {0x08CA8EFCu, 5},                     // Gimli
+};
+
 // Converted data in host RAM, past the plain host's own use of its first page.
 constexpr std::uint32_t kDataBase = 0x12100000u;
 constexpr std::uint32_t kMagic = 0x53544B52u;  // "RKTS"
@@ -139,6 +161,7 @@ struct State {
     Bytes rotk;
     Bytes image;  // written at kDataBase
     std::uint32_t poseTable = 0, palettes = 0, blankWeapon = 0;
+    std::uint32_t portraits[std::size(kPortraitSwaps)] = {};
     std::uint32_t weaponTable[kWeaponEntries] = {};
     // the attack's facing arrays per combo step (step 0 is the tables' own)
     std::uint32_t comboBody[kHeroes][kComboSteps] = {};
@@ -425,6 +448,92 @@ std::vector<Box> blankBoxes(std::vector<Box> boxes)
     return boxes;
 }
 
+// ROTK's pucrunch stream (rotkit/compression/pucrunch.py): a 4-byte header, the RLE byte table,
+// then MSB-first bits in little-endian words.
+Bytes unpackRotk(const Bytes& rom, std::uint32_t at)
+{
+    const std::uint32_t tableSize = r8(rom, at), extraBits = r8(rom, at + 2), escBits = r8(rom, at + 3);
+    std::uint32_t escape = r8(rom, at + 1), pos = at + 4 + tableSize, word = 0, left = 0;
+    auto bits = [&](std::uint32_t n) {
+        std::uint32_t value = 0;
+        while (n) {
+            if (!left) {
+                word = r32(rom, pos);
+                pos += 4;
+                left = 32;
+            }
+            const std::uint32_t take = std::min(n, left);
+            left -= take;
+            value = value << take | (word >> left & ((1u << take) - 1));
+            n -= take;
+        }
+        return value;
+    };
+    auto gamma = [&]() {
+        std::uint32_t k = 0;
+        while (k < 7 && bits(1)) ++k;
+        return 1u << k | bits(k);
+    };
+    Bytes out;
+    auto copy = [&](std::uint32_t dist, std::uint32_t length) {
+        for (std::uint32_t i = 0; i < length; ++i) out.push_back(dist <= out.size() ? out[out.size() - dist] : 0);
+    };
+    const std::uint32_t lowBits = 8 - escBits;
+    while (out.size() < 0x10000) {
+        const std::uint32_t top = bits(escBits);
+        if (top != escape) {
+            out.push_back(static_cast<std::uint8_t>(top << lowBits | bits(lowBits)));
+            continue;
+        }
+        const std::uint32_t length = gamma() + 1;
+        if (length > 2) {
+            std::uint32_t hi = gamma() - 1;
+            if (hi == 254) break;
+            hi = hi << extraBits | bits(extraBits);
+            copy((hi << 8 | bits(8)) + 1, length);
+        } else if (!bits(1)) {
+            copy(bits(8) + 1, 2);
+        } else if (!bits(1)) {
+            const std::uint32_t next = bits(escBits);
+            out.push_back(static_cast<std::uint8_t>(escape << lowBits | bits(lowBits)));
+            escape = next;
+        } else {
+            std::uint32_t count = gamma();
+            if (count >= 128) {
+                count = (count << 1 | bits(1)) & 0xFF;
+                count |= (gamma() - 1) << 8;
+            }
+            const std::uint32_t code = gamma();
+            const std::uint8_t value = static_cast<std::uint8_t>(
+                code < 32 ? r8(rom, at + 4 + code - 1) : (code << 3 | bits(3)) & 0xFF);
+            out.insert(out.end(), count + 1, value);
+        }
+    }
+    return out;
+}
+
+// A hero's ROTK dialog portrait as a Two Towers one: its palette and 6x6 raw tiles (flags 0x12),
+// cropped from ROTK's 7x8.
+Bytes convertPortrait(const Bytes& rom, int hero)
+{
+    const std::uint32_t asset = r32(rom, kRotkHeroPortraits + 8u * hero);
+    const Bytes tiles = unpackRotk(rom, asset + 2 + 32 + 2);
+    auto pixel = [&](int x, int y) {
+        const std::size_t at = static_cast<std::size_t>((y / 8 * kRotkPortraitWide + x / 8) * 32 + y % 8 * 4 + x % 8 / 2);
+        return at < tiles.size() ? (tiles[at] >> (x % 2 * 4) & 15) : 0;
+    };
+    Bytes out = {0x12, 0x00};
+    for (std::uint32_t i = 0; i < 32; ++i) out.push_back(static_cast<std::uint8_t>(r8(rom, asset + 2 + i)));
+    put16(out, kPortraitTiles * kPortraitTiles * 32);
+    for (int t = 0; t < kPortraitTiles * kPortraitTiles; ++t)
+        for (int y = 0; y < 8; ++y)
+            for (int x = 0; x < 8; x += 2) {
+                const int px = kPortraitCropX + t % kPortraitTiles * 8 + x, py = kPortraitCropY + t / kPortraitTiles * 8 + y;
+                out.push_back(static_cast<std::uint8_t>(pixel(px, py) | pixel(px + 1, py) << 4));
+            }
+    return out;
+}
+
 void build()
 {
     const Bytes& rom = g_state.rotk;
@@ -522,6 +631,8 @@ void build()
                 g_state.literalsHigh = std::max(g_state.literalsHigh, a);
             }
     }
+    for (std::size_t i = 0; i < std::size(kPortraitSwaps); ++i)
+        g_state.portraits[i] = append(image, convertPortrait(rom, kPortraitSwaps[i].hero));
     std::sort(g_state.weaponRecords.begin(), g_state.weaponRecords.end());
     std::sort(g_state.idleTicks.begin(), g_state.idleTicks.end());
     g_state.poseTable = append(image, poseTable);
@@ -559,7 +670,7 @@ std::uint32_t comboAttack(int hero)
     return g_state.comboBody[hero][step];
 }
 
-int romRead32(std::uint32_t address, std::uint32_t, std::uint32_t* out)
+int romRead32(std::uint32_t address, std::uint32_t original, std::uint32_t* out)
 {
     // built on the first ROM read: the cart is not mapped yet when reset runs. The build reads the
     // Two Towers' own tables, so without the override.
@@ -602,6 +713,15 @@ int romRead32(std::uint32_t address, std::uint32_t, std::uint32_t* out)
                          (address - kWeaponPoseTable) / 4u % kPoses);
         *out = weapon ? weapon : g_state.blankWeapon;
         return 1;
+    }
+    if (address >= kLinePortraits && address < kLinePortraits + kLinePortraitCount * 8u && address % 8 == kLinePortraits % 8) {
+        for (std::size_t i = 0; i < std::size(kPortraitSwaps); ++i)
+            if (original == kPortraitSwaps[i].tt) {
+                ensureWritten();
+                *out = g_state.portraits[i];
+                return 1;
+            }
+        return 0;
     }
     if (address >= kHeroPalettes && address < kHeroPalettes + kHeroes * 4u) {
         ensureWritten();

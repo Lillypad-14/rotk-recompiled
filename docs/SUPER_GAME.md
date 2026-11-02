@@ -636,7 +636,15 @@ Known problems, in order:
    state), Aragorn's two pose variants 0x0832946C (state 0x1B when player +0x9E bit 0) and
    0x083293E0 (his pose 2 when the hero record's +0x19 has bits 2 and 4). Frodo's 0x0832928C/A0/B4
    are never referenced. The mapping still is by eye; the motions match the skills.
-6. Not converted: HUD portraits, menus, other characters. Animation timing: ROTK walk and swing play
+6. Dialog portraits (done 2026-11-02): the Two Towers' per-line speaker table 0x0832B524 (8 bytes
+   per text line, BG asset first; drawn as a 6x6-tile map) is answered with ROTK's hero dialog
+   portraits (ROTK's pucrunch unpacked on the host, a 48x48 crop at 4,4 of ROTK's 56x64, raw
+   tiles, flags 0x12) wherever it names one of the Two Towers' six hero portraits (Gandalf the
+   Grey's and the White's both get ROTK's Gandalf). ROTK's teal backdrop is color 0, so the
+   scene shows behind the face; the Two Towers' gold ring is gone. Checked headless on the Helm's
+   Deep route (frames 3240..3700): Eowyn and Aragorn speak with ROTK's faces. Other speakers keep
+   the Two Towers' art (ROTK also has Sam, Smeagol, Saruman, Eomer and Theoden).
+   Not converted: the hero select screen's render, menus, other characters. Animation timing: ROTK walk and swing play
    at the Two Towers' 1 tick per frame (as ROTK; ROTK's Eowyn and Gimli walk at 2). Idle (fixed
    2026-11-02): the Two Towers idles at 3 ticks per frame; the compose hook now sets the actor's
    ticks per frame (+0x21, countdown +0x20, actor_tickAnimation 0x08001CB0) to ROTK's own
