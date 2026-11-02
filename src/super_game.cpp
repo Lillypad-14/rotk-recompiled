@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 
+#include "color_vision.h"
 #include "expanded_edition.h"
 #include "runtime_arm.h"
 #include "two_towers.h"
@@ -156,6 +157,10 @@ void playTwoTowers()
     wchar_t modsRoot[MAX_PATH] = {};
     const bool hadModsRoot = GetEnvironmentVariableW(L"GBARECOMP_MODS_ROOT", modsRoot, MAX_PATH) != 0;
     SetEnvironmentVariableW(L"GBARECOMP_MODS_ROOT", nullptr);
+    // Display features the plain host has carry over as ROTK has them set now.
+    char colorVision[16] = {};
+    const bool hadColorVision = GetEnvironmentVariableA("ROTK_PC_COLOR_VISION", colorVision, sizeof colorVision) != 0;
+    SetEnvironmentVariableA("ROTK_PC_COLOR_VISION", colorVisionModeName());
 
     // straight into the game: the GBA boot logo would break the swap
     std::string command = quoted(g_executable.string()) + " --window --bios-skip-intro --rom " + quoted(g_rom.string()) +
@@ -172,6 +177,7 @@ void playTwoTowers()
     SetEnvironmentVariableW(L"ROTK_SUPER_GAME_BACK", nullptr);
     SetEnvironmentVariableW(L"ROTK_SUPER_GAME_BACK_FILE", nullptr);
     if (hadModsRoot) SetEnvironmentVariableW(L"GBARECOMP_MODS_ROOT", modsRoot);
+    SetEnvironmentVariableA("ROTK_PC_COLOR_VISION", hadColorVision ? colorVision : nullptr);
     if (!started) {
         std::fprintf(stderr, "[rotk] super game: could not start %s\n", g_executable.string().c_str());
         if (ready) CloseHandle(ready);
@@ -202,6 +208,13 @@ void playTwoTowers()
                 SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
             } else {
                 SDL_SetWindowFullscreen(window, 0);
+                // The Two Towers' window is the GBA's shape: this one gets its own shape back (wider
+                // with widescreen), at that height and centered where that one was.
+                if (bw > 0 && bh > 0 && w > 0 && h > 0) {
+                    const int ownWidth = bh * w / h;
+                    bx -= (ownWidth - bw) / 2;
+                    bw = ownWidth;
+                }
                 if (bw > 0 && bh > 0) SDL_SetWindowSize(window, bw, bh);
                 SDL_SetWindowPosition(window, bx, by);
             }

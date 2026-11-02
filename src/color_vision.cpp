@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
@@ -67,6 +68,11 @@ void buildTable(Mode mode)
             }
 }
 
+const char* colorVisionName()
+{
+    return g_mode == Mode::Protan ? "protan" : g_mode == Mode::Tritan ? "tritan" : "deutan";
+}
+
 void colorVisionActivated()
 {
     const char* mode = gba_mod_option_value(kPackageId, kFeatureId, "type");
@@ -76,6 +82,7 @@ void colorVisionActivated()
     if (const char* env = std::getenv("ROTK_PC_COLOR_VISION"))
         g_mode = !std::strcmp(env, "protan") ? Mode::Protan : !std::strcmp(env, "tritan") ? Mode::Tritan : Mode::Deutan;
     buildTable(g_mode);
+    std::fprintf(stderr, "[rotk] color vision: %s\n", colorVisionName());
 }
 
 void colorVisionReset()
@@ -89,6 +96,11 @@ void colorVisionReset()
 bool colorVisionActive()
 {
     return g_mode != Mode::Off;
+}
+
+const char* colorVisionModeName()
+{
+    return g_mode == Mode::Off ? nullptr : colorVisionName();
 }
 
 void colorVisionDecorate(const gbarecomp::PresentFrame* frame)

@@ -1,4 +1,5 @@
-// A plain host for a cartridge with no PC extras yet: The Two Towers (docs/SUPER_GAME.md). The ROTK
+// A plain host for a cartridge other than ROTK: The Two Towers (docs/SUPER_GAME.md). Its only PC
+// extra so far is color vision correction, carried over from ROTK's setting. The ROTK
 // host's hooks are tied to ROTK addresses, so it can't run another cartridge.
 //
 // Started by the ROTK host for the super game, it takes over ROTK's window: the window opens hidden
@@ -9,6 +10,8 @@
 // King, which hands the window back: it writes its place, size and fullscreen state to
 // ROTK_SUPER_GAME_BACK_FILE, sets ROTK_SUPER_GAME_BACK (ROTK shows itself there) and quits.
 #include "runtime.h"
+
+#include "color_vision.h"
 
 #include "gba_bus.h"
 #include "mod_function_hooks.h"
@@ -307,7 +310,14 @@ void reveal()
         if (fullscreen) {
             SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
         } else {
-            if (w > 0 && h > 0) SDL_SetWindowSize(window, w, h);
+            // ROTK's window can be widescreen; this game has no widescreen, so its window takes the
+            // GBA's 3:2 shape at that height, centered where ROTK's was.
+            if (w > 0 && h > 0) {
+                const int gbaWidth = h * 3 / 2;
+                x += (w - gbaWidth) / 2;
+                w = gbaWidth;
+                SDL_SetWindowSize(window, w, h);
+            }
             SDL_SetWindowPosition(window, x, y);
         }
     }
@@ -327,6 +337,7 @@ void reveal()
 
 void presentDecorate(const gbarecomp::PresentFrame* frame)
 {
+    rotk::colorVisionDecorate(frame);
     if (!g_handoff) return;
     ++g_frames;
     if (frame->bus && frame->bus->read32(kSceneCurrent) == kSceneMainMenu &&
@@ -340,7 +351,7 @@ void presentDecorate(const gbarecomp::PresentFrame* frame)
 
 bool presentDecorateActive()
 {
-    return g_handoff;
+    return g_handoff || rotk::colorVisionActive();
 }
 
 }  // namespace
@@ -364,6 +375,8 @@ int main(int argc, char** argv)
     gba_mod_register_function_entry_plugin(kSkipCopyrightHookId, kCopyrightTick, 1, skipCopyright);
     gba_mod_register_function_entry_plugin(kSkipTitleHookId, kMainMenuTick, 1, skipTitle);
     gba_mod_register_reset_callback(enableSkipIntro);
+    // ROTK_PC_COLOR_VISION, which ROTK sets to its own choice when it starts this game
+    rotk::colorVisionRegister();
     options.present_decorate = presentDecorate;
     options.present_decorate_active = presentDecorateActive;
     return gbarecomp::run_game(argc, argv, options);

@@ -55,7 +55,7 @@ target_link_gbarecomp_runtime_stack(RotkCart)
 # launcher library stays linked for the runtime's in-game menu; the plain host skips its pre-boot page.
 option(ROTK_PLAIN_HOST "Build the plain host (src/plain_main.cpp) for a cartridge other than ROTK" OFF)
 if(ROTK_PLAIN_HOST)
-    set(ROTK_HOST_SOURCES src/plain_main.cpp)
+    set(ROTK_HOST_SOURCES src/plain_main.cpp src/color_vision.cpp)
 else()
     set(ROTK_HOST_SOURCES src/main.cpp src/widescreen.cpp src/hd_audio.cpp src/hd_icons.cpp src/local_coop.cpp
         src/smooth_motion.cpp src/transparency.cpp src/combat_info.cpp src/duel_hud.cpp src/rumble.cpp src/color_vision.cpp

@@ -85,6 +85,15 @@ Two processes, one window at a time: gbarecomp can't hold two different cartridg
 (the generated code and the runtime are per cartridge). Checked headless: the row draws and the
 cursor wraps onto it. The handoff itself needs a window: test it by playing.
 
+ROTK's PC features in The Two Towers (item 4, 2026-11-01):
+- Color vision: carried over. ROTK sets `ROTK_PC_COLOR_VISION` to its current mode for the child
+  (src/color_vision.cpp is game-independent); the TTT log prints `[rotk] color vision: <mode>`.
+- Widescreen: not ported, by the user's choice. The Two Towers' window takes the GBA's 3:2 shape at
+  ROTK's height, centered where ROTK's window was; on return ROTK gets its own (wider) shape back.
+- Transparency and smooth motion: next; each needs ~7 Two Towers addresses (OAM shadows,
+  composeOam, particle drawer, camera, scene).
+- Minimap, combat info, co-op: bigger ports. HD audio: no (TTT's sound engine differs).
+
 ## Phase 0 findings (2026-10-28)
 
 Two Towers ROM: "TWO TOWERS", code ALPE, 16 MB, SHA-1 `82b3b4afb0ed0d3fca646aa266e0bfc5bffd49d9`,
