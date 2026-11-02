@@ -555,9 +555,8 @@ Next session, in order:
 1. Ask the user how the combo chain feels in a window (mash B; slow taps play the recoveries). If
    chained swings are silent, find where the Two Towers plays its swing sound at an attack's start
    (ROTK keeps a combo sound pending in comboState[4]).
-2. Gimli: unchecked everywhere (weapon, combo, Axe Throw 0x08329584, Whirlwind 0x08329598, idle at
-   3). Hero select needs a third Right/Left press (see "Other heroes" below); make a state at 5560
-   for him like the others.
+2. Other cutscenes and ally summons (Summon Gimli, Call Legolas) with the NPC table fix: only two
+   intro scenes were checked. Swing sound on chained swings still unconfirmed.
 3. Aragorn's two pose variants (0x0832946C, 0x083293E0, see Done 5) never seen in play.
 
 Commits this phase: 17da709 bodies, 786c711 weapons, 7ef6848 skill animations, 28aa44c weapon
@@ -573,8 +572,13 @@ How to run it:
   (ttt-rotk-portraits: dialog portraits only). Switch from ROTK's main menu. ROTK dumps its ROM to
   %TEMP%/rotk-recompiled-rom.gba when either is on and sets ROTK_TTT_ROTK_SPRITES=1 and/or
   ROTK_TTT_ROTK_PORTRAITS=1 plus ROTK_TTT_ROTK_ROM for the child (src/super_game.cpp).
-- Direct: set ROTK_TTT_ROTK_SPRITES=1 and/or ROTK_TTT_ROTK_PORTRAITS=1 and ROTK_TTT_ROTK_ROM (ROM =
-  .private/rotk.gba), then run PlayTwoTowers.cmd. Checked headless at frame 3400 of the route: each
+- A third feature, "ROTK skill animations in The Two Towers" (ttt-rotk-skills, **on** by default,
+  env ROTK_TTT_ROTK_SKILLS=1), only matters with the sprites on: off, the skills play the Two
+  Towers' own animations recolored to the ROTK hero palette (`recolorFacings`, nearest color per
+  index; the hero palette is ROTK's either way, so stock skill art drew in the wrong colors - the
+  user saw "a buggy two towers version" when it was a plain toggle).
+- Direct: set ROTK_TTT_ROTK_SPRITES=1 (+ ROTK_TTT_ROTK_SKILLS=1) and/or ROTK_TTT_ROTK_PORTRAITS=1 and
+  ROTK_TTT_ROTK_ROM (ROM = .private/rotk.gba), then run PlayTwoTowers.cmd. Checked headless at frame 3400 of the route: each
   alone and both together draw as expected.
 - Never run TTT-Recompiled.exe with `--help`: it starts the game (in a window). Headless runs use
   `--no-window`, absolute paths, and one run at a time (parallel runs fight over the mod state
@@ -685,6 +689,20 @@ Done (each checked headless):
    Checks: `ROTK_TTT_DUMP_BOXES=1` prints every weapon's and body's boxes, stock vs converted (all
    44 bodies/specials match); `ROTK_TTT_TRACE_HITS=1` logs each tick player 0's weapon shows a hit
    frame; `ROTK_TTT_TEST_VANILLA=1` runs the hooks and traces with the stock art, for A/B runs.
+9. Gimli, NPC heroes, hotspots (2026-11-02). Gimli is not on a new game's hero select (Left from
+   Aragorn: Eowyn, Legolas, Frodo); `ROTK_TTT_TEST_HERO=5` makes player 0 Gimli from boot (Aragorn's
+   route, state at 5560). Checked: body and colors match ROTK's own render, axe (kind 11), chain,
+   Whirlwind (ROTK cast pose 2), Axe Throw. Axe Throw threw nothing: effects spawn at the body
+   frame's hotspot 0 (0x08001A2C; trigger 0x0801EC74 at frame 5 spawns the axe, 0x08019EEC), and
+   seven ROTK skill animations had no hotspots; bodies with a Two Towers source now take its
+   hotspots (`ttHotspots`, per frame, held). The axe's flight runs 57 unmapped reads in the stock
+   game too. NPC heroes (cutscenes, allies; tick 0x0802F0E5, palette banks 9..D) read their poses
+   from kNpcPoseTables (0x0832A480: hero * 4 + walk, stand, flinch, attack/cast; 0x0832A500..
+   0x0832A5AC other sets), which hold the player pose table's arrays; they drew Two Towers art in
+   the ROTK palette (the user: "sprites look messed up in cutscenes"). Those reads are now answered
+   with the converted arrays (`poseArrays`); checked in the Helm's Deep rain fight and the
+   Rivendell scene. Non-hero NPCs (Boromir) keep their art. `ROTK_TTT_TRACE_ACTORS=1` logs each
+   drawn actor (tick, record, palette bits +0xE1).
 5. Specials (fdca774): build moved to the first ROM read (see above); the skills' cast functions,
    reached only through the skill cast table 0x08057AB0, are extra_funcs in config/ttt.toml (they
    used to run through the interpreter, which also bypassed the override). With the skill
