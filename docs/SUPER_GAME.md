@@ -574,14 +574,13 @@ gba::g_rom_read32_override:
   melee or cast pose.
 
 Known problems, in order:
-1. Wrong weapons. Weapon kinds are per weapon, not per hero (the code assumes kind = hero * 2 + 1).
-   The probe (ROTK_TTT_TRACE_WEAPON=1) on the Helm's Deep route read kinds 1, 2, 3, 6, 8, 9, 11;
-   the swinging player (Aragorn) used kind 3. NPC heroes in the scene use the same table. Rendered
-   stand poses: 0 hand, 1 short sword, 2 bow, 3 sword, 4 hand, 5 long sword, 6 (odd shape), 7 sword,
-   8 staff, 9 short blade, 10 fist, 11 axe, 12 fist, 13 axe. Proposed: 1 -> Frodo part 1, 2 ->
-   Legolas part 1 (bow), 3 -> Aragorn part 1, 5 -> Eowyn part 1, 7 -> Gandalf part 2 (sword),
-   8 -> Gandalf part 1 (staff), 11 and 13 -> Gimli part 1, the rest blank. Check which body each
-   kind is drawn with (it must be that hero's, or the frames do not line up).
+1. Weapons (fixed 2026-11-01, uncommitted): kinds come from the weapon-spawn code (player
+   0x0802F3BC, Gandalf the Grey's hat 0x0802F720, NPC heroes' main hand 0x08042310 and off hand
+   0x08043238), mapped in `kWeaponSources`: 1 Frodo, 2 Legolas, 3 Aragorn, 7 Gandalf's sword (NPC),
+   8 Gandalf's staff, 9 Eowyn, 11 Gimli each get their hero's ROTK part (Gandalf: part 1 sword,
+   part 2 staff). Hands, fists, Aragorn's NPC off-hand long sword (5), the hat (6) and 13 are blank.
+   Checked headless on the route: Aragorn walks and swings with his sword. The other heroes' weapons
+   are not checked in a frame yet.
 2. Hits never verified: the route meets no enemy. Find one (walk further, or compare kills with the
    option off), and check the injected attack box lands on the strike frame.
 3. Weapon colors are approximate (nearest hero color). On PC they can use their own palette:

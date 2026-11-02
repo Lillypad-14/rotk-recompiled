@@ -32,11 +32,33 @@ constexpr int kHeroes = 6, kPoses = 6, kFacings = 5;
 constexpr std::uint32_t kWeaponPoseTable = 0x083314A0u;
 constexpr int kWeaponEntries = 84;
 constexpr std::uint32_t kBlankFrames = 64;
-constexpr int kWeaponKindsPerHero = 2;
-// ROTK hand part of each hero's main weapon (actor_player_updateHandSprites): sword, bow, sword,
-// staff, sword, axe. Drawn in ROTK's weapons palette (OBJ bank 2) remapped to the hero's colors, as
-// the Two Towers draws the weapon part in the hero's palette.
-constexpr std::uint32_t kWeaponPart[kHeroes] = {1, 1, 1, 1, 1, 1};
+// Each weapon kind's ROTK hand part {hero, part}, or {-1} for none. The Two Towers picks the kind
+// per hero when it spawns the weapon actor (player 0x0802F3BC, Gandalf's hat 0x0802F720, NPC heroes'
+// main hand 0x08042310 and off hand 0x08043238), so a kind is always drawn with its hero's body.
+// Hands, fists and the hat are part of ROTK's body art and stay blank. Drawn in ROTK's weapons
+// palette (OBJ bank 2) remapped to the hero's colors, as the Two Towers draws the weapon part in
+// the hero's palette.
+struct WeaponSource {
+    int hero;
+    std::uint32_t part;
+};
+constexpr WeaponSource kWeaponSources[] = {
+    {-1, 0},  // 0 Frodo's off hand
+    {0, 1},   // 1 Frodo's sword
+    {1, 1},   // 2 Legolas's bow
+    {2, 1},   // 3 Aragorn's sword
+    {-1, 0},  // 4 Aragorn's off hand (NPC)
+    {-1, 0},  // 5 Aragorn's off-hand long sword (NPC)
+    {-1, 0},  // 6 Gandalf the Grey's hat
+    {3, 1},   // 7 Gandalf's sword (NPC main hand)
+    {3, 2},   // 8 Gandalf's staff
+    {4, 1},   // 9 Eowyn's sword
+    {-1, 0},  // 10 Eowyn's off hand (NPC)
+    {5, 1},   // 11 Gimli's axe
+    {-1, 0},  // 12 Gimli's off hand (NPC)
+    {-1, 0},  // 13
+};
+static_assert(std::size(kWeaponSources) * 6 == kWeaponEntries);
 constexpr std::uint32_t kWeaponsPalette = 2;
 enum Pose { kWalk, kStand, kAttack, kDeath, kFlinch, kCast };
 
@@ -338,27 +360,27 @@ void build()
             std::memcpy(poseTable.data() + (hero * kPoses + pose) * 4, &array, 4);
         }
         const std::uint32_t palette = r32(rom, kObjPalettes + (kHeroPaletteBase + hero) * 4u);
-        // the weapon part: the hero's main weapon in each pose, as many frames as the body has
+        // the weapon kinds drawn with this hero, as many frames as the body has in each pose
         const auto remap = nearestColors(rom, r32(rom, kObjPalettes + kWeaponsPalette * 4u), palette);
-        for (int pose = 0; pose < kPoses; ++pose) {
-            const Source& source = kSources[pose];
-            const std::uint32_t bank = r32(rom, source.banks + hero * 4u);
-            const std::uint32_t body = r32(rom, bank + source.pose * 4u);
-            const std::uint32_t entry = r32(rom, bank + (kWeaponPart[hero] * 7u + source.pose) * 4u);
-            if (entry < kRomBase || entry >= kRomBase + rom.size()) continue;
-            Bytes facings;
-            for (int facing = 0; facing < kFacings; ++facing) {
-                const std::uint32_t bodyFrames = r16(rom, r32(rom, body + facing * kRecordSize + 4) + 6);
-                const Converted c = convert(rom, entry + facing * kRecordSize, AttackBox{}, remap.data(), bodyFrames);
-                Bytes record;
-                put32(record, append(image, c.tiles));
-                put32(record, append(image, c.frameSet));
-                put32(facings, append(image, record));
+        for (int kind = 0; kind < static_cast<int>(std::size(kWeaponSources)); ++kind) {
+            if (kWeaponSources[kind].hero != hero) continue;
+            for (int pose = 0; pose < kPoses; ++pose) {
+                const Source& source = kSources[pose];
+                const std::uint32_t bank = r32(rom, source.banks + hero * 4u);
+                const std::uint32_t body = r32(rom, bank + source.pose * 4u);
+                const std::uint32_t entry = r32(rom, bank + (kWeaponSources[kind].part * 7u + source.pose) * 4u);
+                if (entry < kRomBase || entry >= kRomBase + rom.size()) continue;
+                Bytes facings;
+                for (int facing = 0; facing < kFacings; ++facing) {
+                    const std::uint32_t bodyFrames = r16(rom, r32(rom, body + facing * kRecordSize + 4) + 6);
+                    const Converted c = convert(rom, entry + facing * kRecordSize, AttackBox{}, remap.data(), bodyFrames);
+                    Bytes record;
+                    put32(record, append(image, c.tiles));
+                    put32(record, append(image, c.frameSet));
+                    put32(facings, append(image, record));
+                }
+                g_state.weaponTable[kind * kPoses + pose] = append(image, facings);
             }
-            const std::uint32_t array = append(image, facings);
-            // Legolas's bow for both his kinds, the other heroes' weapon for their odd kind
-            for (int kind = hero * kWeaponKindsPerHero; kind < (hero + 1) * kWeaponKindsPerHero; ++kind)
-                if (hero == 1 || kind % 2 == 1) g_state.weaponTable[kind * kPoses + pose] = array;
         }
         Bytes colors;
         for (std::uint32_t i = 0; i < 32; ++i) colors.push_back(static_cast<std::uint8_t>(r8(rom, palette + i)));
