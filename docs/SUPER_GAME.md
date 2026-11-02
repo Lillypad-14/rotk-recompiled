@@ -637,4 +637,8 @@ Known problems, in order:
    0x083293E0 (his pose 2 when the hero record's +0x19 has bits 2 and 4). Frodo's 0x0832928C/A0/B4
    are never referenced. The mapping still is by eye; the motions match the skills.
 6. Not converted: HUD portraits, menus, other characters. Animation timing: ROTK walk and swing play
-   at the Two Towers' 1 tick per frame (as ROTK); idle is 3 ticks per frame (ROTK uses 2).
+   at the Two Towers' 1 tick per frame (as ROTK; ROTK's Eowyn and Gimli walk at 2). Idle (fixed
+   2026-11-02): the Two Towers idles at 3 ticks per frame; the compose hook now sets the actor's
+   ticks per frame (+0x21, countdown +0x20, actor_tickAnimation 0x08001CB0) to ROTK's own
+   (SpriteAnimation +12: 2 for Frodo, Aragorn, Gandalf; 3 for Legolas, Eowyn, Gimli). Checked
+   headless for Aragorn: his idle changes every 4 video frames.

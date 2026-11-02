@@ -152,6 +152,8 @@ struct State {
     std::uint32_t literalsLow = ~0u, literalsHigh = 0;
     // the records of weapons with ROTK art (sorted), drawn in weaponColors
     std::vector<std::uint32_t> weaponRecords;
+    // the idle records (sorted) with ROTK's ticks per frame: the Two Towers idles at 3, ROTK at 2
+    std::vector<std::pair<std::uint32_t, std::uint8_t>> idleTicks;
     std::array<std::uint8_t, 32> weaponColors = {};
     // per OAM index: drawn in weaponColors, as pushed and as last copied to OAM
     bool actorWeapon = false;
@@ -429,6 +431,7 @@ void build()
     Bytes& image = g_state.image;
     image.clear();
     g_state.weaponRecords.clear();
+    g_state.idleTicks.clear();
     const std::uint32_t weaponsPalette = r32(rom, kObjPalettes + kWeaponsPalette * 4u);
     for (std::uint32_t i = 0; i < 32; ++i) g_state.weaponColors[i] = static_cast<std::uint8_t>(r8(rom, weaponsPalette + i));
     put32(image, kMagic);
@@ -446,7 +449,9 @@ void build()
             Bytes record;
             put32(record, append(image, c.tiles));
             put32(record, append(image, c.frameSet));
-            put32(facings, append(image, record));
+            const std::uint32_t at = append(image, record);
+            if (pose == kStand) g_state.idleTicks.emplace_back(at, r8(rom, entry + facing * kRecordSize + 12));
+            put32(facings, at);
         }
         return append(image, facings);
     };
@@ -518,6 +523,7 @@ void build()
             }
     }
     std::sort(g_state.weaponRecords.begin(), g_state.weaponRecords.end());
+    std::sort(g_state.idleTicks.begin(), g_state.idleTicks.end());
     g_state.poseTable = append(image, poseTable);
     g_state.palettes = append(image, palettes);
     // FNV-1a of the image after its stamp, so a save state holding another build's image is replaced
@@ -609,6 +615,15 @@ int composeEntry(std::uint32_t, int, ArmCpuState* cpu)
 {
     const std::uint32_t record = bus_read_u32(cpu->R[0] + kActorRecord);
     g_state.actorWeapon = std::binary_search(g_state.weaponRecords.begin(), g_state.weaponRecords.end(), record);
+    // idle at ROTK's speed: actor+0x21 is the ticks per frame, +0x20 the countdown (actor_tickAnimation)
+    const auto idle = std::lower_bound(g_state.idleTicks.begin(), g_state.idleTicks.end(), std::make_pair(record, std::uint8_t{0}));
+    if (idle != g_state.idleTicks.end() && idle->first == record && idle->second) {
+        const std::uint32_t actor = cpu->R[0];
+        if (bus_read_u8(actor + 0x21) != idle->second) {
+            bus_write_u8(actor + 0x21, idle->second);
+            if (bus_read_u8(actor + 0x20) > idle->second) bus_write_u8(actor + 0x20, idle->second);
+        }
+    }
     return 0;
 }
 
