@@ -559,17 +559,29 @@ How to run it:
   (headless dumps need patches/headless-framedump.patch), then `python tools/frame_sheet.py <dir>
   out.png --crop 10,0,90,80 --scale 2`. The hero stands near x 40, y 30 in those frames.
 - Offline: rotk/two-towers/tools/rotk_hero_sprites.py renders any ROTK hero animation converted.
+- Fight check (fast): run the route to frame 5560 with `--dump-state helms.state`, then rerun from
+  it with `--load-state helms.state` and a short route. Replay frames stay absolute (5560 + n). From
+  there, holding Down (0x37F) for about 410 frames reaches a group of Uruk-hai at a rock. Then tap B
+  (attack, 0x3FD; A is the skill) every 20 frames and turn toward them now and then. They die by
+  about frame 6400 and the XP bar gains pips. With no attacks they live, so kills mean hits.
 
 What src/rotk_sprites.cpp does (TTT plain host): converts ROTK animations (ROTK LZ77, packed pieces,
 6-byte boxes) to the Two Towers' format in host RAM at 0x12100000, then answers ROM reads through
 gba::g_rom_read32_override:
 - pose table 0x08329664 (hero * 6 + pose) with ROTK body animations (kSources: walk = move 6,
   stand = move 4, attack = melee 0, death = move 1, flinch = move 3, cast = cast 0); the attack gets
-  the Two Towers' attack box on its strike frame (ROTK frames have no attack box);
+  the Two Towers' body attack box (slot 1) on the matching frame, scaled to the ROTK frame count;
 - hero palettes 0x0832B248 + (hero + 0x33) * 4 with ROTK's ObjPalettes[0x21 + hero];
 - weapon table 0x083314A0 (kind * 6 + pose) with ROTK weapon parts (frames padded to the body's,
-  colors remapped from ROTK's weapons palette, bank 2, to the hero palette); kinds without one get a
-  blank 64-frame animation;
+  colors remapped from ROTK's weapons palette, bank 2, to the hero palette); kinds without art get a
+  blank animation (at least 64 frames). **The weapon actor's box deals the melee damage** (hit
+  callback 0x08010ED4, installed by the weapon spawner): each weapon animation has one box slot,
+  holding ROTK's own strike box when the part has one (all melee heroes' attack: type 1, one frame,
+  every facing) and otherwise the Two Towers' box for that kind and pose, scaled. Stock kinds box
+  the attack (pose 2) and the cast (pose 5), off hands included;
+- ROTK frames are hotspots, then 6-byte boxes, then pieces (SPRITE_FRAME_RECORD in the ROTK
+  decomp), the same order as the Two Towers';
+- the image's second word is its hash, so a save state holding another build's image is rewritten;
 - 23 skill animations the heroes' code loads as literals (kSpecials), each mapped by eye to a ROTK
   melee or cast pose.
 
@@ -581,8 +593,10 @@ Known problems, in order:
    part 2 staff). Hands, fists, Aragorn's NPC off-hand long sword (5), the hat (6) and 13 are blank.
    Checked headless on the route: Aragorn walks and swings with his sword. The other heroes' weapons
    are not checked in a frame yet.
-2. Hits never verified: the route meets no enemy. Find one (walk further, or compare kills with the
-   option off), and check the injected attack box lands on the strike frame.
+2. Hits (fixed 2026-11-02): melee hits come from the weapon's box, and the converter used to read
+   ROTK's boxes and hotspots in the wrong order, so the weapon had no valid strike box. Checked with
+   the fight check above for Aragorn: kills with the weapon boxes, none without. The other heroes,
+   Legolas's bow (no ROTK box, uses the Two Towers' boxes) and casts are not checked in play.
 3. Weapon colors are approximate (nearest hero color). On PC they can use their own palette:
    port host palettes (src/host_palettes.cpp) to the TTT host, keyed by the weapon actor's pieces.
 4. One swing only; ROTK's combo (melee 0/2/4 with recoveries 1/3) not used.

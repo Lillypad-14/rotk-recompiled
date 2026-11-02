@@ -32,31 +32,31 @@ constexpr int kHeroes = 6, kPoses = 6, kFacings = 5;
 constexpr std::uint32_t kWeaponPoseTable = 0x083314A0u;
 constexpr int kWeaponEntries = 84;
 constexpr std::uint32_t kBlankFrames = 64;
-// Each weapon kind's ROTK hand part {hero, part}, or {-1} for none. The Two Towers picks the kind
-// per hero when it spawns the weapon actor (player 0x0802F3BC, Gandalf's hat 0x0802F720, NPC heroes'
-// main hand 0x08042310 and off hand 0x08043238), so a kind is always drawn with its hero's body.
-// Hands, fists and the hat are part of ROTK's body art and stay blank. Drawn in ROTK's weapons
-// palette (OBJ bank 2) remapped to the hero's colors, as the Two Towers draws the weapon part in
-// the hero's palette.
+// Each weapon kind's hero and ROTK hand part (0: no art). The Two Towers picks the kind per hero
+// when it spawns the weapon actor (player 0x0802F3BC, Gandalf's hat 0x0802F720, NPC heroes' main
+// hand 0x08042310 and off hand 0x08043238), so a kind is always drawn with its hero's body. Hands,
+// fists and the hat are part of ROTK's body art. Drawn in ROTK's weapons palette (OBJ bank 2)
+// remapped to the hero's colors, as the Two Towers draws the weapon part in the hero's palette.
+// The weapon actor's box makes the melee hits (callback 0x08010ED4), so every kind keeps one.
 struct WeaponSource {
     int hero;
     std::uint32_t part;
 };
 constexpr WeaponSource kWeaponSources[] = {
-    {-1, 0},  // 0 Frodo's off hand
-    {0, 1},   // 1 Frodo's sword
-    {1, 1},   // 2 Legolas's bow
-    {2, 1},   // 3 Aragorn's sword
-    {-1, 0},  // 4 Aragorn's off hand (NPC)
-    {-1, 0},  // 5 Aragorn's off-hand long sword (NPC)
-    {-1, 0},  // 6 Gandalf the Grey's hat
-    {3, 1},   // 7 Gandalf's sword (NPC main hand)
-    {3, 2},   // 8 Gandalf's staff
-    {4, 1},   // 9 Eowyn's sword
-    {-1, 0},  // 10 Eowyn's off hand (NPC)
-    {5, 1},   // 11 Gimli's axe
-    {-1, 0},  // 12 Gimli's off hand (NPC)
-    {-1, 0},  // 13
+    {0, 0},  // 0 Frodo's off hand
+    {0, 1},  // 1 Frodo's sword
+    {1, 1},  // 2 Legolas's bow
+    {2, 1},  // 3 Aragorn's sword
+    {2, 0},  // 4 Aragorn's off hand (NPC)
+    {2, 0},  // 5 Aragorn's off-hand long sword (NPC)
+    {3, 0},  // 6 Gandalf the Grey's hat
+    {3, 1},  // 7 Gandalf's sword (NPC main hand)
+    {3, 2},  // 8 Gandalf's staff
+    {4, 1},  // 9 Eowyn's sword
+    {4, 0},  // 10 Eowyn's off hand (NPC)
+    {5, 1},  // 11 Gimli's axe
+    {5, 0},  // 12 Gimli's off hand (NPC)
+    {5, 0},  // 13 Gimli's axe (second)
 };
 static_assert(std::size(kWeaponSources) * 6 == kWeaponEntries);
 constexpr std::uint32_t kWeaponsPalette = 2;
@@ -181,44 +181,101 @@ struct Converted {
     Bytes tiles, frameSet;
 };
 
-// A Two Towers attack frame's attack box, to give the converted swing.
-struct AttackBox {
-    bool found = false;
-    std::uint32_t frame = 0, frames = 1;
-    std::uint8_t box[8] = {};
+using Box = std::array<std::uint8_t, 8>;
+
+// One box slot of a Two Towers animation, per frame (all zero when the frame has none).
+struct TtBoxes {
+    std::vector<Box> frames;
+    bool any = false;
 };
 
-AttackBox ttAttackBox(std::uint32_t animation)
+TtBoxes ttBoxes(std::uint32_t animation, std::uint32_t slot)
 {
-    AttackBox result;
+    TtBoxes result;
     const std::uint32_t frameSet = bus_read_u32(animation + 4);
     const std::uint32_t count = bus_read_u16(frameSet + 6), hotspots = bus_read_u8(frameSet + 10),
                         boxes = bus_read_u8(frameSet + 11);
-    result.frames = count ? count : 1;
-    if (boxes < 2) return result;
+    result.frames.resize(count);
+    if (slot >= boxes) return result;
     for (std::uint32_t f = 0; f < count; ++f) {
-        const std::uint32_t frame = frameSet + 12 + bus_read_u16(frameSet + 12 + f * 2);
-        const std::uint32_t box = frame + 6 + hotspots * 2 + 8;  // the second box
-        if (!bus_read_u32(box) && !bus_read_u32(box + 4)) continue;
-        result.found = true;
-        result.frame = f;
-        for (int i = 0; i < 8; ++i) result.box[i] = bus_read_u8(box + i);
-        break;
+        const std::uint32_t box = frameSet + 12 + bus_read_u16(frameSet + 12 + f * 2) + 6 + hotspots * 2 + slot * 8;
+        for (int i = 0; i < 8; ++i) result.frames[f][i] = static_cast<std::uint8_t>(bus_read_u8(box + i));
+        result.any = result.any || bus_read_u32(box) || bus_read_u32(box + 4);
     }
     return result;
 }
 
-// A ROTK animation in the Two Towers' format (raw tiles, 12-byte pieces, 8-byte boxes), with an
-// attack box on the strike frame when one is given, its colors through remap when given (16 entries)
-// and at least minFrames frames (the last repeated).
-Converted convert(const Bytes& rom, std::uint32_t animation, const AttackBox& attack,
+// The boxes spread over outCount frames: each boxed frame lands on the frame at the same point in
+// the animation.
+std::vector<Box> scaleBoxes(const TtBoxes& tt, std::uint32_t outCount)
+{
+    std::vector<Box> out(outCount, Box{});
+    const std::uint32_t count = static_cast<std::uint32_t>(tt.frames.size());
+    if (!tt.any || !count || !outCount) return out;
+    for (std::uint32_t f = 0; f < count; ++f)
+        if (tt.frames[f] != Box{}) out[std::min(outCount - 1, (2 * f + 1) * outCount / (2 * count))] = tt.frames[f];
+    return out;
+}
+
+// How a converted animation gets its boxes. Body: ROTK's boxes, and the Two Towers' box in slot 1
+// (its attack box). Weapon: one slot, ROTK's strike box when the animation has one, else the Two
+// Towers' box.
+struct BoxPlan {
+    bool weapon = false;
+    TtBoxes tt;
+};
+
+// ROTK frame f's box k (6 bytes) as a Two Towers box (8 bytes).
+Box rotkBox(const Bytes& rom, std::uint32_t frameSet, std::uint32_t f, std::uint32_t k)
+{
+    const std::uint32_t frame = frameSet + 12 + r16(rom, frameSet + 12 + f * 2);
+    const std::uint32_t box = frame + 8 + 2 * r8(rom, frameSet + 10) + 6 * k;
+    Box b = {};
+    for (std::uint32_t i = 0; i < 6; ++i) b[i] = static_cast<std::uint8_t>(r8(rom, box + i));
+    return b;
+}
+
+// Each output frame's boxes under the plan.
+std::vector<std::vector<Box>> planBoxes(const Bytes& rom, std::uint32_t frameSet, const BoxPlan& plan,
+                                        std::uint32_t outCount)
+{
+    const std::uint32_t count = r16(rom, frameSet + 6), boxes = r8(rom, frameSet + 11);
+    const std::vector<Box> tt = scaleBoxes(plan.tt, outCount);
+    std::vector<std::vector<Box>> out(outCount);
+    if (plan.weapon) {
+        bool own = false;
+        for (std::uint32_t f = 0; f < count && !own; ++f)
+            for (std::uint32_t k = 0; k < boxes && !own; ++k) own = rotkBox(rom, frameSet, f, k) != Box{};
+        for (std::uint32_t f = 0; f < outCount; ++f) {
+            Box b = {};
+            if (!own) b = tt[f];
+            else if (f < count)
+                for (std::uint32_t k = 0; k < boxes && b == Box{}; ++k) b = rotkBox(rom, frameSet, f, k);
+            out[f] = {b};
+        }
+        return out;
+    }
+    const std::uint32_t slots = plan.tt.any ? std::max<std::uint32_t>(boxes, 2) : boxes;
+    for (std::uint32_t f = 0; f < outCount; ++f) {
+        out[f].assign(slots, Box{});
+        for (std::uint32_t k = 0; k < boxes; ++k) out[f][k] = rotkBox(rom, frameSet, std::min(f, count - 1), k);
+        if (plan.tt.any && boxes < 2) out[f][1] = tt[f];
+    }
+    return out;
+}
+
+// A ROTK animation in the Two Towers' format (raw tiles, 12-byte pieces, 8-byte boxes), boxes as
+// planned, its colors through remap when given (16 entries) and at least minFrames frames (the last
+// repeated).
+Converted convert(const Bytes& rom, std::uint32_t animation, const BoxPlan& plan,
                   const std::uint8_t* remap = nullptr, std::uint32_t minFrames = 0)
 {
     Converted out;
     const std::uint32_t tilesBase = r32(rom, animation), frameSet = r32(rom, animation + 4);
     const std::uint32_t count = r16(rom, frameSet + 6), hotspots = r8(rom, frameSet + 10), boxes = r8(rom, frameSet + 11);
-    const std::uint32_t outBoxes = attack.found ? std::max<std::uint32_t>(boxes, 2) : boxes;
-    const std::uint32_t strike = attack.found ? (attack.frame * count + attack.frames / 2) / attack.frames : 0;
+    const std::uint32_t outCount = std::max(count, minFrames);
+    const auto frameBoxes = planBoxes(rom, frameSet, plan, outCount);
+    const std::uint32_t outBoxes = outCount ? static_cast<std::uint32_t>(frameBoxes[0].size()) : boxes;
     std::vector<Bytes> frames;
     for (std::uint32_t f = 0; f < count; ++f) {
         const std::uint32_t frame = frameSet + 12 + r16(rom, frameSet + 12 + f * 2);
@@ -239,22 +296,11 @@ Converted convert(const Bytes& rom, std::uint32_t animation, const AttackBox& at
         Bytes b = {static_cast<std::uint8_t>(pieces), 0, static_cast<std::uint8_t>(r8(rom, frame + 2)),
                    static_cast<std::uint8_t>(r8(rom, frame + 3))};
         put16(b, offset);
+        // ROTK frames: hotspots, 6-byte trigger boxes, then pieces
         std::uint32_t p = frame + 8;
-        const std::uint32_t boxData = p;
-        p += 6 * boxes;
         for (std::uint32_t h = 0; h < hotspots * 2; ++h) b.push_back(static_cast<std::uint8_t>(r8(rom, p + h)));
         p += 2 * hotspots;
-        for (std::uint32_t k = 0; k < outBoxes; ++k) {
-            if (k < boxes) {
-                for (std::uint32_t i = 0; i < 6; ++i) b.push_back(static_cast<std::uint8_t>(r8(rom, boxData + 6 * k + i)));
-                b.push_back(0);
-                b.push_back(0);
-            } else if (k == 1 && f == strike) {
-                b.insert(b.end(), attack.box, attack.box + 8);
-            } else {
-                b.insert(b.end(), 8, 0);
-            }
-        }
+        p += 6 * boxes;
         for (std::uint32_t k = 0; k < pieces; ++k) {
             const std::uint32_t v = r32(rom, p + 4 * k);
             const std::uint32_t x = v & 0x1FFu, y = v >> 9 & 0x1FFu, size = v >> 18 & 3u, shape = v >> 20 & 3u;
@@ -270,8 +316,13 @@ Converted convert(const Bytes& rom, std::uint32_t animation, const AttackBox& at
         }
         frames.push_back(std::move(b));
     }
-    while (!frames.empty() && frames.size() < minFrames) frames.push_back(frames.back());
-    const std::uint32_t outCount = static_cast<std::uint32_t>(frames.size());
+    while (!frames.empty() && frames.size() < outCount) frames.push_back(frames.back());
+    // each frame: head and hotspots, its boxes, then pieces
+    for (std::uint32_t f = 0; f < frames.size(); ++f) {
+        Bytes boxBytes;
+        for (const Box& box : frameBoxes[f]) boxBytes.insert(boxBytes.end(), box.begin(), box.end());
+        frames[f].insert(frames[f].begin() + 6 + 2 * hotspots, boxBytes.begin(), boxBytes.end());
+    }
     for (std::uint32_t i = 0; i < 12; ++i) out.frameSet.push_back(static_cast<std::uint8_t>(r8(rom, frameSet + i)));
     out.frameSet[6] = static_cast<std::uint8_t>(outCount);
     out.frameSet[7] = static_cast<std::uint8_t>(outCount >> 8);
@@ -301,8 +352,9 @@ std::uint32_t convertFacings(Bytes& image, const Bytes& rom, std::uint32_t entry
 {
     Bytes facings;
     for (int facing = 0; facing < kFacings; ++facing) {
-        const AttackBox attack = ttFacings ? ttAttackBox(bus_read_u32(ttFacings + facing * 4u)) : AttackBox{};
-        const Converted c = convert(rom, entry + facing * kRecordSize, attack);
+        BoxPlan plan;
+        if (ttFacings) plan.tt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 1);
+        const Converted c = convert(rom, entry + facing * kRecordSize, plan);
         Bytes record;
         put32(record, append(image, c.tiles));
         put32(record, append(image, c.frameSet));
@@ -335,12 +387,43 @@ std::array<std::uint8_t, 16> nearestColors(const Bytes& rom, std::uint32_t from,
     return map;
 }
 
+// A transparent animation (one clear 8x8 piece per frame), a frame per box, each with its box.
+Converted blankAnimation(const std::vector<Box>& boxes)
+{
+    Converted out;
+    out.tiles.assign(32, 0);
+    const std::uint32_t count = static_cast<std::uint32_t>(boxes.size());
+    out.frameSet = {8, 8, 0, 0, 0, 0};
+    put16(out.frameSet, count);
+    put16(out.frameSet, 32);
+    out.frameSet.push_back(0);
+    out.frameSet.push_back(1);
+    const std::uint32_t frameBytes = 6 + 8 + 12;
+    for (std::uint32_t f = 0; f < count; ++f) put16(out.frameSet, 2 * count + f * frameBytes);
+    for (const Box& box : boxes) {
+        const Bytes head = {1, 0, 8, 8, 0, 0};
+        const Bytes piece = {0, 0, 0, 0, 0, 0, 8, 8, 0, 0, 0, 0};
+        out.frameSet.insert(out.frameSet.end(), head.begin(), head.end());
+        out.frameSet.insert(out.frameSet.end(), box.begin(), box.end());
+        out.frameSet.insert(out.frameSet.end(), piece.begin(), piece.end());
+    }
+    return out;
+}
+
+// Boxes for a blank animation: at least kBlankFrames frames, the extra ones without a box.
+std::vector<Box> blankBoxes(std::vector<Box> boxes)
+{
+    if (boxes.size() < kBlankFrames) boxes.resize(kBlankFrames, Box{});
+    return boxes;
+}
+
 void build()
 {
     const Bytes& rom = g_state.rotk;
     Bytes& image = g_state.image;
     image.clear();
     put32(image, kMagic);
+    put32(image, 0);  // the image's hash, set when it is complete
     Bytes poseTable(kHeroes * kPoses * 4, 0), palettes;
     for (int hero = 0; hero < kHeroes; ++hero) {
         for (int pose = 0; pose < kPoses; ++pose) {
@@ -349,8 +432,9 @@ void build()
             Bytes facings;
             const std::uint32_t ttFacings = bus_read_u32(kPoseTable + (hero * kPoses + pose) * 4u);
             for (int facing = 0; facing < kFacings; ++facing) {
-                const AttackBox attack = pose == kAttack ? ttAttackBox(bus_read_u32(ttFacings + facing * 4u)) : AttackBox{};
-                const Converted c = convert(rom, entry + facing * kRecordSize, attack);
+                BoxPlan plan;
+                if (pose == kAttack) plan.tt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 1);
+                const Converted c = convert(rom, entry + facing * kRecordSize, plan);
                 Bytes record;
                 put32(record, append(image, c.tiles));
                 put32(record, append(image, c.frameSet));
@@ -368,12 +452,18 @@ void build()
                 const Source& source = kSources[pose];
                 const std::uint32_t bank = r32(rom, source.banks + hero * 4u);
                 const std::uint32_t body = r32(rom, bank + source.pose * 4u);
-                const std::uint32_t entry = r32(rom, bank + (kWeaponSources[kind].part * 7u + source.pose) * 4u);
-                if (entry < kRomBase || entry >= kRomBase + rom.size()) continue;
+                const std::uint32_t part = kWeaponSources[kind].part;
+                const std::uint32_t entry = part ? r32(rom, bank + (part * 7u + source.pose) * 4u) : 0;
+                const bool art = entry >= kRomBase && entry < kRomBase + rom.size();
+                const std::uint32_t ttFacings = bus_read_u32(kWeaponPoseTable + (kind * kPoses + pose) * 4u);
                 Bytes facings;
                 for (int facing = 0; facing < kFacings; ++facing) {
                     const std::uint32_t bodyFrames = r16(rom, r32(rom, body + facing * kRecordSize + 4) + 6);
-                    const Converted c = convert(rom, entry + facing * kRecordSize, AttackBox{}, remap.data(), bodyFrames);
+                    BoxPlan plan;
+                    plan.weapon = true;
+                    plan.tt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 0);
+                    const Converted c = art ? convert(rom, entry + facing * kRecordSize, plan, remap.data(), bodyFrames)
+                                            : blankAnimation(blankBoxes(scaleBoxes(plan.tt, bodyFrames)));
                     Bytes record;
                     put32(record, append(image, c.tiles));
                     put32(record, append(image, c.frameSet));
@@ -386,17 +476,11 @@ void build()
         for (std::uint32_t i = 0; i < 32; ++i) colors.push_back(static_cast<std::uint8_t>(r8(rom, palette + i)));
         put32(palettes, append(image, colors));
     }
-    // the blank weapon: one transparent 8x8 piece in every frame
-    Bytes blankTiles(32, 0), blankSet = {8, 8, 0, 0, 0, 0}, blankFacings, blankRecord;
-    put16(blankSet, kBlankFrames);
-    put16(blankSet, 32);
-    blankSet.push_back(0);
-    blankSet.push_back(0);
-    const Bytes blankFrame = {1, 0, 8, 8, 0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 0, 0, 0, 0};
-    for (std::uint32_t f = 0; f < kBlankFrames; ++f) put16(blankSet, 2 * kBlankFrames);
-    blankSet.insert(blankSet.end(), blankFrame.begin(), blankFrame.end());
-    put32(blankRecord, append(image, blankTiles));
-    put32(blankRecord, append(image, blankSet));
+    // the blank weapon, for kinds the table leaves empty
+    const Converted blank = blankAnimation(std::vector<Box>(kBlankFrames));
+    Bytes blankRecord, blankFacings;
+    put32(blankRecord, append(image, blank.tiles));
+    put32(blankRecord, append(image, blank.frameSet));
     const std::uint32_t record = append(image, blankRecord);
     for (int facing = 0; facing < kFacings; ++facing) put32(blankFacings, record);
     g_state.blankWeapon = append(image, blankFacings);
@@ -414,13 +498,19 @@ void build()
     }
     g_state.poseTable = append(image, poseTable);
     g_state.palettes = append(image, palettes);
+    // FNV-1a of the image after its stamp, so a save state holding another build's image is replaced
+    std::uint32_t hash = 2166136261u;
+    for (std::size_t i = 8; i < image.size(); ++i) hash = (hash ^ image[i]) * 16777619u;
+    std::memcpy(image.data() + 4, &hash, 4);
     std::fprintf(stderr, "[ttt] ROTK hero sprites: %zu KiB\n", image.size() / 1024);
 }
 
-// The image in host RAM, rewritten when the boot or a reset cleared it.
+// The image in host RAM, rewritten when the boot, a reset or a save state replaced it.
 void ensureWritten()
 {
-    if (bus_read_u32(kDataBase) == kMagic) return;
+    std::uint32_t hash;
+    std::memcpy(&hash, g_state.image.data() + 4, 4);
+    if (bus_read_u32(kDataBase) == kMagic && bus_read_u32(kDataBase + 4) == hash) return;
     for (std::size_t i = 0; i < g_state.image.size(); ++i)
         bus_write_u8(kDataBase + static_cast<std::uint32_t>(i), g_state.image[i]);
 }
