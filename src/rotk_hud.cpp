@@ -60,6 +60,21 @@ constexpr std::uint32_t kPlayers = 0x03003640u, kPlayerSize = 0x128u, kThreshold
 constexpr std::uint32_t kHuds = 0x030038B0u, kHudSize = 0x14u;
 constexpr std::uint32_t kOrbsRedraw = 0x08020D00u, kXpRedraw = 0x08020E24u, kHudTick = 0x080214B4u;
 constexpr std::uint32_t kHudText = 0x0800DE14u, kHudTextCallerFrom = 0x08021388u, kHudTextCallerTo = 0x080214B4u;
+// The HUD's message line: 0x0800DE14 lays the message bar 0x089E98B6 (20x2 at x 5, y 18, tile base
+// 0x27: a row of 20 canvas tiles 0x28..0x3B over a dashed line of tile 0x27); that clears the canvas.
+// The loot code (0x080255xx) sets HUD flag 0x01 every tick the player stands at a pile and 0x02 with a
+// new line at +0x04; 0x08021388 then paints it with 0x080151F4 (r0 the canvas's first tile, r1/r2 x/y,
+// of which only x & 7 and y & 7 count: it paints pixels into the canvas tiles, not the map), and lays
+// the bar again once the flag drops. Here the bar's map goes off screen and drawMessage shows the
+// canvas on ROTK's strip, over the strip's own pixels.
+constexpr std::uint32_t kHudString = 0x080151F4u;
+constexpr std::uint32_t kCanvasSlot = 0x28, kCanvasTiles = 20, kCanvasX = 5, kStripRow = 19;
+constexpr std::uint32_t kMessageRow = 18;
+// The painter fills each tile it touches with its own bar background (colors 1-3, 6-9, and 4 in its
+// border rows) and the letters in color 4 on rows 1-5 (it always gets y 0x90); those become ROTK's
+// light yellow (2), the rest shows the strip.
+constexpr std::uint32_t kTextColor = 4, kTextTop = 1, kTextBottom = 5, kRotkTextColor = 2;
+constexpr std::uint32_t kOffscreenRow = 30;  // of 32: rows 20+ never show on the 160-line screen
 constexpr std::uint32_t kAfterOamCopy = 0x0800E270u;
 constexpr std::uint32_t kHudSetup = 0x080208A8u;
 // game flags: 0x400000 while the world is parked under a menu (the game's HUD draws then skip)
@@ -68,7 +83,7 @@ constexpr std::uint32_t kGameFlags = 0x030039A8u, kWorldParked = 0x00400000u;
 constexpr std::uint32_t kBgPaletteBank = 0x030003E8u;
 constexpr std::uint32_t kPaletteFadeCount = 0x03003620u;  // fades running (they write palette RAM)  // lays a player's HUD out (level start, after menus)
 constexpr const char* kHookIds[] = {"ttt.rotk-hud-orbs", "ttt.rotk-hud-xp", "ttt.rotk-hud-tick", "ttt.rotk-hud-text",
-                                    "ttt.rotk-hud-vblank", "ttt.rotk-hud-setup"};
+                                    "ttt.rotk-hud-vblank", "ttt.rotk-hud-setup", "ttt.rotk-hud-string"};
 
 struct Asset {
     std::uint32_t w = 0, h = 0;
@@ -88,6 +103,8 @@ struct State {
     std::uint32_t lastTick = 0;       // VBlanks since the HUD last ticked
     bool drawnStatic = false;  // the palette and bank written since the game last laid its HUD out
     int lastHealth = -1, lastSpirit = -1, lastVial = -1;
+    bool messageDirty = false;  // a new pickup line, not yet taken and composed over the strip
+    std::uint16_t messageCells[20] = {};  // its painted cells (0: none), until the bar clears it
 } g_state;
 
 std::uint32_t r8(std::uint32_t a) { return a - kRomBase < g_state.rom.size() ? g_state.rom[a - kRomBase] : 0u; }
@@ -170,13 +187,90 @@ int hudBank()
     return static_cast<int>(std::max_element(std::begin(counts), std::end(counts)) - std::begin(counts));
 }
 
+std::uint32_t pixel(const Bytes& tiles, std::uint32_t tile, std::uint32_t x, std::uint32_t y)
+{
+    const std::size_t at = tile * 32 + y * 4 + x / 2;
+    return at < tiles.size() ? (tiles[at] >> (4 * (x & 1))) & 0x0Fu : 0u;
+}
+
+// The pickup line on ROTK's strip. The game lays its line off screen (row 30): cells it painted point
+// at tiles 0x28.. (the painter keeps it on screen: always row 18, whatever y says). Once per new line,
+// before the HUD rows are rewritten, the painted cells are taken and each painted tile's background
+// pixels (its most common color) take the strip's pixels under that cell, in place (the game paints
+// fresh tiles for each line); the cells then go in the strip row every VBlank until the bar clears.
+void takeMessage()
+{
+    if (!g_state.messageDirty) return;
+    g_state.messageDirty = false;
+    std::uint16_t* cells = g_state.messageCells;
+    bool any = false;
+    for (std::uint32_t t = 0; t < kCanvasTiles; ++t) {
+        cells[t] = static_cast<std::uint16_t>(bus_read_u16(kMap + (kMessageRow * 32 + kCanvasX + t) * 2));
+        const std::uint32_t tile = cells[t] & 0x3FFu;
+        if (tile < kCanvasSlot || tile >= kCanvasSlot + kCanvasTiles) cells[t] = 0;
+        else any = true;
+    }
+    if (any) {
+        Bytes canvas(kCanvasTiles * 32);
+        for (std::uint32_t i = 0; i < canvas.size(); ++i) canvas[i] = static_cast<std::uint8_t>(bus_read_u8(kTiles + kCanvasSlot * 32 + i));
+        int counts[16] = {};
+        if (std::getenv("ROTK_TTT_TRACE_HUD")) {
+            for (std::uint32_t t = 0; t < kCanvasTiles; ++t) {
+                if (!cells[t]) continue;
+                std::fprintf(stderr, "[hud] cell %u:", t);
+                for (std::uint32_t i = 0; i < 64; ++i)
+                    std::fprintf(stderr, "%s%X", i % 8 ? "" : " ", pixel(canvas, (cells[t] & 0x3FFu) - kCanvasSlot, i & 7, i >> 3));
+                std::fprintf(stderr, "\n");
+            }
+        }
+        for (std::uint32_t t = 0; t < kCanvasTiles; ++t) {
+            if (!cells[t]) continue;
+            const std::uint32_t c = (cells[t] & 0x3FFu) - kCanvasSlot;
+            const std::uint32_t sx = kCanvasX + t - kMessage.x;
+            const std::uint16_t e = sx < g_state.message.w ? g_state.message.map[sx] : 0;
+            for (std::uint32_t y = 0; y < 8; ++y)
+                for (std::uint32_t x = 0; x < 8; ++x) {
+                    std::uint32_t v = pixel(canvas, c, x, y);
+                    ++counts[v];
+                    // row 6 is the painter's border row too: a letter pixel there continues a stroke
+                    const bool tail = y == kTextBottom + 1 && pixel(canvas, c, x, y - 1) == kTextColor;
+                    v = v == kTextColor && ((y >= kTextTop && y <= kTextBottom) || tail)
+                            ? kRotkTextColor
+                            : pixel(g_state.message.tiles, e & 0x3FFu, e & 0x400u ? 7 - x : x, e & 0x800u ? 7 - y : y);
+                    std::uint8_t& b = canvas[c * 32 + y * 4 + x / 2];
+                    b = static_cast<std::uint8_t>(x & 1 ? (b & 0x0F) | v << 4 : (b & 0xF0) | v);
+                }
+        }
+        for (std::uint32_t i = 0; i < canvas.size(); i += 4) {
+            std::uint32_t v;
+            std::memcpy(&v, canvas.data() + i, 4);
+            bus_write_u32(kTiles + kCanvasSlot * 32 + i, v);
+        }
+        if (std::getenv("ROTK_TTT_TRACE_HUD")) {
+            std::fprintf(stderr, "[hud] message composed, colors");
+            for (int i = 0; i < 16; ++i)
+                if (counts[i]) std::fprintf(stderr, " %d:%d", i, counts[i]);
+            std::fprintf(stderr, "\n");
+        }
+    }
+}
+
+void drawMessage()
+{
+    const std::uint16_t* cells = g_state.messageCells;
+    for (std::uint32_t t = 0; t < kCanvasTiles; ++t)
+        if (cells[t])
+            bus_write_u16(kMap + (kStripRow * 32 + kCanvasX + t) * 2,
+                          static_cast<std::uint16_t>((cells[t] & 0x0FFFu) | static_cast<std::uint32_t>(g_state.bank) << 12));
+}
+
 void draw()
 {
     const std::uint32_t player = bus_read_u8(kPlayers + 1);
     const std::uint32_t p = kPlayers + player * kPlayerSize;
+    takeMessage();
     if (!g_state.drawnStatic) {
         if (g_state.bank < 0) g_state.bank = hudBank();
-
         g_state.lastHealth = g_state.lastSpirit = g_state.lastVial = -1;
         g_state.drawnStatic = true;
     }
@@ -203,6 +297,7 @@ void draw()
         writeMap(g_state.spiritMap, kSpirit);
         writeMap(g_state.vialMap, kVial);
     }
+    drawMessage();
     const int health = fill(static_cast<std::int16_t>(bus_read_u16(p + 0x08)),
                             static_cast<std::int16_t>(bus_read_u16(p + 0x6C)), kHealthSteps);
     const int spirit = fill(static_cast<std::int16_t>(bus_read_u16(p + 0x0A)),
@@ -259,30 +354,77 @@ int tickEntry(std::uint32_t, int, ArmCpuState*)
 int setupEntry(std::uint32_t, int, ArmCpuState*)
 {
     g_state.drawnStatic = false;
+    g_state.messageDirty = false;
+    std::memset(g_state.messageCells, 0, sizeof g_state.messageCells);
     g_state.bank = -1;
     g_state.lastTick = 0;
     return 0;
 }
 
-// The message line moves to ROTK's message strip, one row down (y is the 6th argument, [sp + 4]).
-int textEntry(std::uint32_t, int, ArmCpuState* cpu)
+bool hudCaller(const ArmCpuState* cpu)
 {
     const std::uint32_t caller = (cpu->R[14] & ~1u) - 4;
-    if (caller >= kHudTextCallerFrom && caller < kHudTextCallerTo && bus_read_u32(cpu->R[13] + 4) == 18)
-        bus_write_u32(cpu->R[13] + 4, 19);
+    return caller >= kHudTextCallerFrom && caller < kHudTextCallerTo;
+}
+
+// The message bar (clears the line): its map goes to row 30, off screen (y is the 6th argument, [sp + 4]).
+int textEntry(std::uint32_t, int, ArmCpuState* cpu)
+{
+    if (!hudCaller(cpu) || bus_read_u32(cpu->R[13] + 4) != 18) return 0;
+    bus_write_u32(cpu->R[13] + 4, kOffscreenRow);
+    g_state.messageDirty = false;
+    std::memset(g_state.messageCells, 0, sizeof g_state.messageCells);
     return 0;
+}
+
+// A pickup line is painted: taken and composed next VBlank.
+int stringEntry(std::uint32_t, int, ArmCpuState* cpu)
+{
+    if (!hudCaller(cpu)) return 0;
+    if (std::getenv("ROTK_TTT_TRACE_HUD")) {
+        std::fprintf(stderr, "[hudstr] from %08X r0 %X x %u y %u, tile 0x28 before:", (cpu->R[14] & ~1u) - 4, cpu->R[0], cpu->R[1], cpu->R[2]);
+        for (std::uint32_t i = 0; i < 32; ++i) std::fprintf(stderr, " %02X", bus_read_u8(kTiles + kCanvasSlot * 32 + i));
+        std::fprintf(stderr, "\n");
+    }
+    g_state.messageDirty = true;
+    return 0;
+}
+
+// ROTK_TTT_HUD_MSG_TEST=1: stands the local player "near loot" for 180 of every 300 HUD draws (flag
+// 0x01, set each tick as the loot code does) with a new line at the start (flag 0x02, text at +0x04)
+void messageTest()
+{
+    static int draws = 0;
+    const int phase = ++draws % 300;
+    if (phase < 60 || phase >= 240) return;
+    constexpr std::uint32_t kText = 0x0203FF00u;  // EWRAM tail, unused by the HUD test routes
+    const std::uint32_t hud = kHuds + bus_read_u8(kPlayers + 1) * kHudSize;
+    std::uint32_t flags = 0x01u;
+    if (phase == 60) {
+        const char text[] = "Test pickup message";
+        for (std::uint32_t i = 0; i < sizeof text; ++i) bus_write_u8(kText + i, static_cast<std::uint8_t>(text[i]));
+        bus_write_u32(hud + 0x04, kText);
+        flags |= 0x02u;
+        std::fprintf(stderr, "[hud] message test at draw %d\n", draws);
+    }
+    bus_write_u8(hud + 0x0C, bus_read_u8(hud + 0x0C) | flags);
 }
 
 int vblankEntry(std::uint32_t, int, ArmCpuState*)
 {
     // the HUD ticks with the game; menus, dialogs and scene changes stop it
-    if (g_state.lastTick++ < 4 && !(bus_read_u32(kGameFlags) & kWorldParked)) draw();
+    if (g_state.lastTick++ < 4 && !(bus_read_u32(kGameFlags) & kWorldParked)) {
+        if (std::getenv("ROTK_TTT_HUD_MSG_TEST")) messageTest();
+        draw();
+    }
     return 0;
 }
 
 void reset()
 {
     g_state.drawnStatic = false;
+    g_state.messageDirty = false;
+    std::memset(g_state.messageCells, 0, sizeof g_state.messageCells);
     g_state.bank = -1;
     g_state.lastTick = 1000;
     for (const char* id : kHookIds) gba_mod_set_function_hook_enabled(id, 1);
@@ -318,6 +460,7 @@ void rotkHudRegister()
     gba_mod_register_function_entry_plugin(kHookIds[3], kHudText, 1, textEntry);
     gba_mod_register_function_entry_plugin(kHookIds[4], kAfterOamCopy, 1, vblankEntry);
     gba_mod_register_function_entry_plugin(kHookIds[5], kHudSetup, 1, setupEntry);
+    gba_mod_register_function_entry_plugin(kHookIds[6], kHudString, 1, stringEntry);
     gba_mod_register_reset_callback(reset);
     std::fprintf(stderr, "[ttt] ROTK HUD: %zu + %zu + %zu bar steps\n", g_state.health.size(), g_state.spirit.size(),
                  g_state.vial.size());

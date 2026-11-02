@@ -266,6 +266,11 @@ addr = 0x0800DE14
 mode = "thumb"
 note = "Draws text tiles; the HUD's message line moves to ROTK's message strip."
 
+[[mod_function_hook]]
+addr = 0x080151F4
+mode = "thumb"
+note = "Draws a string; the HUD's pickup line moves to ROTK's message strip."
+
 
 # Play session 2026-11-01 20:47 (self-heal misses; the 0x0800FE78.. and 0x0800FF64.. runs are branch
 # targets after literal pools and a function start at 0x0800FF74, not switch tables).

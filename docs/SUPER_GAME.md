@@ -625,7 +625,7 @@ How to run it:
   skill icon, top left, stays). The dark middle box in the arena capture is not drawn by the HUD layout
   (likely the arena's own state); normal play leaves it clear as the port does. The top-left
   emblems 0x08282B94 (ring, face, crown, starburst, 4x3 at tile 0x56) are not ported (corruption has
-  no Two Towers meaning). Unseen: a pickup message on the strip; a boss fight in the circle (could
+  no Two Towers meaning). Pickup line (standing at loot): the Two Towers paints it into tiles 0x28.. on row 18 (0x080151F4 from 0x08021474; its row is fixed, y only places pixels in the tile); a hook on the painter marks it, the next VBlank takes the painted cells before the HUD rows are rewritten, keeps color 4 on rows 1-5 as text (ROTK light yellow) and puts the strip under the rest, and maps the cells onto the strip row (19) until the bar clears the line (its map moved off screen to row 30). ROTK_TTT_HUD_MSG_TEST=1 fakes a pickup line headless. Known flaws: letter tails (p, g, y) are cut (row 6 is also the painter's border row) and a one-pixel mark shows where its first chunk ends. Unseen: a boss fight in the circle (could
   feed Two Towers boss health later).
 - Direct: set ROTK_TTT_ROTK_SPRITES=1 (+ ROTK_TTT_ROTK_SKILLS=1) and/or ROTK_TTT_ROTK_PORTRAITS=1 and
   ROTK_TTT_ROTK_ROM (ROM = .private/rotk.gba), then run PlayTwoTowers.cmd. Checked headless at frame 3400 of the route: each
