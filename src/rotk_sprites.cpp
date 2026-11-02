@@ -423,6 +423,11 @@ int romRead32(std::uint32_t address, std::uint32_t, std::uint32_t* out)
     if (address >= kWeaponPoseTable && address < kWeaponPoseTable + kWeaponEntries * 4u) {
         ensureWritten();
         const std::uint32_t weapon = g_state.weaponTable[(address - kWeaponPoseTable) / 4u];
+        // ROTK_TTT_TRACE_WEAPON=1 logs each weapon kind and pose the game first reads
+        static std::uint32_t seen[kWeaponEntries] = {};
+        if (std::getenv("ROTK_TTT_TRACE_WEAPON") && !seen[(address - kWeaponPoseTable) / 4u]++)
+            std::fprintf(stderr, "[weapon] kind %u pose %u\n", (address - kWeaponPoseTable) / 4u / kPoses,
+                         (address - kWeaponPoseTable) / 4u % kPoses);
         *out = weapon ? weapon : g_state.blankWeapon;
         return 1;
     }

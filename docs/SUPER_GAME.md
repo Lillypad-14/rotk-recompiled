@@ -542,3 +542,51 @@ Findings so far (prototype `rotk/two-towers/tools/rotk_hero_sprites.py` converts
 - Next: the host converter in C++ (src/rotk_sprites.cpp in the plain host), the pose table and
   hero palette reads answered from host RAM through gba::g_rom_read32_override, and the facing order
   checked (both games store 5 facings).
+
+### Phase 5 status and next session (2026-11-02)
+
+The user tried it in a window and called it "real unfinished"; the one concrete report was Aragorn
+holding a bow. Committed: 17da709 (bodies), 786c711 (weapons), 7ef6848 (skill animations).
+
+How to run it:
+- Launcher: feature "ROTK heroes in The Two Towers" (rotk.pc, off by default); switch from ROTK's
+  main menu. ROTK dumps its ROM to %TEMP%/rotk-recompiled-rom.gba and sets ROTK_TTT_ROTK_SPRITES=1
+  and ROTK_TTT_ROTK_ROM for the child (src/super_game.cpp).
+- Direct: set those two variables (ROM = .private/rotk.gba) and run PlayTwoTowers.cmd.
+- Headless check: `GBARECOMP_INPUT_REPLAY=tools/ttt_helms_deep_route.csv` reaches Helm's Deep, walks
+  (frame 5500), attacks (5720..6100, A) and presses B (6120..6400). Add `--no-window --frames 6450`
+  and `GBARECOMP_FRAMEDUMP_DIR=<dir> GBARECOMP_FRAMEDUMP_START=5560 GBARECOMP_FRAMEDUMP_COUNT=840`
+  (headless dumps need patches/headless-framedump.patch), then `python tools/frame_sheet.py <dir>
+  out.png --crop 10,0,90,80 --scale 2`. The hero stands near x 40, y 30 in those frames.
+- Offline: rotk/two-towers/tools/rotk_hero_sprites.py renders any ROTK hero animation converted.
+
+What src/rotk_sprites.cpp does (TTT plain host): converts ROTK animations (ROTK LZ77, packed pieces,
+6-byte boxes) to the Two Towers' format in host RAM at 0x12100000, then answers ROM reads through
+gba::g_rom_read32_override:
+- pose table 0x08329664 (hero * 6 + pose) with ROTK body animations (kSources: walk = move 6,
+  stand = move 4, attack = melee 0, death = move 1, flinch = move 3, cast = cast 0); the attack gets
+  the Two Towers' attack box on its strike frame (ROTK frames have no attack box);
+- hero palettes 0x0832B248 + (hero + 0x33) * 4 with ROTK's ObjPalettes[0x21 + hero];
+- weapon table 0x083314A0 (kind * 6 + pose) with ROTK weapon parts (frames padded to the body's,
+  colors remapped from ROTK's weapons palette, bank 2, to the hero palette); kinds without one get a
+  blank 64-frame animation;
+- 23 skill animations the heroes' code loads as literals (kSpecials), each mapped by eye to a ROTK
+  melee or cast pose.
+
+Known problems, in order:
+1. Wrong weapons. Weapon kinds are per weapon, not per hero (the code assumes kind = hero * 2 + 1).
+   The probe (ROTK_TTT_TRACE_WEAPON=1) on the Helm's Deep route read kinds 1, 2, 3, 6, 8, 9, 11;
+   the swinging player (Aragorn) used kind 3. NPC heroes in the scene use the same table. Rendered
+   stand poses: 0 hand, 1 short sword, 2 bow, 3 sword, 4 hand, 5 long sword, 6 (odd shape), 7 sword,
+   8 staff, 9 short blade, 10 fist, 11 axe, 12 fist, 13 axe. Proposed: 1 -> Frodo part 1, 2 ->
+   Legolas part 1 (bow), 3 -> Aragorn part 1, 5 -> Eowyn part 1, 7 -> Gandalf part 2 (sword),
+   8 -> Gandalf part 1 (staff), 11 and 13 -> Gimli part 1, the rest blank. Check which body each
+   kind is drawn with (it must be that hero's, or the frames do not line up).
+2. Hits never verified: the route meets no enemy. Find one (walk further, or compare kills with the
+   option off), and check the injected attack box lands on the strike frame.
+3. Weapon colors are approximate (nearest hero color). On PC they can use their own palette:
+   port host palettes (src/host_palettes.cpp) to the TTT host, keyed by the weapon actor's pieces.
+4. One swing only; ROTK's combo (melee 0/2/4 with recoveries 1/3) not used.
+5. The specials mapping is a guess per animation; verify each skill in play.
+6. Not converted: HUD portraits, menus, other characters. Animation timing: ROTK walk and swing play
+   at the Two Towers' 1 tick per frame (as ROTK); idle is 3 ticks per frame (ROTK uses 2).

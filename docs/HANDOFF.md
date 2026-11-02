@@ -1,5 +1,11 @@
 # Handoff (2026-10-26)
 
+Latest (2026-11-02): The Two Towers runs on PC and the super game switches between them
+(docs/SUPER_GAME.md). Current work is phase 5, ROTK hero sprites in The Two Towers: status, how to
+test and the problem list are in docs/SUPER_GAME.md "Phase 5 status and next session". Also new:
+host palettes (docs/HOST_PALETTES.md) and headless frame dumps (patches/headless-framedump.patch,
+tools/frame_sheet.py).
+
 Goal: a PC-exclusive ROTK (vanilla and the Expanded mod's PC edition) with the GBA limits removed.
 The GBA edition of the mod is frozen; newer mod versions are PC-only. Read README.md, STATUS.md and
 docs/ENGINE_LIMITS.md first.
