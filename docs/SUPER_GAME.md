@@ -620,8 +620,9 @@ How to run it:
   vial and colors right in both levels, backpack screens untouched. The skill circle is ROTK's
   multi-purpose indicator, not the selected skill: ROTK redraws it (tile base 0x44 at 27, 17) with a
   boss's health from 0x08282A90 (15 steps, PLAYERHUD_FLAG_BOSS_BAR, 0x08028E1E) and two counters
-  from 0x08282B44/0x08282B64 (font_drawString puts the number beside it); idle, it is the green
-  arrow the port shows. The dark middle box in the arena capture is not drawn by the HUD layout
+  from 0x08282B44/0x08282B64 (font_drawString puts the number beside it); idle, a green arrow.
+  **Not drawn** (the user, 2026-11-02: it read as a skill icon swap; The Two Towers' own selected
+  skill icon, top left, stays). The dark middle box in the arena capture is not drawn by the HUD layout
   (likely the arena's own state); normal play leaves it clear as the port does. The top-left
   emblems 0x08282B94 (ring, face, crown, starburst, 4x3 at tile 0x56) are not ported (corruption has
   no Two Towers meaning). Unseen: a pickup message on the strip; a boss fight in the circle (could

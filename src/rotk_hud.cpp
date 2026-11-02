@@ -38,7 +38,9 @@ struct Piece {
 };
 constexpr Piece kMiddle = {0x08781CD4u, 11, 18, 0x01};   // 8x1, 4 tiles
 constexpr Piece kMessage = {0x08781D8Cu, 3, 19, 0x05};   // 24x1, 10 tiles
-constexpr Piece kCircle = {0x0877F9ECu, 27, 17, 0x50};   // 3x3, 9 tiles: the skill frame
+// not drawn: ROTK's indicator circle (0x0877F9EC at 27, 17, 3x3) reads as a skill icon there, and
+// The Two Towers shows its own selected skill (top left); the user keeps that one
+constexpr Piece kCircle = {0x0877F9ECu, 27, 17, 0x50};
 // fill tables of tiles-only assets; the map is laid once from the bar's own asset (as ROTK's setup)
 constexpr Piece kHealth = {0x08282998u, 3, 18, 0x0F};    // 31 steps, 8x1, 8 tiles
 constexpr Piece kSpirit = {0x08282A14u, 19, 18, 0x17};   // 31 steps, 8x1, 8 tiles
@@ -197,8 +199,6 @@ void draw()
         writeMap(g_state.middle, kMiddle);
         writeTiles(g_state.message, kMessage.slot);
         writeMap(g_state.message, kMessage);
-        writeTiles(g_state.circle, kCircle.slot);
-        writeMap(g_state.circle, kCircle);
         writeMap(g_state.healthMap, kHealth);
         writeMap(g_state.spiritMap, kSpirit);
         writeMap(g_state.vialMap, kVial);
