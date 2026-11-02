@@ -13,6 +13,7 @@
 #include "runtime.h"
 
 #include "color_vision.h"
+#include "rotk_hud.h"
 #include "rotk_sounds.h"
 #include "rotk_sprites.h"
 
@@ -382,6 +383,7 @@ int main(int argc, char** argv)
     rotk::colorVisionRegister();
     rotk::rotkSpritesRegister();
     rotk::rotkSoundsRegister();
+    rotk::rotkHudRegister();
     options.present_decorate = presentDecorate;
     options.present_decorate_active = presentDecorateActive;
     return gbarecomp::run_game(argc, argv, options);

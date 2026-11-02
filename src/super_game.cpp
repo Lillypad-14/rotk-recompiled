@@ -35,17 +35,21 @@ bool g_tttRotkPortraits = false;
 bool g_tttRotkSkills = false;
 // "ttt-rotk-sounds": some of its sound effects are ROTK's (src/rotk_sounds.cpp in its host).
 bool g_tttRotkSounds = false;
+// "ttt-rotk-hud": its HUD is ROTK's (src/rotk_hud.cpp in its host).
+bool g_tttRotkHud = false;
 
 void tttRotkSpritesActivated() { g_tttRotkSprites = true; }
 void tttRotkPortraitsActivated() { g_tttRotkPortraits = true; }
 void tttRotkSkillsActivated() { g_tttRotkSkills = true; }
 void tttRotkSoundsActivated() { g_tttRotkSounds = true; }
+void tttRotkHudActivated() { g_tttRotkHud = true; }
 void tttRotkSpritesReset()
 {
     g_tttRotkSprites = std::getenv("ROTK_TTT_ROTK_SPRITES") != nullptr;
     g_tttRotkPortraits = std::getenv("ROTK_TTT_ROTK_PORTRAITS") != nullptr;
     g_tttRotkSkills = std::getenv("ROTK_TTT_ROTK_SKILLS") != nullptr;
     g_tttRotkSounds = std::getenv("ROTK_TTT_ROTK_SOUNDS") != nullptr;
+    g_tttRotkHud = std::getenv("ROTK_TTT_ROTK_HUD") != nullptr;
 }
 
 // This game's ROM as loaded, in a temp file for The Two Towers' host.
@@ -205,11 +209,12 @@ void playTwoTowers()
     char colorVision[16] = {};
     const bool hadColorVision = GetEnvironmentVariableA("ROTK_PC_COLOR_VISION", colorVision, sizeof colorVision) != 0;
     SetEnvironmentVariableA("ROTK_PC_COLOR_VISION", colorVisionModeName());
-    const fs::path rotkRom = g_tttRotkSprites || g_tttRotkPortraits || g_tttRotkSounds ? rotkRomCopy() : fs::path();
+    const fs::path rotkRom = g_tttRotkSprites || g_tttRotkPortraits || g_tttRotkSounds || g_tttRotkHud ? rotkRomCopy() : fs::path();
     SetEnvironmentVariableA("ROTK_TTT_ROTK_SPRITES", !rotkRom.empty() && g_tttRotkSprites ? "1" : nullptr);
     SetEnvironmentVariableA("ROTK_TTT_ROTK_PORTRAITS", !rotkRom.empty() && g_tttRotkPortraits ? "1" : nullptr);
     SetEnvironmentVariableA("ROTK_TTT_ROTK_SKILLS", !rotkRom.empty() && g_tttRotkSkills ? "1" : nullptr);
     SetEnvironmentVariableA("ROTK_TTT_ROTK_SOUNDS", !rotkRom.empty() && g_tttRotkSounds ? "1" : nullptr);
+    SetEnvironmentVariableA("ROTK_TTT_ROTK_HUD", !rotkRom.empty() && g_tttRotkHud ? "1" : nullptr);
     SetEnvironmentVariableA("ROTK_TTT_ROTK_ROM", rotkRom.empty() ? nullptr : rotkRom.string().c_str());
 
     // straight into the game: the GBA boot logo would break the swap
@@ -232,6 +237,7 @@ void playTwoTowers()
     SetEnvironmentVariableA("ROTK_TTT_ROTK_PORTRAITS", nullptr);
     SetEnvironmentVariableA("ROTK_TTT_ROTK_SKILLS", nullptr);
     SetEnvironmentVariableA("ROTK_TTT_ROTK_SOUNDS", nullptr);
+    SetEnvironmentVariableA("ROTK_TTT_ROTK_HUD", nullptr);
     SetEnvironmentVariableA("ROTK_TTT_ROTK_ROM", nullptr);
     if (!started) {
         std::fprintf(stderr, "[rotk] super game: could not start %s\n", g_executable.string().c_str());
@@ -300,6 +306,7 @@ void superGameRegister(gbarecomp::RunOptions& options)
     gba_mod_register_activation_plugin("rotk.pc.ttt-rotk-portraits", tttRotkPortraitsActivated);
     gba_mod_register_activation_plugin("rotk.pc.ttt-rotk-skills", tttRotkSkillsActivated);
     gba_mod_register_activation_plugin("rotk.pc.ttt-rotk-sounds", tttRotkSoundsActivated);
+    gba_mod_register_activation_plugin("rotk.pc.ttt-rotk-hud", tttRotkHudActivated);
     gba_mod_register_reset_callback(tttRotkSpritesReset);
     options.launcher_companion_label = "The Two Towers ROM";
     options.launcher_companion_note =

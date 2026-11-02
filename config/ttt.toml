@@ -239,7 +239,33 @@ note = "Called by the VBlank handler right after it copies the OAM shadow: the p
 [[mod_function_hook]]
 addr = 0x0803DCA0
 mode = "thumb"
-note = "The Two Towers' sound-effect play (id in r0): ROTK sounds can stand in for some ids (src/rotk_sprites.cpp)."
+note = "The Two Towers' sound-effect play (id in r0): ROTK sounds can stand in for some ids (src/rotk_sounds.cpp)."
+
+[[mod_function_hook]]
+addr = 0x080208A8
+mode = "thumb"
+note = "Lays a player's HUD out: ROTK's HUD goes back over it (src/rotk_hud.cpp)."
+
+[[mod_function_hook]]
+addr = 0x08020D00
+mode = "thumb"
+note = "Redraws a player's health and spirit orbs: with ROTK's HUD on, skipped (src/rotk_hud.cpp)."
+
+[[mod_function_hook]]
+addr = 0x08020E24
+mode = "thumb"
+note = "Redraws a player's experience bar: with ROTK's HUD on, skipped."
+
+[[mod_function_hook]]
+addr = 0x080214B4
+mode = "thumb"
+note = "Ticks a player's HUD during play: ROTK's HUD draws while it runs."
+
+[[mod_function_hook]]
+addr = 0x0800DE14
+mode = "thumb"
+note = "Draws text tiles; the HUD's message line moves to ROTK's message strip."
+
 
 # Play session 2026-11-01 20:47 (self-heal misses; the 0x0800FE78.. and 0x0800FF64.. runs are branch
 # targets after literal pools and a function start at 0x0800FF74, not switch tables).

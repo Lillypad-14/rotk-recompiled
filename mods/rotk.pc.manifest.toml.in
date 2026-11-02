@@ -232,6 +232,13 @@ group = "The Two Towers"
 default_enabled = false
 
 [[feature]]
+id = "ttt-rotk-hud"
+name = "ROTK HUD in The Two Towers"
+description = "When you switch to The Two Towers, the health, spirit and experience display is Return of the King's: its bars, its experience vial and its frame."
+group = "The Two Towers"
+default_enabled = false
+
+[[feature]]
 id = "ttt-rotk-portraits"
 name = "ROTK portraits in The Two Towers"
 description = "When you switch to The Two Towers, the heroes, Sam, Smeagol, Eomer and Theoden speak with their Return of the King dialog portraits."
@@ -4011,6 +4018,10 @@ id = "rotk.pc.ttt-rotk-skills"
 [[plugin]]
 feature = "ttt-rotk-sounds"
 id = "rotk.pc.ttt-rotk-sounds"
+
+[[plugin]]
+feature = "ttt-rotk-hud"
+id = "rotk.pc.ttt-rotk-hud"
 
 [[plugin]]
 feature = "ttt-rotk-portraits"

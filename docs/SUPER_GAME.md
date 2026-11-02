@@ -601,6 +601,25 @@ How to run it:
   heard it in a window. `ROTK_TTT_TRACE_SFX=1` logs every id played, `ROTK_TTT_SFX_WAV=<folder>`
   writes each clip. Fight ids seen: 00, 23, 7C, 98..9B. Other loot ids near the gem one (actor_
   lootPile 0x0802538C..0x08025B38): 0x63, 0x79, 0x62.
+- A fifth, "ROTK HUD in The Two Towers" (ttt-rotk-hud, off by default, env ROTK_TTT_ROTK_HUD=1;
+  src/rotk_hud.cpp): the in-game HUD only (not menus). Both games draw the HUD with
+  gfx_loadBgAsset on a text BG with tiles at VRAM 0xC000 and map at 0xE800 (ROTK BG0, TTT BG3). ROTK
+  layout (player_unknown08028824 / player_tickHud, stock ROM; tiles x, y): vial 0x0877DE88 (0, 16)
+  3x4, health 0x0877ABC0 (3, 18) 8x1, middle 0x08781CD4 (11, 18, carries the HUD palette), spirit
+  0x0877CB50 (19, 18), message strip 0x08781D8C (3, 19) 24x1, skill circle 0x0877F9EC (27, 17)
+  3x3. Fills are tiles-only assets from tables: health 0x08282998 and spirit 0x08282A14 (31 steps),
+  experience in the vial 0x08282ACC (30); step = (steps + 1) * current / maximum (0x08029948). TTT:
+  players +0x04 experience into the level (thresholds 0x08050348 by level +0x16), +0x08/+0x6C
+  health, +0x0A/+0x6E spirit; HUD setup 0x080208A8, orb redraw 0x08020D00 (flag 0x10), experience
+  bar 0x08020E24 (flag 0x08), HUD tick 0x080214B4, message text 0x0800DE14 from 0x08021388 (y 18 ->
+  19 for ROTK's strip). The redraws are skipped (flags cleared); after each OAM copy, while the HUD
+  ticks and the world is not parked under a menu (game flags 0x030039A8 bit 0x400000), the host
+  writes ROTK's tiles into TTT HUD tile slots (0x01.., 0x3C, 0x50; TTT's message text uses 0x27..),
+  the map rows 16..19 and the palette (bank = TTT's HUD bank, into the BG shadow 0x030003E8 too, and
+  palette RAM unless a fade runs, 0x03003620). Checked headless on the Helm's Deep route: bars,
+  vial and colors right in both levels, backpack screens untouched. Not yet: the middle box ROTK
+  shows (a sprite indicator, 0x080629C0 table), the skill circle's icon (still ROTK's default),
+  pickup messages on the strip unseen.
 - Direct: set ROTK_TTT_ROTK_SPRITES=1 (+ ROTK_TTT_ROTK_SKILLS=1) and/or ROTK_TTT_ROTK_PORTRAITS=1 and
   ROTK_TTT_ROTK_ROM (ROM = .private/rotk.gba), then run PlayTwoTowers.cmd. Checked headless at frame 3400 of the route: each
   alone and both together draw as expected.
