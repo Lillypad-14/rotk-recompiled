@@ -564,6 +564,12 @@ How to run it:
   there, holding Down (0x37F) for about 410 frames reaches a group of Uruk-hai at a rock. Then tap B
   (attack, 0x3FD; A is the skill) every 20 frames and turn toward them now and then. They die by
   about frame 6400 and the XP bar gains pips. With no attacks they live, so kills mean hits.
+- Other heroes: in the route, drop the Start at 1375/1379 and press Right (0x3EF) or Left (0x3DF)
+  for 5 frames at 1377 + 9n; the A at 1400 confirms. Right: Gandalf, then Frodo; Left: Eowyn, then
+  Legolas (Gimli is a third press, not tried). Only Gandalf starts in Aragorn's level (he stalls
+  before the Uruk-hai); Frodo's and Eowyn's states at 5560 have the backpack open (Start closes it).
+  Checked 2026-11-02 from those states: every hero swings its ROTK weapon in ROTK colors with
+  the combo, and Legolas's shots kill.
 
 What src/rotk_sprites.cpp does (TTT plain host): converts ROTK animations (ROTK LZ77, packed pieces,
 6-byte boxes) to the Two Towers' format in host RAM at 0x12100000, then answers ROM reads through
