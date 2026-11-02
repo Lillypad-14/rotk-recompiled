@@ -723,12 +723,14 @@ void presentDecorate(const gbarecomp::PresentFrame* frame)
     rotk::duelHudDecorate(frame);
     rotk::minimapDecorate(frame);
     rotk::colorVisionDecorate(frame);
+    rotk::superGameDecorate(frame);
     rotk::rumbleObserve(frame);
 }
 
 bool presentDecorateActive()
 {
-    return rotk::combatInfoActive() || rotk::duelHudActive() || rotk::minimapActive() || rotk::colorVisionActive() || rotk::rumbleActive();
+    return rotk::combatInfoActive() || rotk::duelHudActive() || rotk::minimapActive() || rotk::colorVisionActive() || rotk::rumbleActive() ||
+           rotk::superGameDecorateActive();
 }
 
 int main(int argc, char** argv)

@@ -3,13 +3,15 @@
 // from ROTK's settings. The ROTK
 // host's hooks are tied to ROTK addresses, so it can't run another cartridge.
 //
-// Started by the ROTK host for the super game, it takes over ROTK's window: the window opens hidden
-// (GBARECOMP_WINDOW_HANDOFF="x,y,w,h,fullscreen"), and once a frame is drawn it takes ROTK's place,
-// size and fullscreen state, shows itself and signals ROTK_SUPER_GAME_READY, the event ROTK waits on
-// before it hides its own window. Started that way it skips the language menu (English) and the logos,
-// and shows itself once its main menu has faded in. Until then it runs at fast-forward speed, silent. Its main menu then has a fifth row, Return of the
-// King, which hands the window back: it writes its place, size and fullscreen state to
-// ROTK_SUPER_GAME_BACK_FILE, sets ROTK_SUPER_GAME_BACK (ROTK shows itself there) and quits.
+// Started by the ROTK host for the super game when ROTK starts, it stays for ROTK's whole session so a
+// switch is instant both ways. Its window opens hidden (GBARECOMP_WINDOW_HANDOFF), it boots at
+// fast-forward speed, silent, skipping the language menu (English) and the logos, and once its main
+// menu is up it parks: paused, sound paused, window hidden, until ROTK sets ROTK_SUPER_GAME_SHOW.
+// Then it takes the place, size and fullscreen state ROTK wrote to ROTK_SUPER_GAME_SHOW_FILE, shows
+// itself, signals ROTK_SUPER_GAME_READY (ROTK hides) and fades in. Its main menu has a fifth row,
+// Return of the King: it fades out, writes its place to ROTK_SUPER_GAME_BACK_FILE, sets
+// ROTK_SUPER_GAME_BACK (ROTK shows itself there and fades in) and hides; it runs on unseen until its
+// save is on disk, sets ROTK_SUPER_GAME_SAVED (ROTK re-reads it for hero import) and parks again.
 #include "runtime.h"
 
 #include "color_vision.h"
@@ -105,6 +107,15 @@ bool g_handoff = false;
 bool g_fromRotk = false;
 int g_frames = 0;
 int g_menuFrames = 0;
+
+// The super game's states (see the top of this file).
+enum class Mode { Booting, Parked, FadingIn, Playing, FadingOut, Settling };
+Mode g_mode = Mode::Booting;
+// The fade: this many presented frames each way (about a quarter second in all, out and in).
+constexpr int kFadeFrames = 8;
+int g_fadeFrame = 0;
+constexpr int kMaxAudioDeviceId = 16;
+bool g_audioPaused[kMaxAudioDeviceId + 1] = {};
 
 void requestScene(std::uint32_t scene)
 {
@@ -247,7 +258,21 @@ SDL_Window* shownWindow()
     return nullptr;
 }
 
-// Return of the King: the window goes back to ROTK where this one is, and this game quits.
+void signal(const char* variable)
+{
+#if defined(_WIN32)
+    if (const char* name = std::getenv(variable)) {
+        if (HANDLE event = OpenEventA(EVENT_MODIFY_STATE, FALSE, name)) {
+            SetEvent(event);
+            CloseHandle(event);
+        }
+    }
+#else
+    (void)variable;
+#endif
+}
+
+// Return of the King, once faded out: the window goes back to ROTK where this one is.
 void handBack()
 {
     int x = 0, y = 0, w = 0, h = 0, fullscreen = 0;
@@ -263,25 +288,23 @@ void handBack()
         }
     }
 #if defined(_WIN32)
-    if (const char* name = std::getenv("ROTK_SUPER_GAME_BACK")) {
-        if (HANDLE back = OpenEventA(EVENT_MODIFY_STATE, FALSE, name)) {
-            SetEvent(back);
-            CloseHandle(back);
-        }
-    }
+    // ROTK may take the foreground back from this process
+    AllowSetForegroundWindow(ASFW_ANY);
 #endif
-    SDL_Event quit{};
-    quit.type = SDL_QUIT;
-    SDL_PushEvent(&quit);
+    signal("ROTK_SUPER_GAME_BACK");
 }
 
-// A on the main menu: Return of the King hands the window back. The other rows run as the game has them.
+// A on the main menu: Return of the King fades out and hands the window back. The other rows run as
+// the game has them.
 int menuConfirm(std::uint32_t, int, ArmCpuState* cpu)
 {
     if (bus_read_u32(kSceneArgCursor) != kRowReturn) return 0;
     const std::uint32_t lr = cpu->R[14];
     playMenuSound(cpu, lr & ~1u, kSoundConfirm);
-    handBack();
+    if (g_mode == Mode::Playing) {
+        g_mode = Mode::FadingOut;
+        g_fadeFrame = 0;
+    }
     cpu->R[14] = lr;
     return returnToCaller(cpu);
 }
@@ -304,16 +327,50 @@ SDL_Window* hiddenWindow()
     return nullptr;
 }
 
+SDL_Window* anyWindow()
+{
+    if (SDL_Window* window = shownWindow()) return window;
+    return hiddenWindow();
+}
+
+void pauseAudio()
+{
+    for (int id = 1; id <= kMaxAudioDeviceId; ++id)
+        if (SDL_GetAudioDeviceStatus(static_cast<SDL_AudioDeviceID>(id)) == SDL_AUDIO_PLAYING) {
+            SDL_PauseAudioDevice(static_cast<SDL_AudioDeviceID>(id), 1);
+            g_audioPaused[id] = true;
+        }
+}
+
+void resumeAudio()
+{
+    for (int id = 1; id <= kMaxAudioDeviceId; ++id)
+        if (g_audioPaused[id]) {
+            SDL_PauseAudioDevice(static_cast<SDL_AudioDeviceID>(id), 0);
+            g_audioPaused[id] = false;
+        }
+}
+
+// Takes ROTK's place (written by ROTK to ROTK_SUPER_GAME_SHOW_FILE, else the start's handoff value)
+// and shows the window.
 void reveal()
 {
     gbarecomp::set_host_fast_forward(false);
     int x = 0, y = 0, w = 0, h = 0, fullscreen = 0;
+    char line[96] = {};
     const char* geometry = std::getenv("GBARECOMP_WINDOW_HANDOFF");
-    SDL_Window* window = hiddenWindow();
+    if (const char* path = std::getenv("ROTK_SUPER_GAME_SHOW_FILE")) {
+        if (std::FILE* file = std::fopen(path, "r")) {
+            if (std::fgets(line, sizeof line, file)) geometry = line;
+            std::fclose(file);
+        }
+    }
+    SDL_Window* window = anyWindow();
     if (window && geometry && std::sscanf(geometry, "%d,%d,%d,%d,%d", &x, &y, &w, &h, &fullscreen) == 5) {
         if (fullscreen) {
             SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
         } else {
+            SDL_SetWindowFullscreen(window, 0);
             // ROTK's window can be widescreen; this game has no widescreen, so its window takes the
             // GBA's 3:2 shape at that height, centered where ROTK's was.
             if (w > 0 && h > 0) {
@@ -329,33 +386,124 @@ void reveal()
         SDL_ShowWindow(window);
         SDL_RaiseWindow(window);
     }
+    signal("ROTK_SUPER_GAME_READY");
+}
+
+// Parked: paused out of sight until ROTK asks for this game (true), or ROTK is gone (false).
+bool park()
+{
+    if (SDL_Window* window = shownWindow()) SDL_HideWindow(window);
+    pauseAudio();
 #if defined(_WIN32)
-    if (const char* name = std::getenv("ROTK_SUPER_GAME_READY")) {
-        if (HANDLE ready = OpenEventA(EVENT_MODIFY_STATE, FALSE, name)) {
-            SetEvent(ready);
-            CloseHandle(ready);
-        }
+    HANDLE show = nullptr, rotk = nullptr;
+    if (const char* name = std::getenv("ROTK_SUPER_GAME_SHOW")) show = OpenEventA(SYNCHRONIZE, FALSE, name);
+    if (const char* pid = std::getenv("ROTK_SUPER_GAME_PID"))
+        rotk = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(std::strtoul(pid, nullptr, 10)));
+    if (!show) {
+        if (rotk) CloseHandle(rotk);
+        return true;
     }
+    HANDLE handles[2] = {show, rotk};
+    bool shown = false;
+    for (;;) {
+        const DWORD result = WaitForMultipleObjects(rotk ? 2 : 1, handles, FALSE, 50);
+        if (result == WAIT_OBJECT_0) {
+            shown = true;
+            break;
+        }
+        if (result != WAIT_TIMEOUT) break;
+        SDL_PumpEvents();
+        SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+    }
+    CloseHandle(show);
+    if (rotk) CloseHandle(rotk);
+    return shown;
+#else
+    return true;
 #endif
+}
+
+// level 0 is black, kFadeFrames the frame as it is
+void darken(const gbarecomp::PresentFrame* frame, int level)
+{
+    if (level >= kFadeFrames) return;
+    if (level < 0) level = 0;
+    for (unsigned y = 0; y < frame->height; ++y) {
+        std::uint8_t* pixel = frame->rgb + std::size_t(y) * frame->stride * 3u;
+        for (unsigned x = 0; x < frame->width * 3u; ++x)
+            pixel[x] = static_cast<std::uint8_t>(pixel[x] * level / kFadeFrames);
+    }
+}
+
+void superGameFrame(const gbarecomp::PresentFrame* frame)
+{
+    switch (g_mode) {
+    case Mode::Booting:
+        ++g_frames;
+        if (frame->bus && frame->bus->read32(kSceneCurrent) == kSceneMainMenu &&
+            frame->bus->read32(kSceneArgMenuState) == kMenuIdle)
+            ++g_menuFrames;
+        if (g_menuFrames < kMenuShownFrames && g_frames < kRevealFallbackFrames) return;
+        g_mode = Mode::Parked;
+        std::fprintf(stderr, "[ttt] super game: booted, parked after %d frames\n", g_frames);
+        [[fallthrough]];
+    case Mode::Parked:
+        if (!park()) {
+            // ROTK is gone: so is this game
+            SDL_Event quit{};
+            quit.type = SDL_QUIT;
+            SDL_PushEvent(&quit);
+            return;
+        }
+        reveal();
+        std::fprintf(stderr, "[ttt] super game: shown\n");
+        resumeAudio();
+        g_mode = Mode::FadingIn;
+        g_frames = 0;
+        g_fadeFrame = 0;
+        darken(frame, 0);
+        return;
+    case Mode::FadingIn:
+        darken(frame, ++g_fadeFrame);
+        if (g_fadeFrame >= kFadeFrames) g_mode = Mode::Playing;
+        return;
+    case Mode::Playing:
+        // ROTK_SUPER_GAME_TEST_RETURN=N (tests): Return of the King is picked N frames after showing
+        if (const char* test = std::getenv("ROTK_SUPER_GAME_TEST_RETURN"); test && ++g_frames >= std::atoi(test)) {
+            g_mode = Mode::FadingOut;
+            g_fadeFrame = 0;
+        }
+        return;
+    case Mode::FadingOut:
+        darken(frame, kFadeFrames - ++g_fadeFrame);
+        if (g_fadeFrame < kFadeFrames) return;
+        handBack();
+        std::fprintf(stderr, "[ttt] super game: handed back\n");
+        if (SDL_Window* window = shownWindow()) SDL_HideWindow(window);
+        // unseen and silent until the save is on disk
+        gbarecomp::set_host_fast_forward(true);
+        g_mode = Mode::Settling;
+        g_frames = 0;
+        return;
+    case Mode::Settling:
+        // the runtime writes the save a second after the game last touched it
+        if (++g_frames < 2 || (frame->bus && frame->bus->save().dirty() && g_frames < 1200)) return;
+        signal("ROTK_SUPER_GAME_SAVED");
+        std::fprintf(stderr, "[ttt] super game: save on disk after %d frames, parked\n", g_frames);
+        g_mode = Mode::Parked;
+        return;
+    }
 }
 
 void presentDecorate(const gbarecomp::PresentFrame* frame)
 {
     rotk::colorVisionDecorate(frame);
-    if (!g_handoff) return;
-    ++g_frames;
-    if (frame->bus && frame->bus->read32(kSceneCurrent) == kSceneMainMenu &&
-        frame->bus->read32(kSceneArgMenuState) == kMenuIdle)
-        ++g_menuFrames;
-    if (g_menuFrames >= kMenuShownFrames || g_frames >= kRevealFallbackFrames) {
-        reveal();
-        g_handoff = false;
-    }
+    if (g_fromRotk) superGameFrame(frame);
 }
 
 bool presentDecorateActive()
 {
-    return g_handoff || rotk::colorVisionActive();
+    return g_fromRotk || rotk::colorVisionActive();
 }
 
 }  // namespace

@@ -55,35 +55,48 @@ when the host can start it and hands the window over:
 1. The mod sets `PC_HOST_SUPER_GAME_SWITCH` in `PcHostInfo.superGame` (version 5). The host sets
    `PC_HOST_SUPER_GAME_AVAILABLE` there when it found The Two Towers' ROM and `TTT-Recompiled.exe`
    (`ROTK_TTT_EXE`, else beside the executable, else `../host-ttt`).
-2. `src/super_game.cpp` sees the request at the end of a frame (`pcEndFrame`), pauses this game's
-   audio and starts The Two Towers with `GBARECOMP_WINDOW_HANDOFF="x,y,w,h,fullscreen"` (this
-   window's) and the name of an event, its ROM, a BIOS (`--bios`, the config's, or
-   `gba_bios.bin` beside the ROM) and its own save (`<ROM name>-recompiled.eeprom` beside its ROM,
-   apart from an emulator's `.sav`).
-3. The Two Towers starts with `--bios-skip-intro` and its window opens hidden
-   (`patches/window-handoff.patch`). Its host (`src/plain_main.cpp`) hurries it to the main menu
-   through three `[[mod_function_hook]]`s: the copyright tick (0x0802626C) asks for the language
-   menu, the language menu's tick (0x08025EC8) confirms English with the game's own confirm
-   (0x08025F88: language, save stamp) and asks for the main menu (scene 4), and the title's tick
-   (0x0803F054) presses Start through its handler (0x0803F32C). Once the menu's rows are up (state
-   2) it takes ROTK's place, size and fullscreen state, shows itself and sets the event. Only then
-   does ROTK hide its window. Played on its own (`PlayTwoTowers.cmd`) none of this happens.
-   Calling a guest function from a hook needs the generated call sequence (LR, then
-   `runtime_call_push_return`, `runtime_dispatch`): without it the callee's return runs on into
-   the caller.
-4. ROTK waits, paused and muted, its hidden window pumped.
+2. **The Two Towers runs beside ROTK for the whole session** (the user, 2026-11-02: switching must be
+   instant and smooth, The Two Towers keeping its place). `src/super_game.cpp` starts it hidden on
+   ROTK's first frames (`superGamePoll` -> `startCompanion`), in a job object that ends it with ROTK,
+   with `GBARECOMP_WINDOW_HANDOFF="x,y,w,h,fullscreen"` (this window's), the event names
+   `ROTK_SUPER_GAME_SHOW`/`READY`/`BACK`/`SAVED` (`Local\RotkSuperGame<what><ROTK pid>`), the files
+   `ROTK_SUPER_GAME_SHOW_FILE`/`BACK_FILE`, `ROTK_SUPER_GAME_PID`, its ROM, a BIOS (`--bios`, the
+   config's, or `gba_bios.bin` beside the ROM), its own save (`<ROM name>-recompiled.eeprom` beside
+   its ROM) and the ROTK feature variables. If its window is closed it quits as before and ROTK
+   starts a new one (up to 3 failed starts).
+3. Its window opens hidden (`patches/window-handoff.patch`). Its host (`src/plain_main.cpp`) hurries
+   it to the main menu at fast-forward, silent, through three `[[mod_function_hook]]`s: the
+   copyright tick (0x0802626C) asks for the language menu, the language menu's tick (0x08025EC8)
+   confirms English with the game's own confirm (0x08025F88: language, save stamp) and asks for the
+   main menu (scene 4), and the title's tick (0x0803F054) presses Start through its handler
+   (0x0803F32C). Once the menu's rows are up (state 2) it **parks** inside its present hook: window
+   hidden, audio devices paused, waiting on SHOW (or ROTK's process, to quit with it). Calling a
+   guest function from a hook needs the generated call sequence (LR, then
+   `runtime_call_push_return`, `runtime_dispatch`): without it the callee's return runs on into the
+   caller.
+4. The mod sets the switch; ROTK fades its picture to black over 8 frames (`superGameDecorate`),
+   writes its window's place to the show file and sets SHOW (`AllowSetForegroundWindow` first). The
+   Two Towers takes that place (3:2 at that height unless fullscreen), shows itself, sets READY and
+   fades in over 8 frames; ROTK hides, paused and muted, its hidden window pumped.
 5. The Two Towers' main menu has a fifth row then, "Return of the King" (hooks on its
    drawEntry 0x0803F2EC, moveCursor 0x0803F180 and confirm 0x0803F0FC; the five rows start a tile
    higher, at y 88, since a fifth at y 128 is under the bottom border; the text sits in host RAM,
-   written when it draws, as the boot clears that RAM). Confirming it writes its window's place,
-   size and fullscreen state to `ROTK_SUPER_GAME_BACK_FILE`, sets the `ROTK_SUPER_GAME_BACK` event
-   and quits through `SDL_QUIT` (so its save is written). ROTK takes that place, shows its window
-   over The Two Towers' closing one and plays on from its menu. Quitting The Two Towers any other
-   way brings ROTK back too. The frame pacer resyncs after the pause.
+   written when it draws, as the boot clears that RAM). Confirming it fades out over 8 frames,
+   writes its place to the back file and sets BACK; ROTK shows itself there and fades in. The Two
+   Towers hides and runs on unseen at fast-forward until the runtime has its save on disk (the
+   save's dirty flag, written a second after the game last touched it), sets SAVED (ROTK then
+   re-reads it for hero import) and parks again. The frame pacer resyncs after a pause.
+   Measured with a window (scratch harness playing ROTK's side through the same events,
+   `ROTK_SUPER_GAME_TEST_RETURN=N` picks the row N frames after showing): SHOW -> READY 21 ms the
+   first time, 2 ms after; BACK -> SAVED 34 ms; parked it uses about 1% of a core. Before this a
+   switch started a new process each time (1.6-2 s to its first frame, before booting to its menu)
+   and a return waited for it to quit. The present hook only runs with a window: headless runs
+   never reach the handoff.
 
 Two processes, one window at a time: gbarecomp can't hold two different cartridges in one process
-(the generated code and the runtime are per cartridge). Checked headless: the row draws and the
-cursor wraps onto it. The handoff itself needs a window: test it by playing.
+(the generated code and the runtime are per cartridge). On a real GBA the two could not share a
+cartridge either beyond a reset menu: 32 MB is the cartridge window (stock ROTK and The Two Towers
+are 16 MB each, the Expanded ROTK fills all 32), and each game owns all of the work RAM and VRAM.
 
 ROTK's PC features in The Two Towers (item 4, 2026-11-01):
 - Color vision: carried over. ROTK sets `ROTK_PC_COLOR_VISION` to its current mode for the child
