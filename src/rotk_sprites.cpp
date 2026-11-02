@@ -566,6 +566,10 @@ int romRead32(std::uint32_t address, std::uint32_t, std::uint32_t* out)
         for (const auto& [literal, array] : g_state.literals)
             if (literal == address) {
                 ensureWritten();
+                // ROTK_TTT_TRACE_SPECIAL=1 logs each special read, with the game frame
+                if (std::getenv("ROTK_TTT_TRACE_SPECIAL"))
+                    std::fprintf(stderr, "[special] %08X at %u\n", address,
+                                 bus_read_u32(bus_read_u32(kGameStatePointer) + kGameFrame));
                 *out = array;
                 return 1;
             }

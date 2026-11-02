@@ -616,6 +616,18 @@ Known problems, in order:
    weapon's every tick, and the attack still lasts the Two Towers' 20 frames, so ROTK's recoveries
    (melee 1/3) and its longer third swing are not played out. Each swing forced alone killed in
    the fight check; the kill times vary with how the fight goes, not with the swing.
-5. The specials mapping is a guess per animation; verify each skill in play.
+5. The specials mapping is a guess per animation; verify each skill in play. Findings (2026-11-02):
+   `ROTK_TTT_TRACE_SPECIAL=1` logs each special read with the game frame. Tapping A from the
+   five hero states reads none: each hero has one starting skill, which uses the cast pose, and
+   one cast empties the spirit. Testing the specials needs each skill learned, selected and the
+   spirit refilled (player +0x0A spirit, +0x1F skill being cast, skill levels per ttt_save.py; the
+   selected-skill field and the player's RAM address are not found yet). By skill (fact sheets in
+   rotk/build/ttt/skills): Frodo knife throw 0x0832923C, escape 0x08329250/64, snare 0x083292C8,
+   charge 0x083292DC/F0; Legolas white knives 0x0832937C, overdraw 0x08329390; Aragorn sword
+   throw 0x08329444, sweep 0x08329458; Gimli axe throw 0x08329584, whirlwind 0x08329598; Eowyn
+   shield bash 0x08329624, double strike 0x08329638. Not skills: Aragorn's 0x0832946C (state
+   0x1B when player +0x9E bit 0) and 0x083293E0 (replaces his pose 2 when hero record +0x19 has
+   bits 2 and 4) are pose variants in player_tick; Frodo's 0x08329278 is read in Gandalf's second
+   spell table; Frodo's 0x0832928C/A0/B4 are never referenced (dead).
 6. Not converted: HUD portraits, menus, other characters. Animation timing: ROTK walk and swing play
    at the Two Towers' 1 tick per frame (as ROTK); idle is 3 ticks per frame (ROTK uses 2).
