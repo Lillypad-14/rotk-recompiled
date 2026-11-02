@@ -8,6 +8,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <utility>
 #include <vector>
 
 #include "gba_bus.h"
@@ -59,6 +60,33 @@ constexpr Source kSources[kPoses] = {
     {kCastBanks, 0},   // cast
 };
 
+// The heroes' special animations (skills), which their code loads as literals: each Two Towers
+// facing array and the ROTK animation (bank, pose) drawn in its place.
+struct Special {
+    std::uint32_t array;
+    int hero;
+    Source source;
+};
+constexpr Special kSpecials[] = {
+    // Frodo
+    {0x0832923Cu, 0, {kCastBanks, 0}},  {0x08329250u, 0, {kMeleeBanks, 0}}, {0x08329264u, 0, {kCastBanks, 3}},
+    {0x08329278u, 0, {kMeleeBanks, 1}}, {0x0832928Cu, 0, {kMeleeBanks, 2}}, {0x083292A0u, 0, {kMeleeBanks, 2}},
+    {0x083292B4u, 0, {kMeleeBanks, 4}}, {0x083292C8u, 0, {kMeleeBanks, 2}}, {0x083292DCu, 0, {kMeleeBanks, 0}},
+    {0x083292F0u, 0, {kCastBanks, 0}},
+    // Legolas
+    {0x0832937Cu, 1, {kMeleeBanks, 4}}, {0x08329390u, 1, {kMeleeBanks, 0}},
+    // Aragorn
+    {0x083293E0u, 2, {kMeleeBanks, 2}}, {0x0832941Cu, 2, {kMeleeBanks, 4}}, {0x08329444u, 2, {kCastBanks, 0}},
+    {0x08329458u, 2, {kMeleeBanks, 5}}, {0x0832946Cu, 2, {kMeleeBanks, 0}},
+    // Gandalf
+    {0x083294F8u, 3, {kCastBanks, 0}},  {0x0832950Cu, 3, {kCastBanks, 1}},
+    // Gimli
+    {0x08329584u, 5, {kMeleeBanks, 4}}, {0x08329598u, 5, {kMeleeBanks, 5}},
+    // Eowyn
+    {0x08329624u, 4, {kMeleeBanks, 2}}, {0x08329638u, 4, {kMeleeBanks, 4}},
+};
+constexpr std::uint32_t kCodeStart = 0x08000000u, kCodeEnd = 0x08060000u;
+
 // Converted data in host RAM, past the plain host's own use of its first page.
 constexpr std::uint32_t kDataBase = 0x12100000u;
 constexpr std::uint32_t kMagic = 0x53544B52u;  // "RKTS"
@@ -69,6 +97,9 @@ struct State {
     Bytes image;  // written at kDataBase
     std::uint32_t poseTable = 0, palettes = 0, blankWeapon = 0;
     std::uint32_t weaponTable[kWeaponEntries] = {};
+    // code literals that load a special animation, and the converted facing array each answers with
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> literals;
+    std::uint32_t literalsLow = ~0u, literalsHigh = 0;
 };
 State g_state;
 
@@ -242,6 +273,22 @@ std::uint32_t append(Bytes& image, const Bytes& data)
     return at;
 }
 
+// The 5 facings of a ROTK bank entry converted, as a facing array; attack boxes from ttFacings
+// (a Two Towers facing array) when given.
+std::uint32_t convertFacings(Bytes& image, const Bytes& rom, std::uint32_t entry, std::uint32_t ttFacings)
+{
+    Bytes facings;
+    for (int facing = 0; facing < kFacings; ++facing) {
+        const AttackBox attack = ttFacings ? ttAttackBox(bus_read_u32(ttFacings + facing * 4u)) : AttackBox{};
+        const Converted c = convert(rom, entry + facing * kRecordSize, attack);
+        Bytes record;
+        put32(record, append(image, c.tiles));
+        put32(record, append(image, c.frameSet));
+        put32(facings, append(image, record));
+    }
+    return append(image, facings);
+}
+
 std::array<int, 3> rgb(const Bytes& rom, std::uint32_t palette, int index)
 {
     const std::uint32_t c = r16(rom, palette + index * 2);
@@ -331,6 +378,18 @@ void build()
     const std::uint32_t record = append(image, blankRecord);
     for (int facing = 0; facing < kFacings; ++facing) put32(blankFacings, record);
     g_state.blankWeapon = append(image, blankFacings);
+    // the specials, and every code literal that loads one
+    g_state.literals.clear();
+    for (const Special& special : kSpecials) {
+        const std::uint32_t bank = r32(rom, special.source.banks + special.hero * 4u);
+        const std::uint32_t array = convertFacings(image, rom, r32(rom, bank + special.source.pose * 4u), special.array);
+        for (std::uint32_t a = kCodeStart; a < kCodeEnd; a += 4)
+            if (bus_read_u32(a) == special.array) {
+                g_state.literals.emplace_back(a, array);
+                g_state.literalsLow = std::min(g_state.literalsLow, a);
+                g_state.literalsHigh = std::max(g_state.literalsHigh, a);
+            }
+    }
     g_state.poseTable = append(image, poseTable);
     g_state.palettes = append(image, palettes);
     std::fprintf(stderr, "[ttt] ROTK hero sprites: %zu KiB\n", image.size() / 1024);
@@ -350,6 +409,16 @@ int romRead32(std::uint32_t address, std::uint32_t, std::uint32_t* out)
         ensureWritten();
         *out = bus_read_u32(g_state.poseTable + (address - kPoseTable));
         return 1;
+    }
+    if (address < kCodeEnd) {
+        if (address < g_state.literalsLow || address > g_state.literalsHigh) return 0;
+        for (const auto& [literal, array] : g_state.literals)
+            if (literal == address) {
+                ensureWritten();
+                *out = array;
+                return 1;
+            }
+        return 0;
     }
     if (address >= kWeaponPoseTable && address < kWeaponPoseTable + kWeaponEntries * 4u) {
         ensureWritten();
