@@ -1,4 +1,5 @@
 #include "rotk_sprites.h"
+#include "rotk_sounds.h"
 
 #include <algorithm>
 #include <array>
@@ -1010,6 +1011,7 @@ void comboApply()
             bus_write_u8(actor + 0x20, swap.ticks);
             bus_write_u32(actor + 0xE8, bus_read_u32(actor + 0xE8) & ~kAnimationEnded);
             g_state.comboPose[swap.hero] = swap.pose;
+            if (swap.pose % 2 == 0) rotkSoundsHeroSwing(static_cast<int>(swap.hero));
         }
         swap = {};
     }

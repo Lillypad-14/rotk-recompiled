@@ -6,6 +6,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <utility>
 #include <vector>
 
 #include "gba_bus.h"
@@ -33,21 +34,44 @@ constexpr std::uint32_t kSoundData = 0x082808D4u, kSfxSingles = 0x08287DF8u, kSf
                         kSfxEntries = 0x08289450u;
 constexpr std::uint32_t kRotkMixRate = 16384u;
 
-// Two Towers id -> ROTK id.
+// A Two Towers sound played from [from, to) (any caller when to is 0; any id when tt is kAnyId)
+// plays a ROTK sound effect id instead.
+constexpr std::uint32_t kAnyId = 0xFFFFFFFFu;
 struct Swap {
-    std::uint32_t tt, rotk;
+    std::uint32_t tt, from, to, rotk;
     const char* what;
 };
 constexpr Swap kSwaps[] = {
-    {0x58u, 0x29u, "gem pickup"},  // after the gem count (player +0x0C, capped 0xFFFF) at 0x08025996
+    // loot (actor_lootPile 0x0802538C..0x08025B38): ids used only there
+    {0x58u, 0, 0, 0x29u, "gem pickup"},       // after the gem add (player +0x0C, capped 0xFFFF) at 0x08025996
+    {0x63u, 0, 0, 0x2Du, "item pickup"},      // items and artifacts
+    {0x62u, 0, 0, 0x2Fu, "health pickup"},    // after player_addHp / player_addSpirit (half the maximum)
+    {0x79u, 0x08025700u, 0x08025720u, 0x2Au, "pickup refused"},  // 0x79 is the menus' error sound too
+    {0x87u, 0, 0, 0x10Au, "chest opens"},     // actor_chest_trigger
+    {0x70u, 0, 0, 0x11Au, "level up"},        // player_awardXp
+    // melee result (0x0800CD94): the ids come from the foe type's row (0x24 bytes), so by call site
+    {kAnyId, 0x0800D04Cu, 0x0800D050u, 0x07u, "melee hit"},       // row +0x1A
+    {kAnyId, 0x0800D010u, 0x0800D014u, 0x11u, "melee critical"},  // row +0x1C, damage doubled
+    {kAnyId, 0x0800D1CCu, 0x0800D1D0u, 0x0Au, "melee miss"},      // row +0x20, the hit roll failed
+    {0x57u, 0, 0, 0x13u, "missile hit"},      // fx_projectile_hit
 };
+// The heroes' own sounds: per hero 4 ids (8 bytes), the Two Towers' at 0x080502B8 (player_tick: entry
+// 0 when an attack starts, 1 and 2 together, 3 at 0x0801CA6A) and ROTK's at 0x080585D4 (entry 0 on
+// each combo swing), same hero order and layout. Played from player_tick.
+constexpr std::uint32_t kTttHeroSounds[6][4] = {{0x3D, 0x46, 0x3F, 0x3E}, {0x65, 0x6F, 0x68, 0x65},
+                                                {0x00, 0x0A, 0x03, 0x01}, {0x49, 0x53, 0x4B, 0x4A},
+                                                {0x27, 0x30, 0x2B, 0x28}, {0x59, 0x60, 0x5E, 0x5A}};
+constexpr std::uint32_t kRotkHeroSounds = 0x080585D4u;
+constexpr std::uint32_t kPlayerTickFrom = 0x0801AFC8u, kPlayerTickTo = 0x0801CB00u;
 
 struct State {
     bool swap = false, trace = false;
     // ROTK_TTT_TEST_SWAP=<hex id> (tests): that Two Towers id also plays the first swap's sound
     std::uint32_t testId = 0xFFFFFFFFu;
     Bytes rom;
-    GBAModAudioClip clips[std::size(kSwaps)] = {};
+    std::vector<Swap> swaps;
+    std::vector<std::pair<std::uint32_t, GBAModAudioClip>> clips;  // by ROTK id
+    std::uint32_t heroSwing[6] = {};                                // ROTK id per hero
 } g_state;
 
 std::uint32_t r8(std::uint32_t a) { return a - kRomBase < g_state.rom.size() ? g_state.rom[a - kRomBase] : 0u; }
@@ -106,20 +130,40 @@ int returnToCaller(ArmCpuState* cpu)
     return 1;
 }
 
+GBAModAudioClip clipFor(std::uint32_t rotkId)
+{
+    for (const auto& [id, clip] : g_state.clips)
+        if (id == rotkId) return clip;
+    return GBA_MOD_AUDIO_CLIP_INVALID;
+}
+
+// Plays ROTK sound effect rotkId at the Two Towers' sound-effect volume; false when sound is off.
+bool playRotk(std::uint32_t rotkId, const char* what, std::uint32_t ttId)
+{
+    const std::uint32_t settings = bus_read_u32(kTttSoundSettingsPointer);
+    if (!(bus_read_u8(settings + 0x0C) & 4u)) return false;
+    const GBAModAudioClip clip = clipFor(rotkId);
+    if (clip == GBA_MOD_AUDIO_CLIP_INVALID) return false;
+    gba_mod_audio_set_enabled(clip, 1);
+    const int gain = static_cast<int>(bus_read_u8(settings + 0x0D) * 100u / 255u);
+    const int played = gba_mod_audio_play(clip, gain, 0);
+    if (g_state.trace)
+        std::fprintf(stderr, "[sfx] %02X -> ROTK %02X %s, gain %d, played %d\n", ttId, rotkId, what, gain, played);
+    return true;
+}
+
 int sfxPlayEntry(std::uint32_t, int, ArmCpuState* cpu)
 {
-    const std::uint32_t id = cpu->R[0];
+    const std::uint32_t id = cpu->R[0], caller = (cpu->R[14] & ~1u) - 4;
     const std::uint32_t settings = bus_read_u32(kTttSoundSettingsPointer);
     const bool on = bus_read_u8(settings + 0x0C) & 4u;
-    if (g_state.trace) std::fprintf(stderr, "[sfx] %02X%s\n", id, on ? "" : " (sound off)");
+    if (g_state.trace) std::fprintf(stderr, "[sfx] %02X from %08X%s\n", id, caller, on ? "" : " (sound off)");
     if (!g_state.swap || !on) return 0;
-    for (std::size_t i = 0; i < std::size(kSwaps); ++i) {
-        if ((kSwaps[i].tt != id && !(i == 0 && id == g_state.testId)) || g_state.clips[i] == GBA_MOD_AUDIO_CLIP_INVALID)
-            continue;
-        gba_mod_audio_set_enabled(g_state.clips[i], 1);
-        const int gain = static_cast<int>(bus_read_u8(settings + 0x0D) * 100u / 255u);
-        const int played = gba_mod_audio_play(g_state.clips[i], gain, 0);
-        if (g_state.trace) std::fprintf(stderr, "[sfx] %02X -> ROTK %s, gain %d, played %d\n", id, kSwaps[i].what, gain, played);
+    for (std::size_t i = 0; i < g_state.swaps.size(); ++i) {
+        const Swap& swap = g_state.swaps[i];
+        const bool idMatch = swap.tt == kAnyId || swap.tt == id || (i == 0 && id == g_state.testId);
+        const bool callerMatch = !swap.to || (caller >= swap.from && caller < swap.to);
+        if (!idMatch || !callerMatch || !playRotk(swap.rotk, swap.what, id)) continue;
         cpu->R[0] = 0;  // no Two Towers handle
         return returnToCaller(cpu);
     }
@@ -129,7 +173,7 @@ int sfxPlayEntry(std::uint32_t, int, ArmCpuState* cpu)
 void reset()
 {
     gba_mod_set_function_hook_enabled(kHookId, 1);
-    for (GBAModAudioClip clip : g_state.clips)
+    for (const auto& [id, clip] : g_state.clips)
         if (clip != GBA_MOD_AUDIO_CLIP_INVALID) gba_mod_audio_set_enabled(clip, 1);
 }
 
@@ -140,6 +184,12 @@ bool envOn(const char* name)
 }
 
 }  // namespace
+
+void rotkSoundsHeroSwing(int hero)
+{
+    if (!g_state.swap || hero < 0 || hero >= 6) return;
+    playRotk(g_state.heroSwing[hero], "chained swing", 0xFF);
+}
 
 void rotkSoundsRegister()
 {
@@ -156,7 +206,15 @@ void rotkSoundsRegister()
             std::fprintf(stderr, "[ttt] ROTK sounds: no ROTK ROM\n");
             g_state.swap = false;
         } else {
-            for (std::size_t i = 0; i < std::size(kSwaps); ++i) g_state.clips[i] = rotkClip(kSwaps[i].rotk);
+            g_state.swaps.assign(std::begin(kSwaps), std::end(kSwaps));
+            for (std::uint32_t hero = 0; hero < 6; ++hero) {
+                g_state.heroSwing[hero] = r16(kRotkHeroSounds + hero * 8);
+                for (std::uint32_t k = 0; k < 4; ++k)
+                    g_state.swaps.push_back({kTttHeroSounds[hero][k], kPlayerTickFrom, kPlayerTickTo,
+                                             r16(kRotkHeroSounds + hero * 8 + k * 2), "hero sound"});
+            }
+            for (const Swap& swap : g_state.swaps)
+                if (clipFor(swap.rotk) == GBA_MOD_AUDIO_CLIP_INVALID) g_state.clips.emplace_back(swap.rotk, rotkClip(swap.rotk));
         }
     }
     if (const char* test = std::getenv("ROTK_TTT_TEST_SWAP")) g_state.testId = static_cast<std::uint32_t>(std::strtoul(test, nullptr, 16));

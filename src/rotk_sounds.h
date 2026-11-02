@@ -8,4 +8,8 @@ namespace rotk {
 // sequences) differs from ROTK's (8-bit samples), so the ROTK sample is mixed in by the host.
 void rotkSoundsRegister();
 
+// A combo swing chained by the ROTK sprites (no Two Towers attack start, so no sound of its own): ROTK
+// plays the hero's swing sound on each one. Nothing when the sound swap is off.
+void rotkSoundsHeroSwing(int hero);
+
 }  // namespace rotk

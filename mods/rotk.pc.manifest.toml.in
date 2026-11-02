@@ -227,7 +227,7 @@ default_enabled = true
 [[feature]]
 id = "ttt-rotk-sounds"
 name = "ROTK sound effects in The Two Towers"
-description = "When you switch to The Two Towers, some of its sound effects play Return of the King's instead (so far: picking up gems)."
+description = "When you switch to The Two Towers, its pickups, chests, level-ups, melee hits and misses and the heroes' attack sounds play Return of the King's instead, chained combo swings included."
 group = "The Two Towers"
 default_enabled = false
 

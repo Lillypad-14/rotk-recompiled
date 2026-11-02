@@ -584,9 +584,18 @@ How to run it:
   call and the host mixes the ROTK sample as a mod audio clip (65,536 Hz, gain = the Two Towers'
   sfx volume +0x0D of *0x0803DCB4, honouring its sound-off bit 2 of +0x0C). ROTK side: SfxEntries
   0x08289450 -> SfxSingles 0x08287DF8 / SfxVariantSets 0x08288010 -> SoundData 0x082808D4; a
-  sample is +0 loop, +4 end, +8 rate (0x4000 = 16,384 Hz), +12 flags, u8 data from +16. Swaps so
-  far: gem pickup, Two Towers 0x58 (after the gem add at 0x08025996, player +0x0C capped 0xFFFF)
-  -> ROTK 0x29 (sound 12, 0.6 s). Checked headless: the clip decodes (a decaying chime), and with
+  sample is +0 loop, +4 end, +8 rate (0x4000 = 16,384 Hz), +12 flags, u8 data from +16. Swaps
+  (`kSwaps`, by id and/or caller range; the hook logs the caller): gem 0x58 -> 0x29, item/artifact
+  0x63 -> 0x2D, health/spirit pickup 0x62 -> 0x2F, pickup refused (0x79 from 0x08025716 only; 0x79
+  is also the menus' error) -> 0x2A, chest 0x87 -> 0x10A, level up 0x70 -> 0x11A, missile hit 0x57
+  -> 0x13, and melee results by call site in 0x0800CD94 (ids come from the foe type's 0x24-byte
+  row): 0x0800D04C hit (+0x1A) -> 0x07, 0x0800D010 critical (+0x1C) -> 0x11, 0x0800D1CC miss
+  (+0x20) -> 0x0A. Hero sounds: per-hero tables of 4 ids, the Two Towers' 0x080502B8 and ROTK's
+  0x080585D4 (same order and layout; entry 0 at an attack's start, ROTK also on each combo swing),
+  swapped entry by entry from player_tick; chained combo swings call `rotkSoundsHeroSwing` (they
+  had no sound). Enemy voices (0x98..0x9B from 0x08002xxx) and menus are untouched. Fight check:
+  33 clips decode; attack start, 18 chained swings, hits, misses and a crit all swapped, unmapped
+  unchanged (26). Checked headless: the clip decodes (a decaying chime), and with
   `ROTK_TTT_TEST_SWAP=98` (an id the fight check plays) each call skips the Two Towers sound and
   starts the clip with the game running on; no gem pickup reached headless yet, and nobody has
   heard it in a window. `ROTK_TTT_TRACE_SFX=1` logs every id played, `ROTK_TTT_SFX_WAV=<folder>`
