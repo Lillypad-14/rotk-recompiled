@@ -218,6 +218,13 @@ group = "The Two Towers"
 default_enabled = false
 
 [[feature]]
+id = "ttt-rotk-skills"
+name = "ROTK skill animations in The Two Towers"
+description = "With ROTK heroes in The Two Towers on, the heroes' skills play their Return of the King animations. Off: The Two Towers' own skill animations, recolored to match."
+group = "The Two Towers"
+default_enabled = true
+
+[[feature]]
 id = "ttt-rotk-portraits"
 name = "ROTK portraits in The Two Towers"
 description = "When you switch to The Two Towers, the heroes, Sam, Smeagol, Eomer and Theoden speak with their Return of the King dialog portraits."
@@ -3989,6 +3996,10 @@ id = "rotk.pc.color-vision"
 [[plugin]]
 feature = "ttt-rotk-sprites"
 id = "rotk.pc.ttt-rotk-sprites"
+
+[[plugin]]
+feature = "ttt-rotk-skills"
+id = "rotk.pc.ttt-rotk-skills"
 
 [[plugin]]
 feature = "ttt-rotk-portraits"

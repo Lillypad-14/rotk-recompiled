@@ -163,6 +163,11 @@ constexpr PortraitSwap kPortraitSwaps[] = {
 };
 
 // Converted data in host RAM, past the plain host's own use of its first page.
+// The NPC heroes' pose tables (cutscenes, allies): 0x0832A480 is hero * 4 + {walk, stand, flinch,
+// attack (Gimli: cast)}, 0x0832A500.. other NPC sets; entries that are the player pose table's arrays
+// are answered with the converted ones, so NPC heroes are drawn with ROTK art in the ROTK palette
+// they already load (Two Towers art in it looked broken).
+constexpr std::uint32_t kNpcPoseTables = 0x0832A480u, kNpcPoseTablesEnd = 0x0832A5B0u;
 constexpr std::uint32_t kDataBase = 0x12100000u;
 constexpr std::uint32_t kMagic = 0x53544B52u;  // "RKTS"
 
@@ -170,6 +175,8 @@ struct State {
     bool enabled = false;
     // the hero sprites (ROTK_TTT_ROTK_SPRITES=1) and the dialog portraits (ROTK_TTT_ROTK_PORTRAITS=1), each optional
     bool sprites = false, portraitsOn = false;
+    // the heroes' skill animations too (ROTK_TTT_ROTK_SKILLS=1, with the sprites)
+    bool skillArt = false;
     Bytes rotk;
     Bytes image;  // written at kDataBase
     std::uint32_t poseTable = 0, palettes = 0, blankWeapon = 0;
@@ -198,6 +205,12 @@ struct State {
     ComboSwap comboSwap[kPlayers];
     // code literals that load a special animation, and the converted facing array each answers with
     std::vector<std::pair<std::uint32_t, std::uint32_t>> literals;
+    // per literal (same order): the Two Towers' own animation recolored to the ROTK hero palette,
+    // answered when the ROTK skill animations are off (the hero palette is ROTK's either way)
+    std::vector<std::uint32_t> literalsTt;
+    // the pose table's Two Towers facing arrays and the converted ones (sorted by the first): the
+    // NPC heroes' tables (kNpcPoseTables) hold the same arrays
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> poseArrays;
     std::uint32_t literalsLow = ~0u, literalsHigh = 0;
     // the records of weapons with ROTK art (sorted), drawn in weaponColors
     std::vector<std::uint32_t> weaponRecords;
@@ -308,11 +321,29 @@ std::vector<Box> scaleBoxes(const TtBoxes& tt, std::uint32_t outCount)
 // Bodies with a Two Towers source (fromTt) take both of its slots: 0 the hurt box (held frame by
 // frame), 1 the attack box (each boxed frame once, scaled), so the heroes are hit and hit as in the
 // stock game; ROTK's own body boxes differ (Gandalf's hurt box smaller, Aragorn's sweep hittable).
+// fromTt bodies also take the Two Towers' hotspots (per frame, held): effects spawn at hotspot 0
+// (0x08001A2C; Gimli's thrown axe, Frodo's knife), and ROTK's frames have other ones or none.
 struct BoxPlan {
     bool weapon = false;
     bool fromTt = false;
     TtBoxes tt, ttHurt;
+    std::uint32_t ttSpotCount = 0;
+    std::vector<Bytes> ttSpots;  // per Two Towers frame, 2 bytes per hotspot
 };
+
+// A Two Towers animation's hotspots, per frame.
+void ttHotspots(std::uint32_t animation, BoxPlan& plan)
+{
+    const std::uint32_t frameSet = bus_read_u32(animation + 4);
+    const std::uint32_t count = bus_read_u16(frameSet + 6);
+    plan.ttSpotCount = bus_read_u8(frameSet + 10);
+    plan.ttSpots.assign(count, Bytes());
+    for (std::uint32_t f = 0; f < count; ++f) {
+        const std::uint32_t at = frameSet + 12 + bus_read_u16(frameSet + 12 + f * 2) + 6;
+        for (std::uint32_t i = 0; i < plan.ttSpotCount * 2; ++i)
+            plan.ttSpots[f].push_back(static_cast<std::uint8_t>(bus_read_u8(at + i)));
+    }
+}
 
 // ROTK frame f's box k (6 bytes) as a Two Towers box (8 bytes).
 Box rotkBox(const Bytes& rom, std::uint32_t frameSet, std::uint32_t f, std::uint32_t k)
@@ -396,7 +427,8 @@ Converted convert(const Bytes& rom, std::uint32_t animation, const BoxPlan& plan
         put16(b, offset);
         // ROTK frames: hotspots, 6-byte trigger boxes, then pieces
         std::uint32_t p = frame + 8;
-        for (std::uint32_t h = 0; h < hotspots * 2; ++h) b.push_back(static_cast<std::uint8_t>(r8(rom, p + h)));
+        if (!plan.fromTt)
+            for (std::uint32_t h = 0; h < hotspots * 2; ++h) b.push_back(static_cast<std::uint8_t>(r8(rom, p + h)));
         p += 2 * hotspots;
         p += 6 * boxes;
         for (std::uint32_t k = 0; k < pieces; ++k) {
@@ -415,15 +447,22 @@ Converted convert(const Bytes& rom, std::uint32_t animation, const BoxPlan& plan
         frames.push_back(std::move(b));
     }
     while (!frames.empty() && frames.size() < outCount) frames.push_back(frames.back());
+    const std::uint32_t outSpots = plan.fromTt ? plan.ttSpotCount : hotspots;
+    const std::uint32_t spotFrames = static_cast<std::uint32_t>(plan.ttSpots.size());
     // each frame: head and hotspots, its boxes, then pieces
     for (std::uint32_t f = 0; f < frames.size(); ++f) {
+        if (plan.fromTt && outSpots) {
+            const Bytes& spots = plan.ttSpots[std::min(spotFrames - 1, f * spotFrames / static_cast<std::uint32_t>(frames.size()))];
+            frames[f].insert(frames[f].begin() + 6, spots.begin(), spots.end());
+        }
         Bytes boxBytes;
         for (const Box& box : frameBoxes[f]) boxBytes.insert(boxBytes.end(), box.begin(), box.end());
-        frames[f].insert(frames[f].begin() + 6 + 2 * hotspots, boxBytes.begin(), boxBytes.end());
+        frames[f].insert(frames[f].begin() + 6 + 2 * outSpots, boxBytes.begin(), boxBytes.end());
     }
     for (std::uint32_t i = 0; i < 12; ++i) out.frameSet.push_back(static_cast<std::uint8_t>(r8(rom, frameSet + i)));
     out.frameSet[6] = static_cast<std::uint8_t>(outCount);
     out.frameSet[7] = static_cast<std::uint8_t>(outCount >> 8);
+    out.frameSet[10] = static_cast<std::uint8_t>(outSpots);
     out.frameSet[11] = static_cast<std::uint8_t>(outBoxes);
     Bytes body;
     for (const Bytes& frame : frames) {
@@ -455,11 +494,108 @@ std::uint32_t convertFacings(Bytes& image, const Bytes& rom, std::uint32_t entry
             plan.fromTt = true;
             plan.ttHurt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 0);
             plan.tt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 1);
+            ttHotspots(bus_read_u32(ttFacings + facing * 4u), plan);
         }
         const Converted c = convert(rom, entry + facing * kRecordSize, plan);
         Bytes record;
         put32(record, append(image, c.tiles));
         put32(record, append(image, c.frameSet));
+        put32(facings, append(image, record));
+    }
+    return append(image, facings);
+}
+
+// The Two Towers' sprite tile stream (flag 0x40): ROTK's lz77 commands without the length bias.
+Bytes tttLz77(std::uint32_t p)
+{
+    Bytes out;
+    while (out.size() < 0x4000) {
+        const std::uint32_t c = bus_read_u8(p++);
+        if (c == 0) break;
+        if (c < 0x40) {
+            for (std::uint32_t i = 0; i < c; ++i) out.push_back(static_cast<std::uint8_t>(bus_read_u8(p++)));
+        } else if (c < 0x80) {
+            out.insert(out.end(), c & 0x3Fu, static_cast<std::uint8_t>(bus_read_u8(p++)));
+        } else {
+            const std::uint32_t o = bus_read_u8(p++);
+            const std::uint32_t d = (c & 0x7Fu) << 3 | o >> 5, n = o & 0x1Fu;
+            if (n == 0) out.insert(out.end(), d + 64u, static_cast<std::uint8_t>(bus_read_u8(p++)));
+            else for (std::uint32_t i = 0; i < n; ++i) out.push_back(d && d <= out.size() ? out[out.size() - d] : 0);
+        }
+    }
+    return out;
+}
+
+// A Two Towers facing array redrawn with its 4bpp colors mapped to the nearest of another palette's
+// (32 bytes, RGB555; color 0 stays clear). Tiles are stored raw; frames keep their hotspots, boxes
+// and pieces. Read with the ROM override off.
+std::uint32_t recolorFacings(Bytes& image, std::uint32_t ttFacings, const std::uint8_t* from, const std::uint8_t* to)
+{
+    auto rgb = [](const std::uint8_t* pal, int i, int c) {
+        const std::uint32_t v = pal[i * 2] | pal[i * 2 + 1] << 8;
+        return static_cast<int>(v >> (5 * c) & 31u);
+    };
+    std::uint8_t map[16] = {};
+    for (int i = 1; i < 16; ++i) {
+        int best = 1, bestDistance = 1 << 30;
+        for (int j = 1; j < 16; ++j) {
+            int distance = 0;
+            for (int c = 0; c < 3; ++c) distance += (rgb(from, i, c) - rgb(to, j, c)) * (rgb(from, i, c) - rgb(to, j, c));
+            if (distance < bestDistance) bestDistance = distance, best = j;
+        }
+        map[i] = static_cast<std::uint8_t>(best);
+    }
+    Bytes facings;
+    for (int facing = 0; facing < kFacings; ++facing) {
+        const std::uint32_t animation = bus_read_u32(ttFacings + facing * 4u);
+        const std::uint32_t tilesBase = bus_read_u32(animation), frameSet = bus_read_u32(animation + 4);
+        const std::uint32_t count = bus_read_u16(frameSet + 6), spots = bus_read_u8(frameSet + 10),
+                            boxes = bus_read_u8(frameSet + 11);
+        Bytes tiles, head, body;
+        for (std::uint32_t i = 0; i < 12; ++i) head.push_back(static_cast<std::uint8_t>(bus_read_u8(frameSet + i)));
+        for (std::uint32_t f = 0; f < count; ++f) {
+            const std::uint32_t frame = frameSet + 12 + bus_read_u16(frameSet + 12 + f * 2);
+            const std::uint32_t flags = bus_read_u8(frame), pieces = flags & 0x1Fu;
+            const std::uint32_t pieceAt = frame + 6 + 2 * spots + 8 * boxes;
+            std::uint32_t bytes = 0;
+            for (std::uint32_t k = 0; k < pieces; ++k) {
+                const std::uint32_t piece = pieceAt + 12 * k;
+                bytes = std::max(bytes, bus_read_u32(piece + 8) + bus_read_u8(piece + 6) * bus_read_u8(piece + 7) / 2u);
+            }
+            const std::uint32_t source = tilesBase + bus_read_u16(frame + 4);
+            Bytes data;
+            if (flags & 0x40u) {
+                data = tttLz77(source);
+            } else if (flags & 0x20u) {
+                const std::uint32_t size = std::min<std::uint32_t>(bus_read_u32(source) >> 8, 0x4000u);
+                std::uint32_t q = source + 4;
+                while (data.size() < size) {
+                    const std::uint32_t flag = bus_read_u8(q++);
+                    if (flag & 0x80u) data.insert(data.end(), (flag & 0x7Fu) + 3u, static_cast<std::uint8_t>(bus_read_u8(q++)));
+                    else for (std::uint32_t i = 0; i <= (flag & 0x7Fu); ++i) data.push_back(static_cast<std::uint8_t>(bus_read_u8(q++)));
+                }
+            } else {
+                for (std::uint32_t i = 0; i < bytes; ++i) data.push_back(static_cast<std::uint8_t>(bus_read_u8(source + i)));
+            }
+            data.resize(std::max<std::size_t>(data.size(), bytes), 0);
+            for (std::uint8_t& b : data) b = static_cast<std::uint8_t>(map[b & 15] | map[b >> 4] << 4);
+            const std::uint32_t offset = static_cast<std::uint32_t>(tiles.size());
+            tiles.insert(tiles.end(), data.begin(), data.end());
+            align4(tiles);
+            Bytes copy;
+            const std::uint32_t length = 6 + 2 * spots + 8 * boxes + 12 * pieces;
+            for (std::uint32_t i = 0; i < length; ++i) copy.push_back(static_cast<std::uint8_t>(bus_read_u8(frame + i)));
+            copy[0] = static_cast<std::uint8_t>(flags & ~0x60u);
+            copy[4] = static_cast<std::uint8_t>(offset);
+            copy[5] = static_cast<std::uint8_t>(offset >> 8);
+            put16(head, 2 * count + static_cast<std::uint32_t>(body.size()));
+            body.insert(body.end(), copy.begin(), copy.end());
+            while (body.size() % 2) body.push_back(0);
+        }
+        head.insert(head.end(), body.begin(), body.end());
+        Bytes record;
+        put32(record, append(image, tiles));
+        put32(record, append(image, head));
         put32(facings, append(image, record));
     }
     return append(image, facings);
@@ -604,6 +740,7 @@ void build()
             BoxPlan plan;
             plan.fromTt = true;
             plan.ttHurt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 0);
+            ttHotspots(bus_read_u32(ttFacings + facing * 4u), plan);
             if (strike) plan.tt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 1);
             const Converted c = convert(rom, entry + facing * kRecordSize, plan);
             Bytes record;
@@ -676,12 +813,22 @@ void build()
     g_state.blankWeapon = append(image, blankFacings);
     // the specials, and every code literal that loads one
     g_state.literals.clear();
+    g_state.literalsTt.clear();
     for (const Special& special : kSpecials) {
         const std::uint32_t bank = r32(rom, special.source.banks + special.hero * 4u);
         const std::uint32_t array = convertFacings(image, rom, r32(rom, bank + special.source.pose * 4u), special.array);
+        std::uint8_t from[32], to[32];
+        const std::uint32_t ttPalette = bus_read_u32(kHeroPalettes + special.hero * 4u);
+        const std::uint32_t rotkPalette = r32(rom, kObjPalettes + (kHeroPaletteBase + special.hero) * 4u);
+        for (std::uint32_t i = 0; i < 32; ++i) {
+            from[i] = static_cast<std::uint8_t>(bus_read_u8(ttPalette + i));
+            to[i] = static_cast<std::uint8_t>(r8(rom, rotkPalette + i));
+        }
+        const std::uint32_t recolored = recolorFacings(image, special.array, from, to);
         for (std::uint32_t a = kCodeStart; a < kCodeEnd; a += 4)
             if (bus_read_u32(a) == special.array) {
                 g_state.literals.emplace_back(a, array);
+                g_state.literalsTt.push_back(recolored);
                 g_state.literalsLow = std::min(g_state.literalsLow, a);
                 g_state.literalsHigh = std::max(g_state.literalsHigh, a);
             }
@@ -691,6 +838,13 @@ void build()
     std::sort(g_state.weaponRecords.begin(), g_state.weaponRecords.end());
     std::sort(g_state.idleTicks.begin(), g_state.idleTicks.end());
     std::sort(g_state.comboRecords.begin(), g_state.comboRecords.end());
+    g_state.poseArrays.clear();
+    for (int entry = 0; entry < kHeroes * kPoses; ++entry) {
+        std::uint32_t converted;
+        std::memcpy(&converted, poseTable.data() + entry * 4, 4);
+        g_state.poseArrays.emplace_back(bus_read_u32(kPoseTable + entry * 4u), converted);
+    }
+    std::sort(g_state.poseArrays.begin(), g_state.poseArrays.end());
     g_state.poseTable = append(image, poseTable);
     g_state.palettes = append(image, palettes);
     // FNV-1a of the image after its stamp, so a save state holding another build's image is replaced
@@ -768,6 +922,24 @@ void dumpBoxes()
             std::fprintf(stderr, "[body] hero %d pose %d: tt hurt %s atk %s | rotk hurt %s atk %s\n", hero, pose,
                          tt0.c_str(), tt1.c_str(), slot(ours, 0).c_str(), slot(ours, 1).c_str());
         }
+    // hotspot 0 per frame (facing 0), stock vs converted: effects spawn there (Axe Throw 0x08001A2C)
+    auto hotspots = [](std::uint32_t facings) {
+        const std::uint32_t frameSet = bus_read_u32(bus_read_u32(facings) + 4);
+        const std::uint32_t count = bus_read_u16(frameSet + 6), spots = bus_read_u8(frameSet + 10);
+        std::string text = std::to_string(spots) + "hs";
+        for (std::uint32_t f = 0; f < count && spots; ++f) {
+            const std::uint32_t at = frameSet + 12 + bus_read_u16(frameSet + 12 + f * 2) + 6;
+            text += " " + std::to_string(static_cast<std::int8_t>(bus_read_u8(at))) + "," +
+                    std::to_string(static_cast<std::int8_t>(bus_read_u8(at + 1)));
+        }
+        return text;
+    };
+    for (const auto& [literal, array] : g_state.literals) {
+        gba::g_rom_read32_override = nullptr;
+        const std::string ttSpots = hotspots(bus_read_u32(literal));
+        gba::g_rom_read32_override = romRead32;
+        std::fprintf(stderr, "[hotspots] %08X: tt %s | rotk %s\n", literal, ttSpots.c_str(), hotspots(array).c_str());
+    }
     for (const auto& [literal, array] : g_state.literals) {
         gba::g_rom_read32_override = nullptr;
         const std::uint32_t tt = bus_read_u32(literal);
@@ -878,17 +1050,24 @@ int romRead32(std::uint32_t address, std::uint32_t original, std::uint32_t* out)
     }
     if (address < kCodeEnd) {
         if (address < g_state.literalsLow || address > g_state.literalsHigh) return 0;
-        for (const auto& [literal, array] : g_state.literals)
-            if (literal == address) {
+        for (std::size_t n = 0; n < g_state.literals.size(); ++n)
+            if (const auto& [literal, array] = g_state.literals[n]; literal == address) {
                 ensureWritten();
                 // ROTK_TTT_TRACE_SPECIAL=1 logs each special read, with the game frame
                 if (std::getenv("ROTK_TTT_TRACE_SPECIAL"))
                     std::fprintf(stderr, "[special] %08X at %u\n", address,
                                  bus_read_u32(bus_read_u32(kGameStatePointer) + kGameFrame));
-                *out = array;
+                *out = g_state.skillArt ? array : g_state.literalsTt[n];
                 return 1;
             }
         return 0;
+    }
+    if (address >= kNpcPoseTables && address < kNpcPoseTablesEnd) {
+        const auto it = std::lower_bound(g_state.poseArrays.begin(), g_state.poseArrays.end(), std::make_pair(original, 0u));
+        if (it == g_state.poseArrays.end() || it->first != original) return 0;
+        ensureWritten();
+        *out = it->second;
+        return 1;
     }
     if (address >= kWeaponPoseTable && address < kWeaponPoseTable + kWeaponEntries * 4u) {
         ensureWritten();
@@ -926,6 +1105,11 @@ int composeEntry(std::uint32_t, int, ArmCpuState* cpu)
 {
     const std::uint32_t record = bus_read_u32(cpu->R[0] + kActorRecord);
     g_state.actorWeapon = std::binary_search(g_state.weaponRecords.begin(), g_state.weaponRecords.end(), record);
+    // ROTK_TTT_TRACE_ACTORS=1 logs each drawn actor: tick callback, record, palette bits (+0xE1)
+    if (std::getenv("ROTK_TTT_TRACE_ACTORS"))
+        std::fprintf(stderr, "[actor] f=%u a=%08X tick=%08X rec=%08X e1=%02X 9a=%02X\n",
+                     bus_read_u32(bus_read_u32(kGameStatePointer) + kGameFrame), cpu->R[0],
+                     bus_read_u32(cpu->R[0] + 0x14), record, bus_read_u8(cpu->R[0] + 0xE1), bus_read_u8(cpu->R[0] + 0x9A));
     // ROTK_TTT_TRACE_HITS=1 logs each tick player 0's weapon shows a frame with a strike box (each
     // such tick can roll a hit, 0x08010ED4)
     if (std::getenv("ROTK_TTT_TRACE_HITS")) {
@@ -1004,6 +1188,10 @@ int oamCopyEntry(std::uint32_t, int, ArmCpuState*)
         if (std::getenv("ROTK_TTT_SKILL_TEST_SHIELD"))
             bus_write_u8(kPlayer + 0x19, bus_read_u8(kPlayer + 0x19) | 8u);
     }
+    // ROTK_TTT_TEST_HERO=N (tests): player 0 is hero N (player +0x1A), e.g. 5 for Gimli, who is not
+    // on a new game's hero select; set from boot, so the level spawns his weapon
+    if (const char* hero = std::getenv("ROTK_TTT_TEST_HERO"))
+        bus_write_u8(0x03003640u + 0x1A, static_cast<std::uint8_t>(std::atoi(hero)));
     if (const char* dump = std::getenv("ROTK_TTT_DUMP_PLAYER")) {
         static int frames = 0;
         if (++frames == std::atoi(dump))
@@ -1050,6 +1238,7 @@ void rotkSpritesRegister()
     };
     g_state.sprites = on("ROTK_TTT_ROTK_SPRITES");
     g_state.portraitsOn = on("ROTK_TTT_ROTK_PORTRAITS");
+    g_state.skillArt = g_state.sprites && on("ROTK_TTT_ROTK_SKILLS");
     const char* path = std::getenv("ROTK_TTT_ROTK_ROM");
     if ((!g_state.sprites && !g_state.portraitsOn) || !path) return;
     std::ifstream file(path, std::ios::binary);
