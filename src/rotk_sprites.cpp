@@ -1,6 +1,7 @@
 #include "rotk_sprites.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -30,6 +31,12 @@ constexpr int kHeroes = 6, kPoses = 6, kFacings = 5;
 constexpr std::uint32_t kWeaponPoseTable = 0x083314A0u;
 constexpr int kWeaponEntries = 84;
 constexpr std::uint32_t kBlankFrames = 64;
+constexpr int kWeaponKindsPerHero = 2;
+// ROTK hand part of each hero's main weapon (actor_player_updateHandSprites): sword, bow, sword,
+// staff, sword, axe. Drawn in ROTK's weapons palette (OBJ bank 2) remapped to the hero's colors, as
+// the Two Towers draws the weapon part in the hero's palette.
+constexpr std::uint32_t kWeaponPart[kHeroes] = {1, 1, 1, 1, 1, 1};
+constexpr std::uint32_t kWeaponsPalette = 2;
 enum Pose { kWalk, kStand, kAttack, kDeath, kFlinch, kCast };
 
 // ROTK: per hero a bank of part * 7 + pose entries, each 5 inline 16-byte SpriteAnimation records.
@@ -61,6 +68,7 @@ struct State {
     Bytes rotk;
     Bytes image;  // written at kDataBase
     std::uint32_t poseTable = 0, palettes = 0, blankWeapon = 0;
+    std::uint32_t weaponTable[kWeaponEntries] = {};
 };
 State g_state;
 
@@ -148,8 +156,10 @@ AttackBox ttAttackBox(std::uint32_t animation)
 }
 
 // A ROTK animation in the Two Towers' format (raw tiles, 12-byte pieces, 8-byte boxes), with an
-// attack box on the strike frame when one is given.
-Converted convert(const Bytes& rom, std::uint32_t animation, const AttackBox& attack)
+// attack box on the strike frame when one is given, its colors through remap when given (16 entries)
+// and at least minFrames frames (the last repeated).
+Converted convert(const Bytes& rom, std::uint32_t animation, const AttackBox& attack,
+                  const std::uint8_t* remap = nullptr, std::uint32_t minFrames = 0)
 {
     Converted out;
     const std::uint32_t tilesBase = r32(rom, animation), frameSet = r32(rom, animation + 4);
@@ -167,6 +177,8 @@ Converted convert(const Bytes& rom, std::uint32_t animation, const AttackBox& at
                                        : Bytes(rom.begin() + std::min<std::size_t>(source, rom.size()),
                                                rom.begin() + std::min<std::size_t>(source + tileBytes, rom.size()));
         data.resize(tileBytes, 0);
+        if (remap)
+            for (std::uint8_t& byte : data) byte = static_cast<std::uint8_t>(remap[byte & 15] | remap[byte >> 4] << 4);
         const std::uint32_t offset = static_cast<std::uint32_t>(out.tiles.size());
         out.tiles.insert(out.tiles.end(), data.begin(), data.end());
         align4(out.tiles);
@@ -205,11 +217,15 @@ Converted convert(const Bytes& rom, std::uint32_t animation, const AttackBox& at
         }
         frames.push_back(std::move(b));
     }
+    while (!frames.empty() && frames.size() < minFrames) frames.push_back(frames.back());
+    const std::uint32_t outCount = static_cast<std::uint32_t>(frames.size());
     for (std::uint32_t i = 0; i < 12; ++i) out.frameSet.push_back(static_cast<std::uint8_t>(r8(rom, frameSet + i)));
+    out.frameSet[6] = static_cast<std::uint8_t>(outCount);
+    out.frameSet[7] = static_cast<std::uint8_t>(outCount >> 8);
     out.frameSet[11] = static_cast<std::uint8_t>(outBoxes);
     Bytes body;
     for (const Bytes& frame : frames) {
-        put16(out.frameSet, 2 * count + static_cast<std::uint32_t>(body.size()));
+        put16(out.frameSet, 2 * outCount + static_cast<std::uint32_t>(body.size()));
         body.insert(body.end(), frame.begin(), frame.end());
         if (body.size() % 2) body.push_back(0);
     }
@@ -224,6 +240,30 @@ std::uint32_t append(Bytes& image, const Bytes& data)
     const std::uint32_t at = kDataBase + static_cast<std::uint32_t>(image.size());
     image.insert(image.end(), data.begin(), data.end());
     return at;
+}
+
+std::array<int, 3> rgb(const Bytes& rom, std::uint32_t palette, int index)
+{
+    const std::uint32_t c = r16(rom, palette + index * 2);
+    return {static_cast<int>(c & 31), static_cast<int>(c >> 5 & 31), static_cast<int>(c >> 10 & 31)};
+}
+
+// Each color of one ROTK palette as the nearest color of another (0 stays clear).
+std::array<std::uint8_t, 16> nearestColors(const Bytes& rom, std::uint32_t from, std::uint32_t to)
+{
+    std::array<std::uint8_t, 16> map = {};
+    for (int c = 1; c < 16; ++c) {
+        const auto want = rgb(rom, from, c);
+        int best = 1, bestDistance = 1 << 30;
+        for (int t = 1; t < 16; ++t) {
+            const auto have = rgb(rom, to, t);
+            const int d = (want[0] - have[0]) * (want[0] - have[0]) + (want[1] - have[1]) * (want[1] - have[1]) +
+                          (want[2] - have[2]) * (want[2] - have[2]);
+            if (d < bestDistance) best = t, bestDistance = d;
+        }
+        map[c] = static_cast<std::uint8_t>(best);
+    }
+    return map;
 }
 
 void build()
@@ -251,6 +291,28 @@ void build()
             std::memcpy(poseTable.data() + (hero * kPoses + pose) * 4, &array, 4);
         }
         const std::uint32_t palette = r32(rom, kObjPalettes + (kHeroPaletteBase + hero) * 4u);
+        // the weapon part: the hero's main weapon in each pose, as many frames as the body has
+        const auto remap = nearestColors(rom, r32(rom, kObjPalettes + kWeaponsPalette * 4u), palette);
+        for (int pose = 0; pose < kPoses; ++pose) {
+            const Source& source = kSources[pose];
+            const std::uint32_t bank = r32(rom, source.banks + hero * 4u);
+            const std::uint32_t body = r32(rom, bank + source.pose * 4u);
+            const std::uint32_t entry = r32(rom, bank + (kWeaponPart[hero] * 7u + source.pose) * 4u);
+            if (entry < kRomBase || entry >= kRomBase + rom.size()) continue;
+            Bytes facings;
+            for (int facing = 0; facing < kFacings; ++facing) {
+                const std::uint32_t bodyFrames = r16(rom, r32(rom, body + facing * kRecordSize + 4) + 6);
+                const Converted c = convert(rom, entry + facing * kRecordSize, AttackBox{}, remap.data(), bodyFrames);
+                Bytes record;
+                put32(record, append(image, c.tiles));
+                put32(record, append(image, c.frameSet));
+                put32(facings, append(image, record));
+            }
+            const std::uint32_t array = append(image, facings);
+            // Legolas's bow for both his kinds, the other heroes' weapon for their odd kind
+            for (int kind = hero * kWeaponKindsPerHero; kind < (hero + 1) * kWeaponKindsPerHero; ++kind)
+                if (hero == 1 || kind % 2 == 1) g_state.weaponTable[kind * kPoses + pose] = array;
+        }
         Bytes colors;
         for (std::uint32_t i = 0; i < 32; ++i) colors.push_back(static_cast<std::uint8_t>(r8(rom, palette + i)));
         put32(palettes, append(image, colors));
@@ -291,7 +353,8 @@ int romRead32(std::uint32_t address, std::uint32_t, std::uint32_t* out)
     }
     if (address >= kWeaponPoseTable && address < kWeaponPoseTable + kWeaponEntries * 4u) {
         ensureWritten();
-        *out = g_state.blankWeapon;
+        const std::uint32_t weapon = g_state.weaponTable[(address - kWeaponPoseTable) / 4u];
+        *out = weapon ? weapon : g_state.blankWeapon;
         return 1;
     }
     if (address >= kHeroPalettes && address < kHeroPalettes + kHeroes * 4u) {
