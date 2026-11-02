@@ -592,7 +592,7 @@ gba::g_rom_read32_override:
 - ROTK frames are hotspots, then 6-byte boxes, then pieces (SPRITE_FRAME_RECORD in the ROTK
   decomp), the same order as the Two Towers';
 - the image's second word is its hash, so a save state holding another build's image is rewritten;
-- 23 skill animations the heroes' code loads as literals (kSpecials), each mapped by eye to a ROTK
+- 23 skill animations the heroes' code loads as literals (kSpecials, 24 literals), each mapped by eye to a ROTK
   melee or cast pose.
 
 Known problems, in order:
@@ -616,18 +616,25 @@ Known problems, in order:
    weapon's every tick, and the attack still lasts the Two Towers' 20 frames, so ROTK's recoveries
    (melee 1/3) and its longer third swing are not played out. Each swing forced alone killed in
    the fight check; the kill times vary with how the fight goes, not with the swing.
-5. The specials mapping is a guess per animation; verify each skill in play. Findings (2026-11-02):
-   `ROTK_TTT_TRACE_SPECIAL=1` logs each special read with the game frame. Tapping A from the
-   five hero states reads none: each hero has one starting skill, which uses the cast pose, and
-   one cast empties the spirit. Testing the specials needs each skill learned, selected and the
-   spirit refilled (player +0x0A spirit, +0x1F skill being cast, skill levels per ttt_save.py; the
-   selected-skill field and the player's RAM address are not found yet). By skill (fact sheets in
-   rotk/build/ttt/skills): Frodo knife throw 0x0832923C, escape 0x08329250/64, snare 0x083292C8,
-   charge 0x083292DC/F0; Legolas white knives 0x0832937C, overdraw 0x08329390; Aragorn sword
-   throw 0x08329444, sweep 0x08329458; Gimli axe throw 0x08329584, whirlwind 0x08329598; Eowyn
-   shield bash 0x08329624, double strike 0x08329638. Not skills: Aragorn's 0x0832946C (state
-   0x1B when player +0x9E bit 0) and 0x083293E0 (replaces his pose 2 when hero record +0x19 has
-   bits 2 and 4) are pose variants in player_tick; Frodo's 0x08329278 is read in Gandalf's second
-   spell table; Frodo's 0x0832928C/A0/B4 are never referenced (dead).
+5. Specials (fixed and checked 2026-11-02): the converter used to run in the reset callback,
+   before the cart is mapped, so every Two Towers read in build() gave 0: no special literal was
+   found (the skills drew the Two Towers' own art in ROTK colors) and the Two Towers' attack
+   boxes in the body and weapon plans were empty. The image is now built on the first ROM read.
+   The skills' cast functions, reached only through the skill cast table 0x08057AB0, are now
+   extra_funcs in config/ttt.toml. Checked headless with `ROTK_TTT_SKILL_TEST=N` (player 0 knows
+   and selects skill N, spirit full, casting unblocked; `ROTK_TTT_SKILL_TEST_SHIELD=1` adds a
+   shield) and `ROTK_TTT_TRACE_SPECIAL=1` (logs each special read), from the hero states, tapping
+   A every 60 frames: every mapped special of Frodo, Legolas, Aragorn, Gandalf and Eowyn plays
+   ROTK art in ROTK colors with no unmapped code (Legolas's White Knives: 2 unmapped reads). Which
+   skill plays which: Frodo escape 0x08329250/64 + 0x08329278, charge 0x083292DC/F0, knife throw
+   0x0832923C, snare 0x083292C8; Legolas overdraw 0x08329390, white knives 0x0832937C; Aragorn
+   sword throw 0x08329444, sweep 0x08329458; Gandalf skills 5, 6, 8 0x0832950C (a spin), 7, 9, 10
+   0x083294F8 (a ground slam); Eowyn shield bash 0x08329624, double strike 0x08329638. Player
+   record (0x03003640 + 0x128 * player): +0x0A spirit, +0x6E its maximum, +0x19 bit 3 shield,
+   +0x1E selected skill, +0x1F skill being cast, +0x21 bit 1 blocks casting (set in Frodo's and
+   Eowyn's starting levels), skill levels at +0x25 + N and +0x30 + N. Not checked: Gimli (no
+   state), Aragorn's two pose variants 0x0832946C (state 0x1B when player +0x9E bit 0) and
+   0x083293E0 (his pose 2 when the hero record's +0x19 has bits 2 and 4). Frodo's 0x0832928C/A0/B4
+   are never referenced. The mapping still is by eye; the motions match the skills.
 6. Not converted: HUD portraits, menus, other characters. Animation timing: ROTK walk and swing play
    at the Two Towers' 1 tick per frame (as ROTK); idle is 3 ticks per frame (ROTK uses 2).

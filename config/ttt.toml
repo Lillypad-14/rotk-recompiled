@@ -313,3 +313,330 @@ note = "self-heal miss, bridged x2"
 addr = 0x08033DD0
 mode = "thumb"
 note = "self-heal miss, bridged x1"
+
+# The skills' cast functions, reached only through the skill cast table (0x08057AB0, 11 per hero).
+
+[[extra_func]]
+addr = 0x0803A52C
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 26"
+
+[[extra_func]]
+addr = 0x0803A5BC
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 24"
+
+[[extra_func]]
+addr = 0x0803A714
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 22"
+
+[[extra_func]]
+addr = 0x0803A788
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 25"
+
+[[extra_func]]
+addr = 0x0803A84C
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 23"
+
+[[extra_func]]
+addr = 0x0803A928
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 34"
+
+[[extra_func]]
+addr = 0x0803A98C
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 36"
+
+[[extra_func]]
+addr = 0x0803AA20
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 33"
+
+[[extra_func]]
+addr = 0x0803AAB4
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 35"
+
+[[extra_func]]
+addr = 0x0803AB28
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 14"
+
+[[extra_func]]
+addr = 0x0803AB90
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 11"
+
+[[extra_func]]
+addr = 0x0803AC08
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 12"
+
+[[extra_func]]
+addr = 0x0803AC80
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 13"
+
+[[extra_func]]
+addr = 0x0803ACF4
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 15"
+
+[[extra_func]]
+addr = 0x0803AD84
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 4"
+
+[[extra_func]]
+addr = 0x0803ADF8
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 0"
+
+[[extra_func]]
+addr = 0x0803AEE4
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 1"
+
+[[extra_func]]
+addr = 0x0803AFB0
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 2"
+
+[[extra_func]]
+addr = 0x0803B044
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 3"
+
+[[extra_func]]
+addr = 0x0803B0B8
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 59"
+
+[[extra_func]]
+addr = 0x0803B12C
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 56"
+
+[[extra_func]]
+addr = 0x0803B1A0
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 57"
+
+[[extra_func]]
+addr = 0x0803B214
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 55"
+
+[[extra_func]]
+addr = 0x0803B28C
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 58"
+
+[[extra_func]]
+addr = 0x0803B300
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 60"
+
+[[extra_func]]
+addr = 0x0803B374
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 45"
+
+[[extra_func]]
+addr = 0x0803B3E8
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 46"
+
+[[extra_func]]
+addr = 0x0803B4AC
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 44"
+
+[[extra_func]]
+addr = 0x0803B590
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 47"
+
+[[extra_func]]
+addr = 0x0803B630
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 48"
+
+[[extra_func]]
+addr = 0x0803B6A4
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 32"
+
+[[extra_func]]
+addr = 0x0803B6FC
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 31"
+
+[[extra_func]]
+addr = 0x0803B754
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 28"
+
+[[extra_func]]
+addr = 0x0803B7B4
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 29"
+
+[[extra_func]]
+addr = 0x0803B81C
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 30"
+
+[[extra_func]]
+addr = 0x0803B8D4
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 20"
+
+[[extra_func]]
+addr = 0x0803B934
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 18"
+
+[[extra_func]]
+addr = 0x0803B98C
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 19"
+
+[[extra_func]]
+addr = 0x0803B9E4
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 21"
+
+[[extra_func]]
+addr = 0x0803BA44
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 40"
+
+[[extra_func]]
+addr = 0x0803BAA0
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 43"
+
+[[extra_func]]
+addr = 0x0803BB1C
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 38"
+
+[[extra_func]]
+addr = 0x0803BB8C
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 41"
+
+[[extra_func]]
+addr = 0x0803BC04
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 42"
+
+[[extra_func]]
+addr = 0x0803BC78
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 39"
+
+[[extra_func]]
+addr = 0x0803BCF0
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 7"
+
+[[extra_func]]
+addr = 0x0803BD48
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 10"
+
+[[extra_func]]
+addr = 0x0803BDD0
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 6"
+
+[[extra_func]]
+addr = 0x0803BE30
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 9"
+
+[[extra_func]]
+addr = 0x0803BE88
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 51"
+
+[[extra_func]]
+addr = 0x0803BEE8
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 53"
+
+[[extra_func]]
+addr = 0x0803BF4C
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 54"
+
+[[extra_func]]
+addr = 0x0803BFA8
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 50"
+
+[[extra_func]]
+addr = 0x0803C010
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 52"
+
+[[extra_func]]
+addr = 0x0803C070
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 65"
+
+[[extra_func]]
+addr = 0x0803C0D0
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 63"
+
+[[extra_func]]
+addr = 0x0803C138
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 62"
+
+[[extra_func]]
+addr = 0x0803C310
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 5"
+
+[[extra_func]]
+addr = 0x0803C368
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 8"
+
+[[extra_func]]
+addr = 0x0803C3B4
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 16"
+
+[[extra_func]]
+addr = 0x0803C404
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 17"
+
+[[extra_func]]
+addr = 0x0803C4F8
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 37"
+
+[[extra_func]]
+addr = 0x0803C544
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 64"
+
+[[extra_func]]
+addr = 0x0803C590
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 61"
+
+[[extra_func]]
+addr = 0x0803C5E0
+mode = "thumb"
+note = "skill cast table 0x08057AB0 entry 49"

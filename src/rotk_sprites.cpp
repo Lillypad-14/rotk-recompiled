@@ -524,7 +524,8 @@ void build()
     std::uint32_t hash = 2166136261u;
     for (std::size_t i = 8; i < image.size(); ++i) hash = (hash ^ image[i]) * 16777619u;
     std::memcpy(image.data() + 4, &hash, 4);
-    std::fprintf(stderr, "[ttt] ROTK hero sprites: %zu KiB\n", image.size() / 1024);
+    std::fprintf(stderr, "[ttt] ROTK hero sprites: %zu KiB, %zu special literals\n", image.size() / 1024,
+                 g_state.literals.size());
 }
 
 // The image in host RAM, rewritten when the boot, a reset or a save state replaced it.
@@ -554,6 +555,13 @@ std::uint32_t comboAttack(int hero)
 
 int romRead32(std::uint32_t address, std::uint32_t, std::uint32_t* out)
 {
+    // built on the first ROM read: the cart is not mapped yet when reset runs. The build reads the
+    // Two Towers' own tables, so without the override.
+    if (g_state.image.empty()) {
+        gba::g_rom_read32_override = nullptr;
+        build();
+        gba::g_rom_read32_override = romRead32;
+    }
     if (address >= kPoseTable && address < kPoseTable + kHeroes * kPoses * 4u) {
         ensureWritten();
         const std::uint32_t entry = (address - kPoseTable) / 4u;
@@ -621,6 +629,34 @@ int oamCopyEntry(std::uint32_t, int, ArmCpuState*)
 {
     g_state.displayed = g_state.pending;
     g_state.pending.fill(false);
+    // ROTK_TTT_SKILL_TEST=N (tests): player 0 knows and selects skill N, spirit kept full. Player
+    // records at 0x03003640, 0x128 apart: +0x0A spirit, +0x6E its maximum, +0x1E the selected
+    // skill, skill levels at +0x25 + N and +0x30 + N.
+    if (const char* test = std::getenv("ROTK_TTT_SKILL_TEST")) {
+        constexpr std::uint32_t kPlayer = 0x03003640u;
+        const std::uint32_t skill = static_cast<std::uint32_t>(std::atoi(test));
+        bus_write_u8(kPlayer + 0x1E, static_cast<std::uint8_t>(skill));
+        if (bus_read_u8(kPlayer + 0x25 + skill) == 0) bus_write_u8(kPlayer + 0x25 + skill, 1);
+        if (bus_read_u8(kPlayer + 0x30 + skill) == 0) bus_write_u8(kPlayer + 0x30 + skill, 1);
+        bus_write_u16(kPlayer + 0x0A, bus_read_u16(kPlayer + 0x6E));
+        // +0x21 bit 1 blocks casting (set in Frodo's and Eowyn's starting levels)
+        bus_write_u8(kPlayer + 0x21, bus_read_u8(kPlayer + 0x21) & ~2u);
+        // +0x19 bit 3: a shield is worn (Eowyn's Shield Bash needs one)
+        if (std::getenv("ROTK_TTT_SKILL_TEST_SHIELD"))
+            bus_write_u8(kPlayer + 0x19, bus_read_u8(kPlayer + 0x19) | 8u);
+    }
+    if (const char* dump = std::getenv("ROTK_TTT_DUMP_PLAYER")) {
+        static int frames = 0;
+        if (++frames == std::atoi(dump))
+            for (std::uint32_t p = 0; p < 2; ++p) {
+                std::fprintf(stderr, "[player %u]", p);
+                for (std::uint32_t i = 0; i < 0x128; ++i) {
+                    if (i % 32 == 0) std::fprintf(stderr, "\n  %03X:", i);
+                    std::fprintf(stderr, " %02X", bus_read_u8(0x03003640u + p * 0x128u + i));
+                }
+                std::fprintf(stderr, "\n");
+            }
+    }
     return 0;
 }
 
@@ -631,10 +667,8 @@ const std::uint8_t* paletteProvider(std::uint32_t index)
 
 void reset()
 {
-    // built from the Two Towers' own tables, so before the override answers for them
     gba::g_rom_read32_override = nullptr;
     if (!g_state.enabled) return;
-    if (g_state.image.empty()) build();
     gba::g_rom_read32_override = romRead32;
     g_state.actorWeapon = false;
     std::fill(std::begin(g_state.comboStep), std::end(g_state.comboStep), 0);
