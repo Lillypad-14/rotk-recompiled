@@ -36,7 +36,8 @@ constexpr std::uint32_t kSaveSlotsField = 0x20 + 4 * kPackageForLanguage.size();
 constexpr std::uint32_t kIconsField = kSaveSlotsField + 8;
 constexpr std::uint32_t kSkillArtField = kIconsField + 4;
 constexpr std::uint32_t kSpritesField = kSkillArtField + 4;
-constexpr std::uint32_t kHeaderSize = kSpritesField + 8;
+constexpr std::uint32_t kSkillColorsField = kSpritesField + 8;
+constexpr std::uint32_t kHeaderSize = kSkillColorsField + 4;
 // Backpack icons: a 16-byte SpriteAnimation per base item (tiles, frame set, palette pointers and
 // a frame duration). Frame 0 is the 24x24 backpack icon: a gold bevel around a dark green fill.
 // A Two Towers frame is {u8 flags (OAM piece count in bits 0-4), u8, u8 width, u8 height,
@@ -330,14 +331,17 @@ Icon convertIcon(const std::vector<std::uint8_t>& rom, std::uint32_t record)
 // palette) of 4x4 tiles: a round frame (colors 11..15) around the art (1..10).
 constexpr std::uint32_t kSkillIcons = 0x0832EA64u;
 constexpr std::uint32_t kHeroCount = 6, kSkillCount = 11;
-// The 16 colors the skill screen draws them with.
-constexpr std::uint32_t kSkillIconPalette = 0x08A792E8u + 2;
+// The skill screen draws them in BG palette bank 3, the 16 colors of the hero's skill frame asset
+// (a BG asset per hero, its palette after the 2 flag bytes).
+constexpr std::uint32_t kHeroSkillFrames = 0x083297F0u;
 constexpr int kSkillIconSize = 32;
 // The art for ROTK's 32x24 skill icon, whose border is 1 pixel at the top and bottom and 2 at the
-// sides, in its art shades 8 (brightest) .. 13.
+// sides, in the icon's own colors 8..15: a hero's 7 most used art colors (the rest drawn in the
+// nearest of them) on black, as the art sits on a black disc in The Two Towers.
 constexpr int kSkillArtWidth = 32, kSkillArtHeight = 24;
 constexpr std::uint32_t kSkillArtBytes = kSkillArtWidth * kSkillArtHeight / 2;
-constexpr int kArtShadeFirst = 8, kArtShadeCount = 6;
+constexpr int kSkillArtFirstColor = 8, kSkillArtColorCount = 8;
+constexpr int kSkillArtBackground = kSkillArtFirstColor + kSkillArtColorCount - 1;
 
 // The Two Towers' BG tile decoder (ARM at ROM 0x08000264, copied to IWRAM): the C64 pucrunch
 // unpacker. It builds an LZ source address byte by byte in its stack frame, as the 6502 did, and
@@ -441,11 +445,14 @@ std::vector<std::uint8_t> unpackTiles(const std::vector<std::uint8_t>& rom, std:
 
 // A Two Towers skill icon's art for ROTK's skill icon: frame and fill cleared, colors by brightness
 // in ROTK's art shades, centered in 32x24 4bpp tiles (4 by 3, row by row).
-std::vector<std::uint8_t> convertSkillArt(const std::vector<std::uint8_t>& rom, std::uint32_t asset)
+using SkillArt = std::array<std::array<std::uint8_t, kSkillIconSize>, kSkillIconSize>;
+
+// A skill icon's art in its Two Towers colors (1..10), the round frame and the fill around the art 0.
+SkillArt decodeSkillArt(const std::vector<std::uint8_t>& rom, std::uint32_t asset)
 {
     constexpr int kLast = kSkillIconSize - 1;
     const std::vector<std::uint8_t> tiles = unpackTiles(rom, asset + 4);
-    std::uint8_t art[kSkillIconSize][kSkillIconSize] = {};
+    SkillArt art = {};
     for (int y = 0; y < kSkillIconSize; ++y)
         for (int x = 0; x < kSkillIconSize; ++x) {
             const std::size_t at = ((y / 8) * 4 + x / 8) * 32 + (y % 8) * 4 + (x % 8) / 2;
@@ -464,13 +471,55 @@ std::vector<std::uint8_t> convertSkillArt(const std::vector<std::uint8_t>& rom, 
         art[y][x] = 0;
         stack.insert(stack.end(), {{y - 1, x}, {y + 1, x}, {y, x - 1}, {y, x + 1}});
     }
-    std::uint8_t shade[16];
-    for (int i = 0; i < 16; ++i) {
-        const int color = read16(rom, kSkillIconPalette + i * 2);
-        const double luma = 0.3 * (color & 31) + 0.59 * (color >> 5 & 31) + 0.11 * (color >> 10 & 31);
-        shade[i] = static_cast<std::uint8_t>(
-            kArtShadeFirst + std::min(kArtShadeCount - 1, static_cast<int>((31 - luma) * kArtShadeCount / 32)));
+    return art;
+}
+
+// A hero's icon colors: its 7 most used art colors and black, and each art color's index among them.
+struct SkillColors {
+    std::array<std::uint8_t, 16> remap = {};
+    std::array<std::uint16_t, kSkillArtColorCount> colors = {};
+};
+
+SkillColors skillColors(const std::vector<std::uint8_t>& rom, std::uint32_t hero, const std::vector<SkillArt>& arts)
+{
+    const std::uint32_t palette = read32(rom, kHeroSkillFrames + hero * 4) + 2;
+    std::array<int, 16> uses = {};
+    for (const SkillArt& art : arts)
+        for (const auto& row : art)
+            for (std::uint8_t color : row)
+                if (color) ++uses[color];
+    std::vector<int> order;
+    for (int c = 1; c < 16; ++c)
+        if (uses[c]) order.push_back(c);
+    std::stable_sort(order.begin(), order.end(), [&](int a, int b) { return uses[a] > uses[b]; });
+    if (order.size() > kSkillArtColorCount - 1) order.resize(kSkillArtColorCount - 1);
+    auto rgb = [&](int c) {
+        const int v = read16(rom, palette + c * 2);
+        return std::array<int, 3>{v & 31, v >> 5 & 31, v >> 10 & 31};
+    };
+    SkillColors out;
+    for (std::size_t i = 0; i < order.size(); ++i) {
+        out.colors[i] = static_cast<std::uint16_t>(read16(rom, palette + order[i] * 2) & 0x7FFF);
+        out.remap[order[i]] = static_cast<std::uint8_t>(kSkillArtFirstColor + i);
     }
+    for (int c = 1; c < 16; ++c) {
+        if (!uses[c] || out.remap[c]) continue;
+        const auto want = rgb(c);
+        int best = 0, bestDistance = 1 << 30;
+        for (std::size_t i = 0; i < order.size(); ++i) {
+            const auto have = rgb(order[i]);
+            const int d = (want[0] - have[0]) * (want[0] - have[0]) + (want[1] - have[1]) * (want[1] - have[1]) +
+                          (want[2] - have[2]) * (want[2] - have[2]);
+            if (d < bestDistance) best = static_cast<int>(i), bestDistance = d;
+        }
+        out.remap[c] = static_cast<std::uint8_t>(kSkillArtFirstColor + best);
+    }
+    return out;
+}
+
+// The art centered in ROTK's 32x24 icon, inside its border, in the hero's icon colors.
+std::vector<std::uint8_t> placeSkillArt(const SkillArt& art, const SkillColors& colors)
+{
     int top = kSkillIconSize, bottom = -1, left = kSkillIconSize, right = -1;
     for (int y = 0; y < kSkillIconSize; ++y)
         for (int x = 0; x < kSkillIconSize; ++x)
@@ -479,14 +528,14 @@ std::vector<std::uint8_t> convertSkillArt(const std::vector<std::uint8_t>& rom, 
                 left = std::min(left, x), right = std::max(right, x);
             }
     std::vector<std::uint8_t> out(kSkillArtBytes, 0);
-    if (bottom < 0) return out;
     const int dy = kSkillArtHeight / 2 - (top + bottom + 1) / 2, dx = kSkillArtWidth / 2 - (left + right) / 2;
-    for (int y = top; y <= bottom; ++y)
-        for (int x = left; x <= right; ++x) {
-            const int ty = y + dy, tx = x + dx;
-            if (!art[y][x] || ty < 1 || ty > kSkillArtHeight - 2 || tx < 2 || tx > kSkillArtWidth - 3) continue;
+    for (int ty = 1; ty <= kSkillArtHeight - 2; ++ty)
+        for (int tx = 2; tx <= kSkillArtWidth - 3; ++tx) {
+            const int y = ty - dy, x = tx - dx;
+            const bool inside = bottom >= 0 && y >= 0 && x >= 0 && y < kSkillIconSize && x < kSkillIconSize;
+            const int color = inside && art[y][x] ? colors.remap[art[y][x]] : kSkillArtBackground;
             out[((ty / 8) * (kSkillArtWidth / 8) + tx / 8) * 32 + (ty % 8) * 4 + (tx % 8) / 2] |=
-                static_cast<std::uint8_t>(shade[art[y][x]] << ((tx & 1) * 4));
+                static_cast<std::uint8_t>(color << ((tx & 1) * 4));
         }
     return out;
 }
@@ -741,14 +790,21 @@ void build(const std::vector<std::uint8_t>& rom)
         putPointer(at + 8, append(icon.palette.data(), icon.palette.size()));
     }
 
-    std::vector<std::uint8_t> skillArt;
-    for (std::uint32_t hero = 0; hero < kHeroCount; ++hero)
-        for (std::uint32_t skill = 0; skill < kSkillCount; ++skill) {
-            const std::vector<std::uint8_t> art =
-                convertSkillArt(rom, read32(rom, kSkillIcons + (hero * kSkillCount + skill) * 4));
-            skillArt.insert(skillArt.end(), art.begin(), art.end());
+    std::vector<std::uint8_t> skillArt, skillPalettes;
+    for (std::uint32_t hero = 0; hero < kHeroCount; ++hero) {
+        std::vector<SkillArt> arts;
+        for (std::uint32_t skill = 0; skill < kSkillCount; ++skill)
+            arts.push_back(decodeSkillArt(rom, read32(rom, kSkillIcons + (hero * kSkillCount + skill) * 4)));
+        const SkillColors colors = skillColors(rom, hero, arts);
+        for (const SkillArt& art : arts) {
+            const std::vector<std::uint8_t> placed = placeSkillArt(art, colors);
+            skillArt.insert(skillArt.end(), placed.begin(), placed.end());
         }
+        const auto* bytes = reinterpret_cast<const std::uint8_t*>(colors.colors.data());
+        skillPalettes.insert(skillPalettes.end(), bytes, bytes + sizeof colors.colors);
+    }
     putPointer(kSkillArtField, append(skillArt.data(), skillArt.size()));
+    putPointer(kSkillColorsField, append(skillPalettes.data(), skillPalettes.size()));
 
     // {Two Towers address, ROTK SpriteAnimation} per converted animation
     std::vector<std::uint8_t> index(std::size(kSprites) * 8, 0);
