@@ -555,8 +555,9 @@ constexpr SpriteSource kSprites[] = {
     {0x080501D8u, 0x08CC6268u},
     // Gandalf's Shield bubble: forming, up, dissolving
     {0x080500C8u, 0x08CC6268u}, {0x080500D8u, 0x08CC6268u}, {0x080500E8u, 0x08CC6268u},
-    // Gandalf's Sunburst
+    // Gandalf's Sunburst, and its rays: growing, holding, fading
     {0x080500F8u, 0x08CC3F34u},
+    {0x08050108u, 0x08CC3F34u}, {0x08050118u, 0x08CC3F34u}, {0x08050128u, 0x08CC3F34u},
     // Gandalf's Fireworks: the rocket by facing (down .. up) and its explosion
     {0x08328208u, 0x08CC1338u, 1}, {0x08328210u, 0x08CC1338u, 1}, {0x08328218u, 0x08CC1338u, 1},
     {0x08328220u, 0x08CC1338u, 1}, {0x08328228u, 0x08CC1338u, 1}, {0x08328230u, 0x08CC1338u, 1},
@@ -568,6 +569,8 @@ constexpr SpriteSource kSprites[] = {
     // hero palettes are at 0x0832B248 + (hero + 0x33) * 4)
     {0x083282D8u, 0x0898A874u, 1}, {0x083282E0u, 0x0898A874u, 1}, {0x083282E8u, 0x0898A874u, 1},
     {0x083282F0u, 0x0898A874u, 1}, {0x083282F8u, 0x0898A874u, 1},
+    // The trail lights of Gimli's axe and Aragorn's sword: orange and yellow sparkles
+    {0x0832EB6Cu, 0x08CA78B4u, 1}, {0x0832EB74u, 0x08CA78B4u, 1},
     // Gimli's Battle Cry
     {0x080501E8u, 0x08CC71D4u},
     // Gimli's Berserk Fury: rising, burning, fading
