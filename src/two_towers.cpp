@@ -839,6 +839,18 @@ void twoTowersFind(const std::vector<std::string>& args)
     std::fprintf(stderr, "[rotk] The Two Towers data: %zu KiB\n", g_block.size() / 1024);
 }
 
+bool twoTowersRomValid(const std::string& path)
+{
+    if (path.empty() || !isTwoTowers(path)) return false;
+    const std::vector<std::uint8_t> rom = load(path);
+    return rom.size() == kRomSize && gba::sha1(rom.data(), rom.size()).hex() == kRomSha1;
+}
+
+std::string twoTowersRomPath()
+{
+    return g_romPath.string();
+}
+
 std::uint32_t twoTowersBlockSize()
 {
     return static_cast<std::uint32_t>(g_block.size());

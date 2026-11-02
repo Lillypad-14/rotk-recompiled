@@ -19,6 +19,7 @@
 #include "hd_icons.h"
 #include "legacy_item_tables.h"
 #include "two_towers.h"
+#include "super_game.h"
 #include "minimap.h"
 #include "controls_menu.h"
 #include "rumble.h"
@@ -99,6 +100,7 @@ enum PcInfoField : std::uint32_t {
     kInfoTwoTowers = 0x28,
     kInfoItemTypeInfos = 0x2C,  // the legacy item tables' ItemTypeInfos copy
     kInfoLegacyScratch = 0x30,  // 4 KB of host RAM for the mod's legacy item bookkeeping
+    kInfoSuperGame = 0x34,  // PC_HOST_SUPER_GAME_* bits: available (host), switch (mod)
 };
 
 // ROM literal-pool words that hold the base of a per-actor queue. The same addresses in the stock
@@ -229,7 +231,7 @@ void writeInfoBlock()
     const PcLayout& pc = layout();
     const std::uint32_t info = gba::kHostRamBase;
     static bool stressArmed = false;
-    bus_write_u32(info + kInfoVersion, 4u);
+    bus_write_u32(info + kInfoVersion, 5u);
     bus_write_u32(info + kInfoMainActors, pc.mainActors);
     bus_write_u32(info + kInfoOverlayActors, pc.overlayActors);
     bus_write_u32(info + kInfoMainPool, pc.mainPool);
@@ -250,6 +252,7 @@ void writeInfoBlock()
     bus_write_u32(info + kInfoTwoTowers, pc.twoTowers);
     bus_write_u32(info + kInfoItemTypeInfos, pc.itemTables ? rotk::legacyItemTablesInfos(pc.itemTables) : 0u);
     bus_write_u32(info + kInfoLegacyScratch, pc.itemTables);
+    bus_write_u32(info + kInfoSuperGame, rotk::superGameAvailable() ? 1u : 0u);
     bus_write_u32(info + kInfoMagic, kPcInfoMagic);
 }
 
@@ -517,8 +520,15 @@ int pcHideOamEntry(std::uint32_t, int, ArmCpuState* cpu)
 }
 
 // Observes sprite_endFrame: a frame that pushed nothing leaves no extra pieces behind.
+// Whether the sprite-piece hooks run (extra objects or smooth motion). The end-of-frame hook also
+// runs for the super game's switch request.
+bool g_observePieces = false;
+
 int pcEndFrame(std::uint32_t, int, ArmCpuState*)
 {
+    if (bus_read_u32(gba::kHostRamBase + kInfoMagic) == kPcInfoMagic)
+        rotk::superGamePoll(gba::kHostRamBase + kInfoSuperGame);
+    if (!g_observePieces) return 0;
     ExtraObjects& extra = extraObjects();
     const int buffer = shadowBuffer(bus_read_u32(kOamShadow));
     if (buffer >= 0 && bus_read_u8(kSpriteAllocCount) == 0) extra.counts[buffer] = 0;
@@ -616,7 +626,8 @@ void applyPcSettings()
                                       layout().actors && envNumber("ROTK_PC_RENDER_SORT", 1) != 0);
     gba_mod_set_function_hook_enabled(kPushOamHookId, observePieces);
     gba_mod_set_function_hook_enabled(kHideOamHookId, observePieces);
-    gba_mod_set_function_hook_enabled(kEndFrameHookId, observePieces);
+    g_observePieces = observePieces;
+    gba_mod_set_function_hook_enabled(kEndFrameHookId, observePieces || rotk::superGameAvailable());
     if (!layout().itemTables) rotk::legacyItemTablesReset();
     gba::g_rom_read32_override = layout().actors || layout().itemTables ? pcRomLiterals : nullptr;
     g_dma_observer = pcObserveDma;
@@ -744,6 +755,7 @@ int main(int argc, char** argv)
     rotk::bugReportRegister(options);
     rotk::controlsMenuRegister(options);
     rotk::expandedEditionRegister(options);
+    rotk::superGameRegister(options);
     rotk::combatInfoRegister();
     rotk::rumbleRegister();
     rotk::colorVisionRegister();
@@ -756,11 +768,14 @@ int main(int argc, char** argv)
     if (rotk_launcher_preboot(args, options)) return 0;  // the player quit the launcher
     if (const int code = rotk::expandedEditionDispatch(args); code >= 0) return code;
     rotk::twoTowersFind(args);
+    rotk::superGameFind(args);
     std::vector<char*> launchArgs;
     for (std::string& arg : args) launchArgs.push_back(arg.data());
     return gbarecomp::run_game(static_cast<int>(launchArgs.size()), launchArgs.data(), options);
 #else
-    rotk::twoTowersFind(std::vector<std::string>(argv, argv + argc));
+    const std::vector<std::string> args(argv, argv + argc);
+    rotk::twoTowersFind(args);
+    rotk::superGameFind(args);
     return gbarecomp::run_game(argc, argv, options);
 #endif
 }

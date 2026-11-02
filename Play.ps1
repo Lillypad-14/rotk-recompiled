@@ -1,8 +1,9 @@
 # -Target expanded plays the Expanded mod build (prepare/build it with --target expanded first).
+# -Target ttt plays The Two Towers on the plain host (prepare/build it with --target ttt first).
 # The launcher opens first: PC enhancements are on its Mods page, CPU boost included.
 # -CpuOverclock N overrides the launcher's CPU boost for this run (1 = original GBA speed).
 param(
-    [ValidateSet('stock', 'expanded')][string]$Target = 'stock',
+    [ValidateSet('stock', 'expanded', 'ttt')][string]$Target = 'stock',
     [ValidateSet(0, 1, 2, 4, 8, 16)][int]$CpuOverclock = 0
 )
 $ErrorActionPreference = 'Stop'
@@ -13,6 +14,11 @@ if ($Target -eq 'expanded') {
     $config = Join-Path $projectRoot '.private/expanded/game.toml'
     $playDirectory = Join-Path $projectRoot '.private/expanded/play'
     $save = 'rotk.sram'
+} elseif ($Target -eq 'ttt') {
+    $binary = Join-Path $projectRoot 'build/host-ttt/TTT-Recompiled.exe'
+    $config = Join-Path $projectRoot '.private/ttt/game.toml'
+    $playDirectory = Join-Path $projectRoot '.private/ttt/play'
+    $save = 'ttt.eeprom'
 } else {
     $binary = Join-Path $projectRoot 'build/host/ROTK-Recompiled.exe'
     $config = Join-Path $projectRoot '.private/game.toml'

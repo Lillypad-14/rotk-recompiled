@@ -51,10 +51,18 @@ add_library(RotkCart OBJECT ${CART_SOURCES})
 target_include_directories(RotkCart PRIVATE ${ROTK_HOST_INCLUDES})
 target_link_gbarecomp_runtime_stack(RotkCart)
 
-add_executable(${ROTK_EXECUTABLE} src/main.cpp src/widescreen.cpp src/hd_audio.cpp src/hd_icons.cpp src/local_coop.cpp
-    src/smooth_motion.cpp src/transparency.cpp src/combat_info.cpp src/duel_hud.cpp src/rumble.cpp src/color_vision.cpp src/bug_report.cpp
-    src/sample_packs.cpp src/minimap.cpp src/profiler.cpp src/controls_menu.cpp src/bps_patch.cpp
-    src/expanded_edition.cpp src/two_towers.cpp src/legacy_item_tables.cpp $<TARGET_OBJECTS:RotkCart>)
+# A cartridge other than ROTK (The Two Towers) builds with the plain host: no ROTK hooks. The
+# launcher library stays linked for the runtime's in-game menu; the plain host skips its pre-boot page.
+option(ROTK_PLAIN_HOST "Build the plain host (src/plain_main.cpp) for a cartridge other than ROTK" OFF)
+if(ROTK_PLAIN_HOST)
+    set(ROTK_HOST_SOURCES src/plain_main.cpp)
+else()
+    set(ROTK_HOST_SOURCES src/main.cpp src/widescreen.cpp src/hd_audio.cpp src/hd_icons.cpp src/local_coop.cpp
+        src/smooth_motion.cpp src/transparency.cpp src/combat_info.cpp src/duel_hud.cpp src/rumble.cpp src/color_vision.cpp
+        src/bug_report.cpp src/sample_packs.cpp src/minimap.cpp src/profiler.cpp src/controls_menu.cpp src/bps_patch.cpp
+        src/expanded_edition.cpp src/two_towers.cpp src/legacy_item_tables.cpp src/super_game.cpp)
+endif()
+add_executable(${ROTK_EXECUTABLE} ${ROTK_HOST_SOURCES} $<TARGET_OBJECTS:RotkCart>)
 target_include_directories(${ROTK_EXECUTABLE} PRIVATE ${ROTK_HOST_INCLUDES})
 # Release downloads: a Windows GUI program, so no console window opens beside the game. Off for
 # development, where the console carries the logs and scripts wait for the exit code.
@@ -92,7 +100,7 @@ if(ROTK_LAUNCHER)
 endif()
 
 # Built-in package for the PC enhancements, preloaded next to the executable for this target's ROM.
-set(ROTK_MOD_GAME_ID "rotk")
+set(ROTK_MOD_GAME_ID "rotk" CACHE STRING "Mod and settings namespace of the game")
 # An edition build's settings also serve the Expanded build it starts (GBARECOMP_MODS_ROOT).
 set(ROTK_EDITION_TARGET "")
 if(ROTK_EDITION_SHA1)
@@ -102,8 +110,11 @@ game_id = \"${ROTK_MOD_GAME_ID}\"
 rom_sha1 = \"${ROTK_EDITION_SHA1}\"
 ")
 endif()
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/mods/rotk.pc.manifest.toml.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/mods/packages/rotk.pc/1.0.0/manifest.toml" @ONLY)
+# The plain host has none of the package's plugins.
+if(NOT ROTK_PLAIN_HOST)
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/mods/rotk.pc.manifest.toml.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/mods/packages/rotk.pc/1.0.0/manifest.toml" @ONLY)
+endif()
 target_compile_definitions(${ROTK_EXECUTABLE} PRIVATE ROTK_MOD_GAME_ID="${ROTK_MOD_GAME_ID}")
 if(ROTK_EDITION_PATCH AND ROTK_EDITION_EXE AND ROTK_EDITION_SHA1)
     target_compile_definitions(${ROTK_EXECUTABLE} PRIVATE ROTK_EDITION_PATCH="expanded.bps"

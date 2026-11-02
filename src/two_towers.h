@@ -33,6 +33,10 @@ namespace rotk {
 // Finds The Two Towers ROM (ROTK_PC_TWO_TOWERS_ROM, else beside the ROTK ROM or the executable),
 // checks its SHA-1 and builds the block. Without the ROM the block is empty.
 void twoTowersFind(const std::vector<std::string>& args);
+// The Two Towers ROM twoTowersFind found, empty without it.
+std::string twoTowersRomPath();
+// Whether the file is The Two Towers ROM the PC edition reads (size, header and SHA-1).
+bool twoTowersRomValid(const std::string& path);
 // The block's size in bytes, 0 without The Two Towers.
 std::uint32_t twoTowersBlockSize();
 // The block as it reads at a host RAM address.

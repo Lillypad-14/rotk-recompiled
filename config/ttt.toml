@@ -1,0 +1,217 @@
+# The Two Towers (GBA, USA/Europe, ALPE): the super game's second cartridge (docs/SUPER_GAME.md).
+# The analyzer finds its code from the entry point; reviewed miss-log proposals are added below.
+
+[program]
+name = "The Lord of the Rings: The Two Towers (USA, Europe)"
+id = "ttt_usa_eu"
+load_address = 0x08000000
+size = 0x01000000
+entry_pc = 0x08000000
+
+[identity]
+sha1 = "82b3b4afb0ed0d3fca646aa266e0bfc5bffd49d9"
+
+[[data_range]]
+start = 0x08000004
+end = 0x080000C0
+note = "Cartridge header and logo; the first ARM branch remains executable."
+
+[[extra_func]]
+addr = 0x08000000
+mode = "arm"
+name = "rom_header_start_vector"
+
+[[code_copy]]
+runtime_start = 0x03004720
+source_start = 0x08000264
+size = 0x00000350
+name = "pucrunch_iwram"
+note = "0x08036738 CpuSets 0xd4 words of the ARM pucrunch unpacker to IWRAM (g_DecompressPucrunch 0x03004A8C), as ROTK does."
+
+[[extra_func]]
+addr = 0x03004720
+mode = "arm"
+name = "decompress_pucrunch_iwram"
+
+# Reviewed miss-log proposals (first boot, 2026-11-01): pucrunch's inner dispatch targets in the IWRAM
+# copy, and resume points inside Thumb functions.
+[[extra_func]]
+addr = 0x030049C8
+mode = "arm"
+
+[[extra_func]]
+addr = 0x03004A04
+mode = "arm"
+
+[[extra_func]]
+addr = 0x03004A08
+mode = "arm"
+
+[[extra_func]]
+addr = 0x03004A38
+mode = "arm"
+
+[[extra_func]]
+addr = 0x08021B4C
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x08021B6C
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x08021E60
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x08048C9A
+mode = "thumb"
+
+# Reviewed miss-log proposals (scripted play into the first levels, 2026-11-01)
+[[extra_func]]
+addr = 0x0802ED80
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x08034E40
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x08034FFE
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x08035080
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x0803F448
+mode = "thumb"
+
+# Reviewed miss-log proposals (the same play, fresh heal cache): resume points in Thumb functions
+[[extra_func]]
+addr = 0x08012158
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x0801228C
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x080192C8
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x08019398
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x08019790
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x08024FD0
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x08024FFE
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x08025084
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x08025172
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x0802517C
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x0802A330
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x0802CB18
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x0802CBF8
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x0802ECC8
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x0802ECF6
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x0802FC94
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x080303C8
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x08034DB8
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x0803C4A4
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x0803C944
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x0803F3BC
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x0803F3EA
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x0803F460
+mode = "thumb"
+
+[[extra_func]]
+addr = 0x0803F4B8
+mode = "thumb"
+
+
+[[mod_function_hook]]
+addr = 0x08025EC8
+mode = "thumb"
+note = "scene_languageSelect_tick: started for the super game, the plain host picks English and goes straight to the main menu (src/plain_main.cpp)."
+
+[[mod_function_hook]]
+addr = 0x0802626C
+mode = "thumb"
+note = "scene_copyright_tick: started for the super game, the plain host moves on to the language menu at once (src/plain_main.cpp)."
+
+[[mod_function_hook]]
+addr = 0x0803F054
+mode = "thumb"
+note = "scene_mainMenu_tick: started for the super game, the plain host presses Start for the player on the title (src/plain_main.cpp)."
+
+[[mod_function_hook]]
+addr = 0x0803F2EC
+mode = "thumb"
+note = "scene_mainMenu_drawEntry: started for the super game, the menu gets a Return of the King row (src/plain_main.cpp)."
+
+[[mod_function_hook]]
+addr = 0x0803F180
+mode = "thumb"
+note = "scene_mainMenu_moveCursor: the cursor wraps over the five rows."
+
+[[mod_function_hook]]
+addr = 0x0803F0FC
+mode = "thumb"
+note = "The main menu confirm: Return of the King hands the window back to ROTK."

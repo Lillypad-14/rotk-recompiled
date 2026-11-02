@@ -30,6 +30,61 @@ version for original hardware.
 | 5 | **ROTK sprites in Two Towers** (toggle) | shared sprite engine, mostly data |
 | later | Two Towers split-screen co-op | TTT has the same link system (`g_MpLinkState`) |
 
+## Phase 1: The Two Towers on PC (2026-11-01)
+
+It runs. `python tools/lab.py prepare --target ttt` (the ROM from `.private/ttt.gba`, SHA-1 checked)
+and `python tools/lab.py build --target ttt --sdl2 <SDL2>` make `build/host-ttt/TTT-Recompiled.exe`
+from `config/ttt.toml` on the plain host (`src/plain_main.cpp`, CMake `ROTK_PLAIN_HOST`): the
+ROTK host's hooks sit at ROTK addresses, so it can't run another cartridge. Its mod and settings
+namespace is `the_two_towers`, apart from ROTK's.
+
+- No decomp is needed: the analyzer found 10,183 functions from the entry point. The config adds
+  the one IWRAM copy (0x08036738 CpuSets the ARM pucrunch unpacker, 0xd4 words from 0x08000264 to
+  0x03004720, as ROTK copies it to 0x030035E0) and reviewed miss-log resume points.
+- Checked headless (`--no-window --dump-png`, input from `GBARECOMP_INPUT_REPLAY`, a
+  `frame,0xKEYS` CSV, keys active low): the language menu, the first level with Aragorn and
+  Legolas, the backpack and a rain level with dialogue, no dispatch misses after the second pass.
+- Next: play it through (more levels, saving to EEPROM, the ending), add what the miss log proposes,
+  then phase 2 (both cartridges in one exe).
+
+## Phase 2: switching between the games (2026-11-01)
+
+The main menu's seventh row, "The Two Towers" (rotk `hacks/patches/super_game`, PC edition), shows
+when the host can start it and hands the window over:
+
+1. The mod sets `PC_HOST_SUPER_GAME_SWITCH` in `PcHostInfo.superGame` (version 5). The host sets
+   `PC_HOST_SUPER_GAME_AVAILABLE` there when it found The Two Towers' ROM and `TTT-Recompiled.exe`
+   (`ROTK_TTT_EXE`, else beside the executable, else `../host-ttt`).
+2. `src/super_game.cpp` sees the request at the end of a frame (`pcEndFrame`), pauses this game's
+   audio and starts The Two Towers with `GBARECOMP_WINDOW_HANDOFF="x,y,w,h,fullscreen"` (this
+   window's) and the name of an event, its ROM, a BIOS (`--bios`, the config's, or
+   `gba_bios.bin` beside the ROM) and its own save (`<ROM name>-recompiled.eeprom` beside its ROM,
+   apart from an emulator's `.sav`).
+3. The Two Towers starts with `--bios-skip-intro` and its window opens hidden
+   (`patches/window-handoff.patch`). Its host (`src/plain_main.cpp`) hurries it to the main menu
+   through three `[[mod_function_hook]]`s: the copyright tick (0x0802626C) asks for the language
+   menu, the language menu's tick (0x08025EC8) confirms English with the game's own confirm
+   (0x08025F88: language, save stamp) and asks for the main menu (scene 4), and the title's tick
+   (0x0803F054) presses Start through its handler (0x0803F32C). Once the menu's rows are up (state
+   2) it takes ROTK's place, size and fullscreen state, shows itself and sets the event. Only then
+   does ROTK hide its window. Played on its own (`PlayTwoTowers.cmd`) none of this happens.
+   Calling a guest function from a hook needs the generated call sequence (LR, then
+   `runtime_call_push_return`, `runtime_dispatch`): without it the callee's return runs on into
+   the caller.
+4. ROTK waits, paused and muted, its hidden window pumped.
+5. The Two Towers' main menu has a fifth row then, "Return of the King" (hooks on its
+   drawEntry 0x0803F2EC, moveCursor 0x0803F180 and confirm 0x0803F0FC; the five rows start a tile
+   higher, at y 88, since a fifth at y 128 is under the bottom border; the text sits in host RAM,
+   written when it draws, as the boot clears that RAM). Confirming it writes its window's place,
+   size and fullscreen state to `ROTK_SUPER_GAME_BACK_FILE`, sets the `ROTK_SUPER_GAME_BACK` event
+   and quits through `SDL_QUIT` (so its save is written). ROTK takes that place, shows its window
+   over The Two Towers' closing one and plays on from its menu. Quitting The Two Towers any other
+   way brings ROTK back too. The frame pacer resyncs after the pause.
+
+Two processes, one window at a time: gbarecomp can't hold two different cartridges in one process
+(the generated code and the runtime are per cartridge). Checked headless: the row draws and the
+cursor wraps onto it. The handoff itself needs a window: test it by playing.
+
 ## Phase 0 findings (2026-10-28)
 
 Two Towers ROM: "TWO TOWERS", code ALPE, 16 MB, SHA-1 `82b3b4afb0ed0d3fca646aa266e0bfc5bffd49d9`,
@@ -221,9 +276,14 @@ Gandalf is done (rotk `hacks/patches/legacy_skills/legacy_gandalf.c`, art via `k
 `src/two_towers.cpp`), with sounds and cast poses as ROTK stand-ins:
 - Zap, Magical Healing, Shield, Fireworks, Thunderstrike: as The Two Towers. Fireworks' rocket has
   tile collision there too and nothing handles a wall: at one it stops and fizzles out after its 30
-  ticks, no blast. Its burst also enlarges a glow object (light, not the blast), not ported.
-- Sunburst: as The Two Towers (stun 30 + 10 per level, radius 75, no damage when cast), without its
-  8 rotated rays, which only show (ROTK sprites scale but do not rotate).
+  ticks, no blast. Its trail light (particle emitter group 2, variant 2: orange sparkles 0x0832EB6C)
+  follows the rocket, and its burst doubles the emitter's count and triples its spread: a spray of
+  sparkles (`trail` in `LegacyProjectileDef`).
+- Sunburst: as The Two Towers (stun 30 + 10 per level, radius 75, no damage when cast). On the
+  burst's 4th frame it sends 8 rays (0x08018B8C, tick 0x08018CC8): stars that spiral out on the
+  render oscillation both games share (`actor_applyRenderOscillation`, phase 45 degrees apart, step
+  0x800, an ellipse widening 3 by 2 a tick), growing, holding 25 ticks and fading. Nothing rotates:
+  the rays are the oscillation. Flame of Anor's burst sends them too.
 - Summon Eagle: one eagle at a time, 12 Spirit and 3 corruption per level, a swoop per level for
   20 + 5 per level. Each swoop it waits unseen up to 16 ticks for a foe within 75 pixels, comes in
   from 160 pixels left or right of Gandalf (alternating) at a random height within 60, strikes and
@@ -240,8 +300,9 @@ Gimli (rotk `legacy_gimli.c`, 2026-10-29), untested in play beyond the arena cas
 - Axe Throw: 4 Spirit (the description says 3), the axe flies 21 ticks and hits every foe it passes
   with Gimli's own melee hit (`combat_resolvePveAttack`, accuracy roll included, as The Two Towers'
   0x0800CD94) +1 damage per level, skipping a foe already hurt, stopping at one that does not
-  flinch. The arena hero's accuracy (20 against defense 50) misses there. Not yet: one axe at a
-  time, its two trail lights.
+  flinch. The arena hero's accuracy (20 against defense 50) misses there. One axe at a time. Its
+  two trail lights (emitters 2/3 and 2/2, orange 0x0832EB6C and yellow 0x0832EB74) drop sparkles
+  each tick (`trail` in `LegacyThrownDef`); Aragorn's Sword Throw has the same pair.
 - Whirlwind Attack: 3 Spirit (not 6), ROTK's Whirling Attack with its stored damage set to the level
   (ROTK adds it to the melee hit in that state, as The Two Towers adds the level).
 - Berserk Fury: 8 Spirit (not 10) and 3 corruption per level, 300 ticks of +20% speed, +10 damage
@@ -312,8 +373,13 @@ with The Two Towers' bonus as the stored damage (ROTK adds it to the melee hit i
 
 Passive rows of the other heroes fixed from their code (2026-10-29): Strength of the Shire's Spirit
 regen is level / 3, Rummage and Eyes of Rohan 5 + level treasure, Duck melee armor only, Critical
-Shot 10 + level, Aragorn's Ferocity 5 + level. Still mapped by guess: Resist One Ring, Meditation,
-Eowyn's Ferocity (their Two Towers stats have no item text) and the Parry rows (level thresholds).
+Shot 10 + level, Aragorn's Ferocity 5 + level. Fixed 2026-11-01: Parry and Stand Fast give 5% parry
+per level up to 10, then 5% riposte per further level (0x0803A788); Eowyn's Ferocity is +1 HP per
+slain foe per level (stat 29, "Health per Slain Foe", not the Spirit the description says);
+Meditation (stat 57) heals 1 + 4 per level every 90 ticks once Legolas has stood still (states 1
+or 5) for 90 ticks (0x0801CC9E), done in `legacySkills_playerTick`. Resist One Ring stores 2 per
+level in stat 58, which The Two Towers never reads; here it takes 2% per level off the One Ring's
+35 corruption, as the description says.
 
 Damage goes through ROTK's `combat_applyPveRangedHit`, which reduces it more than The Two Towers'
 armor subtraction (0x0800D84C): the eagle's 45 lands as 21 on the arena dummy, Zap's 15 as 6.

@@ -1,0 +1,13 @@
+--- a/src/runtime/host_window.cpp
++++ b/src/runtime/host_window.cpp
+@@ -1985,6 +1985,10 @@
+     if (orientation_policy_ == 2) window_flags |= SDL_WINDOW_RESIZABLE;
+     window_flags |= SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_BORDERLESS;
+ #endif
++    // A game handing its window over (GBARECOMP_WINDOW_HANDOFF) opens this one hidden; the host
++    // places and shows it once it has drawn, so the swap shows no blank window.
++    if (std::getenv("GBARECOMP_WINDOW_HANDOFF"))
++        window_flags = (window_flags & ~static_cast<Uint32>(SDL_WINDOW_SHOWN)) | SDL_WINDOW_HIDDEN;
+     b->window = SDL_CreateWindow(title ? title : "gbarecomp",
+                                  SDL_WINDOWPOS_CENTERED,
+                                  SDL_WINDOWPOS_CENTERED,

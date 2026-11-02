@@ -1,0 +1,107 @@
+--- a/src/recomp_launcher.h
++++ b/src/recomp_launcher.h
+@@ -1574,6 +1574,9 @@
+      * plays the edition, e.g. a mod built from the verified ROM, instead of the
+      * plain game. Appended additively; zero = the plain game. */
+     int  edition_enabled;
++    /* The companion ROM the player picked (GameInfo.companion_label), "" for
++     * none. Appended additively. */
++    char companion_path[512];
+ };
+ #define RECOMP_LAUNCHER_HAS_ZAPPER_SETTINGS 1
+ 
+@@ -2389,6 +2392,16 @@
+      * ABI stability. */
+     const char*        edition_label;
+     const char*        edition_note;
++
++    /* ---- Companion ROM (Settings.companion_path) ----------------------------
++     * A second cartridge the game can use (another game it hands over to,
++     * imports from, ...): the game card shows a row named companion_label with
++     * a Browse button, companion_note below, and companion_status(path) as the
++     * verdict on the pick (NULL = no line). NULL label = no row. Borrowed for
++     * the launcher's lifetime. Appended for ABI stability. */
++    const char*        companion_label;
++    const char*        companion_note;
++    const char*        (*companion_status)(const char* path);
+ } RecompLauncherCGameInfo;
+ 
+ /* RecompLauncherCGameInfo carries texture_filter_labels / _values. */
+--- a/src/common/launcher_model.h
++++ b/src/common/launcher_model.h
+@@ -178,6 +178,10 @@
+     // Alternate edition (GameInfo.edition_label): borrowed; NULL = none.
+     const char* edition_label;
+     const char* edition_note;
++    // Companion ROM (GameInfo.companion_label): borrowed; NULL = none.
++    const char* companion_label;
++    const char* companion_note;
++    const char* (*companion_status)(const char* path);
+     bool        saves_supported;     // sram_path != NULL -> show the SAVES panel
+     const char* sram_path;           // borrowed; NULL when the game has no SRAM
+ 
+--- a/src/common/launcher_model.c
++++ b/src/common/launcher_model.c
+@@ -364,6 +364,9 @@
+         m->msu1_patch_path      = game->msu1_patch_path;
+         m->edition_label        = game->edition_label;
+         m->edition_note         = game->edition_note;
++        m->companion_label      = game->companion_label;
++        m->companion_note       = game->companion_note;
++        m->companion_status     = game->companion_status;
+         m->saves_supported      = game->sram_path != NULL;
+         m->sram_path            = game->sram_path;
+         m->has_solar_sensor     = game->has_solar_sensor != 0;
+--- a/src/common/backends/imgui/launcher_imgui.cpp
++++ b/src/common/backends/imgui/launcher_imgui.cpp
+@@ -2212,6 +2212,8 @@
+         if (launcher_model_bios_applies(m) && !m->bios_name) reserve += px(112.0f);  // BIOS row
+         if (m->edition_label && m->edition_label[0])
+             reserve += px(120.0f);                     // edition row: checkbox + wrapped note
++        if (m->companion_label && m->companion_label[0])
++            reserve += px(140.0f);                     // companion row: label, pick, note, button
+         if (m->msu1_patch_available) reserve += px(198.0f);  // MSU-1 patch-available sub-block
+                                                               // (title + up-to-3-line wrapped note + 2 stacked buttons)
+         if (builtin_file_picker_should_be_offered()) reserve += px(84.0f);
+@@ -2409,6 +2411,41 @@
+             }
+         }
+         ImGui::EndChild();
++        ImGui::PopStyleColor(2);
++    }
++
++    // Companion ROM row (GameInfo.companion_label): a second cartridge the
++    // game uses, picked here beside the game's own.
++    if (m->companion_label && m->companion_label[0]) {
++        ImGui::Dummy(ImVec2(0, px(10)));
++        ImGui::PushStyleColor(ImGuiCol_ChildBg, col(th.panel_hovered));
++        ImGui::PushStyleColor(ImGuiCol_Border, col(th.border));
++        if (ImGui::BeginChild("companion_block", ImVec2(availw, 0),
++                              ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY,
++                              ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
++            const float inner_w = ImGui::GetContentRegionAvail().x;
++            ImGui::TextUnformatted(m->companion_label);
++            const char* picked = m->s.companion_path;
++            const char* name = picked;
++            for (const char* c = picked; *c; ++c)
++                if (*c == '/' || *c == '\\') name = c + 1;
++            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + inner_w);
++            ImGui::TextColored(col(th.text_muted), "%s", picked[0] ? name : ui_text("No ROM picked"));
++            if (const char* status = m->companion_status ? m->companion_status(picked) : nullptr)
++                ImGui::TextColored(col(th.accent), "%s", status);
++            if (m->companion_note && m->companion_note[0])
++                ImGui::TextColored(col(th.text_muted), "%s", m->companion_note);
++            ImGui::PopTextWrapPos();
++            if (ImGui::Button(ui_text(picked[0] ? "Change ROM..." : "Browse..."))) {
++                ui_pick_file(m, m->companion_label, {"*.gba"}, "GBA ROM (.gba)",
++                             [m](const char* path) {
++                                 if (path)
++                                     std::snprintf(m->s.companion_path,
++                                                   sizeof(m->s.companion_path), "%s", path);
++                             });
++            }
++        }
++        ImGui::EndChild();
+         ImGui::PopStyleColor(2);
+     }
+ 

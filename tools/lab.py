@@ -37,6 +37,8 @@ FRAMEWORK_PATCHES = [
     ROOT / "patches/local-link.patch",
     ROOT / "patches/controls.patch",
     ROOT / "patches/debug-print.patch",
+    ROOT / "patches/window-handoff.patch",
+    ROOT / "patches/launcher-companion-rom.patch",
 ]
 
 # recomp-ui (launcher) patches, applied the same way to external/recomp-ui.
@@ -46,10 +48,13 @@ RECOMP_UI_PATCHES = [
     ROOT / "patches/recomp-ui-edition.patch",
     ROOT / "patches/recomp-ui-bios-row.patch",
     ROOT / "patches/recomp-ui-controls.patch",
+    ROOT / "patches/recomp-ui-companion-rom.patch",
 ]
 
 STOCK_ROM_SIZE = 0x1000000
 EXPANDED_ROM_SIZE = 0x2000000
+# The Two Towers (USA, Europe), game code ALPE
+TTT_ROM_SHA1 = "82b3b4afb0ed0d3fca646aa266e0bfc5bffd49d9"
 
 
 @dataclass(frozen=True)
@@ -75,6 +80,9 @@ TARGETS = {
     # The mod's direct-boot test arena as a PC edition (tools/arena.py), apart from the Expanded build.
     "arena": Target("arena", "ROTK Test Arena", ROOT / ".private/arena", ROOT / "build/arena/generated",
                     ROOT / "build/host-arena", "RotkArena", "sram", 19854),
+    # The Two Towers on the plain host (docs/SUPER_GAME.md, phase 1).
+    "ttt": Target("ttt", "The Two Towers Recompiled", ROOT / ".private/ttt", ROOT / "build/ttt/generated",
+                  ROOT / "build/host-ttt", "TTT-Recompiled", "eeprom", 19855),
 }
 
 
@@ -181,8 +189,13 @@ def prepare(args: argparse.Namespace) -> None:
     apply_framework_patch(args.framework)
     verify_image(args.bios, LOCK["bios_sha1"], 0x4000)
     target.private.mkdir(parents=True, exist_ok=True)
-    symbols = decomp_symbols(args.decomp)
-    if target.name == "stock":
+    symbols = decomp_symbols(args.decomp) if target.name != "ttt" else {}
+    if target.name == "ttt":
+        rom = args.rom or ROOT / ".private/ttt.gba"
+        verify_image(rom, TTT_ROM_SHA1, STOCK_ROM_SIZE)
+        rom_bytes = rom.read_bytes()
+        config = ROOT / "config/ttt.toml"
+    elif target.name == "stock":
         rom = args.rom or args.decomp / "rotk.gba"
         verify_image(rom, LOCK["baseline_rom_sha1"], STOCK_ROM_SIZE)
         rom_bytes = rom.read_bytes()
@@ -202,10 +215,10 @@ def prepare(args: argparse.Namespace) -> None:
         print(f"Expanded: {len(mod_symbols)} mod function roots from {elf.name}")
     sha1 = hashlib.sha1(rom_bytes).hexdigest()
     crc32 = zlib.crc32(rom_bytes) & 0xFFFFFFFF
-    rom_copy = target.private / "rotk.gba"
+    rom_copy = target.private / ("ttt.gba" if target.name == "ttt" else "rotk.gba")
     rom_copy.write_bytes(rom_bytes)
     shutil.copyfile(args.bios, target.private / "gba_bios.bin")
-    if target.name != "stock":
+    if target.name not in ("stock", "ttt"):
         config = expanded_config(target, sha1)
     symbol_file = target.private / "functions.tsv"
     write_symbols(symbol_file, symbols)
@@ -224,7 +237,7 @@ def prepare(args: argparse.Namespace) -> None:
              args.framework / "bios/gba_bios.toml", "--out", target.generated / "bios"])
     game = f'''[game]
 name = "{target.title}"
-short_name = "rotk"
+short_name = "{'ttt' if target.name == 'ttt' else 'rotk'}"
 [bios]
 path = "{(target.private / 'gba_bios.bin').as_posix()}"
 sha1 = "{LOCK['bios_sha1']}"
@@ -268,7 +281,11 @@ def build(args: argparse.Namespace) -> None:
         f"-DROTK_GAME_NAME={target.title}",
         f"-DROTK_ROM_SHA1={provenance['rom_sha1']}",
         f"-DROTK_ROM_CRC32={provenance['rom_crc32']}",
-        f"-DROTK_DEBUG_PORT={target.debug_port}"]
+        f"-DROTK_DEBUG_PORT={target.debug_port}",
+        f"-DROTK_PLAIN_HOST={'ON' if target.name == 'ttt' else 'OFF'}"]
+    if target.name == "ttt":
+        # its own mod and settings namespace: ROTK's mods are tied to ROTK's code
+        command.append("-DROTK_MOD_GAME_ID=the_two_towers")
     if args.sdl2:
         command += [f"-DSDL2_INCLUDE_DIR={(args.sdl2 / 'include/SDL2').as_posix()}",
                     f"-DSDL2_LIBRARY={(args.sdl2 / 'lib/libSDL2.dll.a').as_posix()}"]
