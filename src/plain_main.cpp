@@ -13,6 +13,7 @@
 #include "runtime.h"
 
 #include "color_vision.h"
+#include "rotk_sounds.h"
 #include "rotk_sprites.h"
 
 #include "gba_bus.h"
@@ -380,6 +381,7 @@ int main(int argc, char** argv)
     // ROTK_PC_COLOR_VISION, which ROTK sets to its own choice when it starts this game
     rotk::colorVisionRegister();
     rotk::rotkSpritesRegister();
+    rotk::rotkSoundsRegister();
     options.present_decorate = presentDecorate;
     options.present_decorate_active = presentDecorateActive;
     return gbarecomp::run_game(argc, argv, options);

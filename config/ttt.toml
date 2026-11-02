@@ -236,6 +236,11 @@ addr = 0x0800E270
 mode = "thumb"
 note = "Called by the VBlank handler right after it copies the OAM shadow: the pieces' colors go live."
 
+[[mod_function_hook]]
+addr = 0x0803DCA0
+mode = "thumb"
+note = "The Two Towers' sound-effect play (id in r0): ROTK sounds can stand in for some ids (src/rotk_sprites.cpp)."
+
 # Play session 2026-11-01 20:47 (self-heal misses; the 0x0800FE78.. and 0x0800FF64.. runs are branch
 # targets after literal pools and a function start at 0x0800FF74, not switch tables).
 

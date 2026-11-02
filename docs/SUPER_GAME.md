@@ -577,6 +577,21 @@ How to run it:
   Towers' own animations recolored to the ROTK hero palette (`recolorFacings`, nearest color per
   index; the hero palette is ROTK's either way, so stock skill art drew in the wrong colors - the
   user saw "a buggy two towers version" when it was a plain toggle).
+- A fourth, "ROTK sound effects in The Two Towers" (ttt-rotk-sounds, off by default, env
+  ROTK_TTT_ROTK_SOUNDS=1; src/rotk_sounds.cpp): Two Towers sound ids in `kSwaps` play ROTK's sound
+  instead. The engines differ (Two Towers: note sequences from a sound bank, sfx_play 0x0803DCA0
+  -> 0x08046464; ROTK: unsigned 8-bit samples), so a hook on 0x0803DCA0 (config/ttt.toml) skips the
+  call and the host mixes the ROTK sample as a mod audio clip (65,536 Hz, gain = the Two Towers'
+  sfx volume +0x0D of *0x0803DCB4, honouring its sound-off bit 2 of +0x0C). ROTK side: SfxEntries
+  0x08289450 -> SfxSingles 0x08287DF8 / SfxVariantSets 0x08288010 -> SoundData 0x082808D4; a
+  sample is +0 loop, +4 end, +8 rate (0x4000 = 16,384 Hz), +12 flags, u8 data from +16. Swaps so
+  far: gem pickup, Two Towers 0x58 (after the gem add at 0x08025996, player +0x0C capped 0xFFFF)
+  -> ROTK 0x29 (sound 12, 0.6 s). Checked headless: the clip decodes (a decaying chime), and with
+  `ROTK_TTT_TEST_SWAP=98` (an id the fight check plays) each call skips the Two Towers sound and
+  starts the clip with the game running on; no gem pickup reached headless yet, and nobody has
+  heard it in a window. `ROTK_TTT_TRACE_SFX=1` logs every id played, `ROTK_TTT_SFX_WAV=<folder>`
+  writes each clip. Fight ids seen: 00, 23, 7C, 98..9B. Other loot ids near the gem one (actor_
+  lootPile 0x0802538C..0x08025B38): 0x63, 0x79, 0x62.
 - Direct: set ROTK_TTT_ROTK_SPRITES=1 (+ ROTK_TTT_ROTK_SKILLS=1) and/or ROTK_TTT_ROTK_PORTRAITS=1 and
   ROTK_TTT_ROTK_ROM (ROM = .private/rotk.gba), then run PlayTwoTowers.cmd. Checked headless at frame 3400 of the route: each
   alone and both together draw as expected.

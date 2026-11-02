@@ -225,6 +225,13 @@ group = "The Two Towers"
 default_enabled = true
 
 [[feature]]
+id = "ttt-rotk-sounds"
+name = "ROTK sound effects in The Two Towers"
+description = "When you switch to The Two Towers, some of its sound effects play Return of the King's instead (so far: picking up gems)."
+group = "The Two Towers"
+default_enabled = false
+
+[[feature]]
 id = "ttt-rotk-portraits"
 name = "ROTK portraits in The Two Towers"
 description = "When you switch to The Two Towers, the heroes, Sam, Smeagol, Eomer and Theoden speak with their Return of the King dialog portraits."
@@ -4000,6 +4007,10 @@ id = "rotk.pc.ttt-rotk-sprites"
 [[plugin]]
 feature = "ttt-rotk-skills"
 id = "rotk.pc.ttt-rotk-skills"
+
+[[plugin]]
+feature = "ttt-rotk-sounds"
+id = "rotk.pc.ttt-rotk-sounds"
 
 [[plugin]]
 feature = "ttt-rotk-portraits"
