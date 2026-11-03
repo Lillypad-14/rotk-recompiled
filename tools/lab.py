@@ -303,6 +303,27 @@ def build(args: argparse.Namespace) -> None:
             shutil.copyfile(source, target.host_build / name)
     if args.sdl2:
         shutil.copyfile(args.sdl2 / "bin/SDL2.dll", target.host_build / "SDL2.dll")
+    if target.name == "expanded":
+        refresh_launcher_edition(args)
+
+
+def refresh_launcher_edition(args: argparse.Namespace) -> None:
+    """Point the stock launcher's Expanded checkbox at the Expanded ROM just built.
+
+    The launcher patches the player's ROM with expanded.bps and hands the result to the Expanded
+    exe, which only accepts the exact ROM it was built from. A stale patch or hash makes Play do
+    nothing (the Expanded exe exits with "ROM SHA-1 mismatch").
+    """
+    launcher = ROOT / "build/host"
+    if not (launcher / "CMakeCache.txt").exists():
+        return
+    expanded_rom = TARGETS["expanded"].private / "rotk.gba"
+    patch = TARGETS["expanded"].private / "expanded.bps"
+    checked([sys.executable, ROOT / "tools/make_edition_patch.py", "--expanded", expanded_rom, "--out", patch])
+    sha1 = hashlib.sha1(expanded_rom.read_bytes()).hexdigest()
+    checked(["cmake", "-S", ROOT, "-B", launcher, f"-DROTK_EDITION_PATCH={patch.as_posix()}",
+             f"-DROTK_EDITION_SHA1={sha1}"])
+    checked(["cmake", "--build", launcher, "--target", TARGETS["stock"].executable, "--parallel", str(args.jobs)])
 
 
 def default_checkout(submodule: str, sibling: str) -> Path:

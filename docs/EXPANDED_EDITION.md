@@ -38,11 +38,41 @@ bound by the GBA's RAM. `prepare` picks `build/rotk_pc.gba` and `build/hack_pc.e
 ```powershell
 make -C ../rotk hack-pc
 python tools/lab.py prepare --target expanded --rom ../rotk/build/rotk_pc.gba --elf ../rotk/build/hack_pc.elf
-python tools/lab.py build --target expanded
-python tools/make_edition_patch.py     # .private/expanded/expanded.bps, prints the CMake settings
-cmake -S . -B build/host -DROTK_EDITION_PATCH=<bps> -DROTK_EDITION_SHA1=<sha1> -DROTK_EDITION_EXE=<expanded exe>
-python tools/lab.py build --target stock
+python tools/lab.py build --target expanded   # also refreshes the launcher's patch, see below
 ```
+
+`build --target expanded` ends by remaking `.private/expanded/expanded.bps` from the ROM it just built,
+reconfiguring `build/host` with that ROM's `ROTK_EDITION_SHA1`, and rebuilding the launcher. Set
+`ROTK_EDITION_EXE` once by hand when `build/host` is first configured:
+
+```powershell
+cmake -S . -B build/host -DROTK_EDITION_EXE=../host-expanded/ROTK-Recompiled-Expanded.exe
+```
+
+## Play does nothing (or "exited with code 1")
+
+Pressing Play with Expanded ticked closes or does nothing, and `Play.ps1` reports exit code 1. The
+Expanded exe printed `ROM SHA-1 mismatch: got <old> expected <new>` and quit.
+
+Cause: the Expanded build was re-prepared from a new mod ROM, but the launcher (`build/host`) still
+had the old `expanded.bps` and `ROTK_EDITION_SHA1`. The launcher found an old `-expanded.gba` that
+matched its old hash and handed it to the new Expanded exe, which only accepts its own ROM. This
+happened on 2026-11-02 after `prepare --target expanded` without refreshing the launcher.
+
+Fix: `python tools/lab.py build --target expanded`, which refreshes the launcher. By hand:
+
+```powershell
+python tools/make_edition_patch.py     # prints -DROTK_EDITION_SHA1=<sha1>
+cmake -S . -B build/host -DROTK_EDITION_SHA1=<sha1>
+cmake --build build/host --target ROTK-Recompiled
+```
+
+Check: `grep ROTK_EDITION_SHA1 build/host/CMakeCache.txt` must equal the SHA-1 of
+`.private/expanded/rotk.gba`. `Play.ps1` checks this before every launch, and warns when they differ.
+The game's own reason for quitting is printed just above the PowerShell error.
+
+Related: after a change to the `rotk.pc` manifest or its features, rebuild both `build/host` and
+`build/host-expanded`. An exe whose manifest is older fails with "cannot launch with selected mods".
 
 `ROTK_EDITION_EXE` is relative to the vanilla executable or absolute: a release puts both executables
 and `expanded.bps` in one folder. The patch is a Flips BPS delta (349 KB for mod 521e3b8);

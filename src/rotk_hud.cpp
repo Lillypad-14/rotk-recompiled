@@ -90,6 +90,8 @@ constexpr std::uint32_t kAfterOamCopy = 0x0800E270u;
 constexpr std::uint32_t kHudSetup = 0x080208A8u;
 // game flags: 0x400000 while the world is parked under a menu (the game's HUD draws then skip)
 constexpr std::uint32_t kGameFlags = 0x030039A8u, kWorldParked = 0x00400000u;
+// game flags: 0x08 while the game's own HUD is down (the Select menu, the backpack, level intros)
+constexpr std::uint32_t kHudDown = 0x00000008u;
 // g_PaletteBanks[0]: the BG palette's shadow buffer (copied to palette RAM by fades and cycles)
 constexpr std::uint32_t kBgPaletteBank = 0x030003E8u;
 constexpr std::uint32_t kPaletteFadeCount = 0x03003620u;  // fades running (they write palette RAM)  // lays a player's HUD out (level start, after menus)
@@ -491,7 +493,7 @@ void messageTest()
 int vblankEntry(std::uint32_t, int, ArmCpuState*)
 {
     // the HUD ticks with the game; menus, dialogs and scene changes stop it
-    if (g_state.lastTick++ < 4 && !(bus_read_u32(kGameFlags) & kWorldParked)) {
+    if (g_state.lastTick++ < 4 && !(bus_read_u32(kGameFlags) & (kWorldParked | kHudDown))) {
         if (std::getenv("ROTK_TTT_HUD_MSG_TEST")) messageTest();
         draw();
     }

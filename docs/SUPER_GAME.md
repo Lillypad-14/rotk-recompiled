@@ -630,7 +630,7 @@ How to run it:
   health, +0x0A/+0x6E spirit; HUD setup 0x080208A8, orb redraw 0x08020D00 (flag 0x10), experience
   bar 0x08020E24 (flag 0x08), HUD tick 0x080214B4, message text 0x0800DE14 from 0x08021388 (y 18 ->
   19 for ROTK's strip). The redraws are skipped (flags cleared); after each OAM copy, while the HUD
-  ticks and the world is not parked under a menu (game flags 0x030039A8 bit 0x400000), the host
+  ticks and the world is not parked under a menu (game flags 0x030039A8 bit 0x400000) and the game's HUD is not down (bit 0x08: the Select pause menu, the backpack, level intros; fixed 2026-11-02, the HUD's last draws had turned the pause menu's branches green and covered its bottom rows), the host
   writes ROTK's tiles into TTT HUD tile slots (0x01.., 0x3C, 0x50; TTT's message text uses 0x27..),
   the map rows 16..19 and the palette (bank = TTT's HUD bank, into the BG shadow 0x030003E8 too, and
   palette RAM unless a fade runs, 0x03003620). Checked headless on the Helm's Deep route: bars,

@@ -28,11 +28,21 @@ if ($Target -eq 'expanded') {
 if (!(Test-Path -LiteralPath $binary) -or !(Test-Path -LiteralPath $config)) {
     throw "Build the project first: python tools/lab.py prepare --target $Target; python tools/lab.py build --target $Target"
 }
+# The launcher's Expanded checkbox only works when its patch hash matches the Expanded build's ROM.
+$cache = Join-Path $projectRoot 'build/host/CMakeCache.txt'
+$expandedRom = Join-Path $projectRoot '.private/expanded/rotk.gba'
+if ((Test-Path -LiteralPath $cache) -and (Test-Path -LiteralPath $expandedRom)) {
+    $line = Select-String -LiteralPath $cache -Pattern '^ROTK_EDITION_SHA1:STRING=(.+)$' | Select-Object -First 1
+    $built = (Get-FileHash -LiteralPath $expandedRom -Algorithm SHA1).Hash.ToLower()
+    if ($line -and $line.Matches[0].Groups[1].Value -ne $built) {
+        Write-Warning "The launcher's Expanded patch is stale, so ticking Expanded and pressing Play will do nothing. Fix: python tools/lab.py build --target expanded (it refreshes the launcher). See docs/EXPANDED_EDITION.md 'Play does nothing'."
+    }
+}
 New-Item -ItemType Directory -Force -Path $playDirectory | Out-Null
 Push-Location $playDirectory
 try {
     & $binary --config $config --window --save-path "$playDirectory/$save" --state-dir "$playDirectory/states"
-    if ($LASTEXITCODE -ne 0) { throw "ROTK Recompiled exited with code $LASTEXITCODE" }
+    if ($LASTEXITCODE -ne 0) { throw "ROTK Recompiled exited with code $LASTEXITCODE. The game's reason is printed above this error." }
 } finally {
     Pop-Location
 }
