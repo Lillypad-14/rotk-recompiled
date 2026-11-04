@@ -1,0 +1,24 @@
+--- a/src/debug/tcp_debug_server.cpp
++++ b/src/debug/tcp_debug_server.cpp
+@@ -832,7 +832,20 @@
+             out = ok;
+             return;
+         }
+-        emit_error(out, "address range is not RAM/palette/VRAM/OAM");
++        // Cartridge data (dev tools that swap game data in a running session, such as the romhack's
++        // hero_fast.py push). Code is recompiled ahead of time, so only data reads see the change.
++        if (addr >= 0x08000000u && addr + len <= 0x08000000u + ctx.bus->rom_size()) {
++            auto* rom = const_cast<uint8_t*>(ctx.bus->rom_ptr());
++            for (std::size_t i = 0; i < len; ++i)
++                rom[addr - 0x08000000u + i] =
++                    static_cast<uint8_t>(std::strtoul(hex.substr(i * 2, 2).c_str(), nullptr, 16));
++            char ok[96];
++            std::snprintf(ok, sizeof(ok), "{\"ok\":true,\"addr\":%llu,\"len\":%zu}",
++                          static_cast<unsigned long long>(addr), len);
++            out = ok;
++            return;
++        }
++        emit_error(out, "address range is not RAM/palette/VRAM/OAM/ROM");
+         return;
+     }
+     if (contains("\"read_ewram\"")) {

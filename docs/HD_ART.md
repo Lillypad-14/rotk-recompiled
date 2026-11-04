@@ -14,8 +14,9 @@ priority and blend stack (sprites stay on top, fades still apply). The GBA build
 - ROTK (`src/hd_icons.cpp`): launcher feature "HD skill icons" (Display, on by default at 6x) with a
   "Render resolution" option (3x/4x/6x). Loads every pack under
   `mods/packages/rotk.pc/<version>/hd/<pack>/manifest.txt` and raises the internal resolution.
-- Packs: the romhack's `hacks/patches/ringwraith/icons_hd/` and
-  `hacks/patches/skill_expansion/<hero>_icons_hd/` (133 icons), copied into the package by CMake.
+- Packs: every `hacks/patches/*/icons_hd/` and `hacks/patches/*/*_icons_hd/` of the romhack
+  checkout in `ROTK_ROMHACK_DIR` (lab.py passes its `--decomp`, default `game/`), copied into the
+  package by CMake as `<dir>_<pack>`.
   `manifest.txt` lines: `<png> <tiles_w> <tiles_h> <tile data hex>`. PNGs are RGBA with the in-game
   icon's transparent corners; the art stays intact under the alpha.
 - Romhack tool (`hacks/tools/skill_icon_art.py`): `slice --hd DIR` saves each icon's full-resolution

@@ -123,12 +123,14 @@ if(ROTK_EDITION_PATCH AND ROTK_EDITION_EXE AND ROTK_EDITION_SHA1)
         "${ROTK_EDITION_PATCH}" "$<TARGET_FILE_DIR:${ROTK_EXECUTABLE}>/expanded.bps")
 endif()
 
-# HD art packs from the romhack (skill_icon_art.py build --hd-out), one folder per pack.
+# HD art packs from the romhack (skill_icon_art.py build --hd-out), one folder per pack. lab.py
+# passes the romhack checkout it builds the ROM from.
+set(ROTK_ROMHACK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/game" CACHE PATH "romhack checkout the HD packs come from")
 file(GLOB ROTK_HD_PACKS LIST_DIRECTORIES true CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/game/hacks/patches/*/icons_hd"
-    "${CMAKE_CURRENT_SOURCE_DIR}/game/hacks/patches/*/*_icons_hd")
+    "${ROTK_ROMHACK_DIR}/hacks/patches/*/icons_hd"
+    "${ROTK_ROMHACK_DIR}/hacks/patches/*/*_icons_hd")
 foreach(pack ${ROTK_HD_PACKS})
-    file(RELATIVE_PATH name "${CMAKE_CURRENT_SOURCE_DIR}/game/hacks/patches" "${pack}")
+    file(RELATIVE_PATH name "${ROTK_ROMHACK_DIR}/hacks/patches" "${pack}")
     string(REPLACE "/" "_" name "${name}")
     file(GLOB pack_files CONFIGURE_DEPENDS "${pack}/*")
     file(COPY ${pack_files} DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/mods/packages/rotk.pc/1.0.0/hd/${name}")

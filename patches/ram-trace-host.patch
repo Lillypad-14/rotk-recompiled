@@ -1,0 +1,17 @@
+--- a/src/runtime/runtime.cpp
++++ b/src/runtime/runtime.cpp
+@@ -2434,6 +2434,14 @@
+         reg(0x05000000u, bus.pal_ptr(),       1 * 1024);
+         reg(0x06000000u, bus.vram_ptr(),     96 * 1024);
+         reg(0x07000000u, bus.oam_ptr(),       1 * 1024);
++        // PC host RAM (game heap, actor pools): only the [lo, hi] slice, since
++        // the whole window is tens of MiB.
++        const uint32_t host_end = gba::kHostRamBase + static_cast<uint32_t>(bus.host_ram_size());
++        if (wram_trace_hi >= gba::kHostRamBase && wram_trace_lo < host_end) {
++            const uint32_t lo = std::max(wram_trace_lo, gba::kHostRamBase);
++            const uint32_t hi = std::min(wram_trace_hi, host_end - 1u);
++            reg(lo, bus.host_ram_ptr() + (lo - gba::kHostRamBase), hi - lo + 1u);
++        }
+     }
+     auto wram_trace_tick = [&]() {
+         if (!wram_trace_log) return;

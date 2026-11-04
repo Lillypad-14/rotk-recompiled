@@ -138,3 +138,8 @@ note = "sprite_composeOam: observed only, smooth motion tags the pushed pieces w
 addr = 0x08039324
 mode = "thumb"
 note = "fx_drawParticle: observed only, smooth motion stops tagging pieces with the last composed actor (src/smooth_motion.cpp)."
+
+[[mod_function_hook]]
+addr = 0x08002CD8
+mode = "thumb"
+note = "sprite_composeFrame: observed only, host palettes give the pieces of a frame set tagged HPAL their own colors (src/host_palettes.cpp)."

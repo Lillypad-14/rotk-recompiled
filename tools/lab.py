@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import re
 import shutil
+import os
 import subprocess
 import sys
 import zlib
@@ -43,6 +44,8 @@ FRAMEWORK_PATCHES = [
     ROOT / "patches/headless-framedump.patch",
     ROOT / "patches/host-palettes.patch",
     ROOT / "patches/launcher-companion-toggle.patch",
+    ROOT / "patches/ram-trace-host.patch",
+    ROOT / "patches/rom-poke.patch",
 ]
 
 # recomp-ui (launcher) patches, applied the same way to external/recomp-ui.
@@ -288,6 +291,8 @@ def build(args: argparse.Namespace) -> None:
         f"-DROTK_ROM_CRC32={provenance['rom_crc32']}",
         f"-DROTK_DEBUG_PORT={target.debug_port}",
         f"-DROTK_PLAIN_HOST={'ON' if target.name == 'ttt' else 'OFF'}"]
+    if target.name != "ttt":
+        command.append(f"-DROTK_ROMHACK_DIR={Path(args.decomp).resolve().as_posix()}")
     if target.name == "ttt":
         # its own mod and settings namespace: ROTK's mods are tied to ROTK's code
         command.append("-DROTK_MOD_GAME_ID=the_two_towers")
@@ -332,9 +337,47 @@ def default_checkout(submodule: str, sibling: str) -> Path:
     return inside if (inside / ".git").exists() else ROOT.parent / sibling
 
 
+def rebuild(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    """prepare + build in one go. Without --decomp it takes the romhack working tree beside this repo
+    (../rotk), where hacks and hero tools are developed, not the game submodule's older commit. A new
+    [[mod_function_hook]] in config/rotk.toml needs this (build alone keeps the old generated config)."""
+    if "--decomp" not in sys.argv:
+        sibling = ROOT.parent / "rotk"
+        if (sibling / "config/functions.cfg").exists():
+            args.decomp = sibling
+    target = TARGETS[args.target]
+    running = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {target.executable}.exe", "/NH"],
+                             capture_output=True, text=True).stdout if os.name == "nt" else ""
+    # tasklist cuts long names, so look for any matching row (it prints "INFO: No tasks" otherwise).
+    if running.strip() and not running.strip().startswith("INFO:"):
+        parser.error(f"{target.executable}.exe is running from the build folder: close it first (the link "
+                     "would fail). Copies started by the romhack's hero_fast.py are fine.")
+    print(f"rebuild {args.target} from {args.decomp}")
+    if target.name == "expanded" and args.rom is None and (args.decomp / "make/hack.mk").exists():
+        build_mod(args.decomp)
+    prepare(args)
+    build(args)
+
+
+def build_mod(decomp: Path) -> None:
+    """`make hack-pc` in the romhack, so prepare never takes a mod ROM older than its sources
+    (make rebuilds only what changed). Windows tool folders go first on PATH."""
+    env = dict(os.environ)
+    tools = Path(os.environ.get("LOCALAPPDATA", "")) / "rotk-tools"
+    extra = [tools / "arm-gcc/bin", tools / "armips",
+             Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft/WinGet/Links"]
+    env["PATH"] = os.pathsep.join([str(p) for p in extra if p.exists()] + [env.get("PATH", "")])
+    print(f"+ make hack-pc (in {decomp})")
+    result = subprocess.run(["make", "hack-pc"], cwd=decomp, env=env, capture_output=True, text=True)
+    if result.returncode:
+        errors = [line for line in (result.stdout + result.stderr).splitlines() if "error" in line.lower()]
+        raise SystemExit("make hack-pc failed:\n" + "\n".join(errors[-20:] or [result.stderr[-3000:]]))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "build"))
+    parser.add_argument("command", choices=("prepare", "build", "rebuild"),
+                        help="rebuild: prepare then build, from the romhack working tree beside this repo")
     parser.add_argument("--target", choices=sorted(TARGETS), default="stock")
     parser.add_argument("--framework", type=Path, default=default_checkout("external/gbarecomp", "gbarecomp"))
     parser.add_argument("--decomp", type=Path, default=default_checkout("game", "rotk"),
@@ -352,7 +395,10 @@ def main() -> None:
     if args.jobs < 1:
         parser.error("--jobs must be positive")
     try:
-        (prepare if args.command == "prepare" else build)(args)
+        if args.command == "rebuild":
+            rebuild(args, parser)
+        else:
+            (prepare if args.command == "prepare" else build)(args)
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
         print(error, file=sys.stderr)
         raise SystemExit(1)

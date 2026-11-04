@@ -23,5 +23,28 @@ On PC the renderer is ours, so a sprite piece can carry its own 16 colors:
   older host) legacy effects claim shared banks (`hackLib_fxUseColors`) and, with none free, borrow
   bank 2 one palette at a time until one frees up (`legacyFx_frameTick`).
 
-On when the Two Towers data is loaded. Single console only: split-screen co-op keeps one state (the
-legacy skills are single player).
+The host-RAM animation palettes are on when the Two Towers data is loaded. Single console only:
+split-screen co-op keeps one state (the legacy skills are single player).
+
+## Piece palettes (any colors in hero anims)
+
+The romhack's hero anims may use any `#rrggbb` color (romhack `docs/wip-docs/animation-studio.md`,
+"Colors"). Its encoder gives each sprite piece (OAM entry) that uses one its own 15 colors, so a
+frame of up to 31 pieces can show hundreds. Always on, on every target.
+
+- Data (romhack `hacks/tools/hero_data.py`, `place_frames`): such a frame set sits in the hero data
+  region right after `"HPAL"` and its table's address. Table: u32 frame count, a u32 entry address
+  per frame (0: none). Entry: u32 piece count, then per piece u16 tile offset, u16 1 if it has its
+  own colors, and 16 BGR555 colors.
+- Host: an observer on `sprite_composeFrame` (0x08002cd8, declared in `config/rotk.toml`) notes the
+  frame set and frame index (r0, r1) and the frame's first OBJ tile (the first stack argument). If
+  the frame set is tagged, each piece pushed next is matched by `attr2 tile - first tile` against the
+  entry's tile offsets and drawn in its colors through the same provider.
+- Untagged frame sets (every stock sprite, held weapons and hands) keep their OBJ banks.
+- `ROTK_PC_PIECE_PALETTE_LOG=1` prints composeFrame calls, tagged frames, tagged pieces and matches
+  every 512 pieces. All zero frames: the composeFrame hook is missing from the generated config.
+
+A new `[[mod_function_hook]]` in `config/rotk.toml` takes effect only after `lab.py prepare` (it
+regenerates `.private/<target>/rotk-*.toml`). `lab.py build` alone compiles a hook that never fires.
+Pass `--decomp ../rotk` to both when the romhack working tree is newer than the `game/` submodule,
+or the prepared ROM is the submodule's (the romhack's `hero_fast.py` then refuses to run).

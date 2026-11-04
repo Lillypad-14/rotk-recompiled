@@ -256,7 +256,7 @@ void writeInfoBlock()
     bus_write_u32(info + kInfoLegacyScratch, pc.itemTables);
     bus_write_u32(info + kInfoSuperGame, rotk::superGameAvailable() ? 1u : 0u);
     // bit 0: host palettes (sprites whose animation palette is in host RAM draw in it)
-    bus_write_u32(info + kInfoFeatures, rotk::hostPalettesActive() ? 1u : 0u);
+    bus_write_u32(info + kInfoFeatures, rotk::hostPalettesConvertedSprites() ? 1u : 0u);
     bus_write_u32(info + kInfoMagic, kPcInfoMagic);
 }
 
@@ -481,7 +481,7 @@ int pcPushOam(std::uint32_t, int, ArmCpuState* cpu)
         extra.lastPushExtra = false;
         rotk::widescreenNotePiece(buffer, count);
         rotk::smoothNotePiece(buffer, count);
-        rotk::hostPalettesNotePiece(buffer, count);
+        rotk::hostPalettesNotePiece(buffer, count, cpu->R[1]);
         return 0;
     }
     if (extra.counts[buffer] >= extra.capacity) {
@@ -497,7 +497,7 @@ int pcPushOam(std::uint32_t, int, ArmCpuState* cpu)
     }
     rotk::widescreenNotePiece(buffer, kHardwareObjects + extra.counts[buffer]);
     rotk::smoothNotePiece(buffer, kHardwareObjects + extra.counts[buffer]);
-    rotk::hostPalettesNotePiece(buffer, kHardwareObjects + extra.counts[buffer]);
+    rotk::hostPalettesNotePiece(buffer, kHardwareObjects + extra.counts[buffer], cpu->R[1]);
     const std::uint32_t slot = extra.counts[buffer]++ * 8u;
     for (std::uint32_t i = 0; i < 8u; ++i) {
         const std::uint8_t value = bus_read_u8(cpu->R[1] + i);
