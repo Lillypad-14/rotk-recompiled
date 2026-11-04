@@ -18,6 +18,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 HOST = ROOT / "build/host"
 HOST_EXPANDED = ROOT / "build/host-expanded"
+# The Two Towers, run beside ROTK for the main menu's The Two Towers row (src/super_game.cpp looks for
+# it beside the game executable).
+HOST_TTT = ROOT / "build/host-ttt"
 ENGINE = ROOT / "external/gbarecomp"
 
 FROM_HOST = ["ROTK-Recompiled.exe", "SDL2.dll", "libc++.dll", "libunwind.dll", "libwinpthread-1.dll",
@@ -43,7 +46,7 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=ROOT / ".private/release")
     args = parser.parse_args()
 
-    exes = [HOST / "ROTK-Recompiled.exe", HOST_EXPANDED / "ROTK-Recompiled-Expanded.exe"]
+    exes = [HOST / "ROTK-Recompiled.exe", HOST_EXPANDED / "ROTK-Recompiled-Expanded.exe", HOST_TTT / "TTT-Recompiled.exe"]
     for exe in exes:
         if pe_subsystem(exe) != 2:
             raise SystemExit(f"{exe} is a console program: configure with -DROTK_GUI_SUBSYSTEM=ON and rebuild")
@@ -53,7 +56,8 @@ def main() -> None:
     folder.mkdir(parents=True)
     for name in FROM_HOST:
         shutil.copy2(HOST / name, folder / name)
-    shutil.copy2(exes[1], folder / exes[1].name)
+    for exe in exes[1:]:
+        shutil.copy2(exe, folder / exe.name)
     shutil.copytree(HOST / "assets", folder / "assets")
     shutil.copytree(HOST / "mods/packages", folder / "mods/packages")
 

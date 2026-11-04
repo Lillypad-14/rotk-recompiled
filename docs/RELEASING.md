@@ -22,8 +22,11 @@ no ROM, BIOS or game art; the player picks their own ROM and BIOS in the launche
    python tools/lab.py build --target stock
    ```
 
-   Both release executables are Windows GUI programs, so players get no console window:
-   configure `build/host` and `build/host-expanded` with `-DROTK_GUI_SUBSYSTEM=ON` before building
+   The Two Towers executable too (`python tools/lab.py build --target ttt`): the game looks for it beside
+   itself, and without it hides the main menu's The Two Towers row.
+
+   All three release executables are Windows GUI programs, so players get no console window:
+   configure `build/host`, `build/host-expanded` and `build/host-ttt` with `-DROTK_GUI_SUBSYSTEM=ON` before building
    them. Turn it back off for development (`Play.ps1` and the test tools wait on the console).
 
 3. Check the patch: `build/host-expanded/RotkBpsPatchCheck.exe <unmodified rom> build/host/expanded.bps`
@@ -40,6 +43,7 @@ it refuses console builds and checks the bundled headers. The zip holds one fold
 | `build/host` | `ROTK-Recompiled.exe`, `SDL2.dll`, `libc++.dll`, `libunwind.dll`, `libwinpthread-1.dll`, `expanded.bps`, `launcher-window.ini`, `assets/` |
 | `build/host/mods` | `packages/` only |
 | `build/host-expanded` | `ROTK-Recompiled-Expanded.exe` |
+| `build/host-ttt` | `TTT-Recompiled.exe`: without it the main menu has no The Two Towers row |
 | `external/gbarecomp/tools/fetch_tcc.ps1 -Toolchain <zip folder>\overlay_toolchain` | `overlay_toolchain/`: TinyCC and the overlay headers |
 | repository | `LICENSE`, `patches/LICENSE.md`, `CREDITS.md` in `licenses/`, and a `PLAY.txt` |
 

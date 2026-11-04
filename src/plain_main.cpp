@@ -26,6 +26,8 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <string>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -510,6 +512,16 @@ bool presentDecorateActive()
 
 int main(int argc, char** argv)
 {
+    // A release ships this beside ROTK, whose mods/ holds ROTK's package: The Two Towers keeps its own
+    // mods-ttt/ folder unless a launcher names one.
+    if (const char* root = std::getenv("GBARECOMP_MODS_ROOT"); (!root || !*root) && argc > 0 && argv && argv[0]) {
+        const std::string mods = (std::filesystem::path(argv[0]).parent_path() / "mods-ttt").string();
+#if defined(_WIN32)
+        _putenv_s("GBARECOMP_MODS_ROOT", mods.c_str());
+#else
+        setenv("GBARECOMP_MODS_ROOT", mods.c_str(), 1);
+#endif
+    }
     gbarecomp::RunOptions options;
     options.builtin_game_name = ROTK_GAME_NAME;
     options.builtin_rom_sha1 = ROTK_ROM_SHA1;
