@@ -1,0 +1,20 @@
+diff --git a/src/runtime/bios_hle.cpp b/src/runtime/bios_hle.cpp
+index 40ba197..6af6897 100644
+--- a/src/runtime/bios_hle.cpp
++++ b/src/runtime/bios_hle.cpp
+@@ -537,6 +537,15 @@ void bios_hle_boot_skip(uint32_t cart_entry) {
+     // its own during init. Zero = none yet. (IME defaults to 0, so no IRQ can
+     // vector before the game programs IE/IME anyway.)
+     bus_write_u32(0x03007FFCu, 0);
++    // IO the BIOS leaves set: identity BG2/BG3 affine matrices (a game that draws mode 3/4/5
++    // video without writing them, such as The Two Towers' intro movie, shows black otherwise),
++    // RCNT general-purpose mode and POSTFLG "booted".
++    bus_write_u16(0x04000020u, 0x0100);  // BG2PA
++    bus_write_u16(0x04000026u, 0x0100);  // BG2PD
++    bus_write_u16(0x04000030u, 0x0100);  // BG3PA
++    bus_write_u16(0x04000036u, 0x0100);  // BG3PD
++    bus_write_u16(0x04000134u, 0x8000);  // RCNT
++    bus_write_u8(0x04000300u, 1);        // POSTFLG
+ }
+ 
+ BiosHleMode bios_hle_mode() { return g_mode; }

@@ -798,6 +798,12 @@ Done (each checked headless):
    from frame 1520 of the Helm's Deep route (player +0xBC + 24 = ff ff 13 ff, +0x25 and +0x30 = 1),
    replay the route with its ABSOLUTE frames (a loaded state keeps its frame count), then fight from
    5560. `ROTK_TTT_TRACE_READS=1` logs every overridden ROM read with the first records it returns.
+8c. Black intro movie (2026-11-06): ROTK starts The Two Towers with `--bios-skip-intro`, whose
+   boot synthesizer left BG2PA/PD and BG3PA/PD at 0 (the BIOS sets 0x100). The movie is mode 4 on
+   BG2 and never writes the matrix, so every pixel sampled one point: black for the whole movie.
+   patches/boot-skip-io.patch sets the identity matrices, RCNT 0x8000 and POSTFLG 1. Headless runs
+   with game.toml booted the real BIOS and never showed it; reproduce with the release folder's
+   exe, `--bios-skip-intro`, and no presses after the hero pick (route presses skip the movie).
 7. Dialog portraits (3e9c339, 79b5987): the Two Towers' per-line speaker table 0x0832B524 (8 bytes
    per text line, BG asset first; scene_inGameDialog 0x08013498 loads it, drawn as a 6x6-tile map;
    no "active hero" fallback, unlike ROTK) is answered with ROTK's DialogPortraits (0x08D3DCE0,
