@@ -578,7 +578,8 @@ Next session, in order:
    (ROTK keeps a combo sound pending in comboState[4]).
 2. Other cutscenes and ally summons (Summon Gimli, Call Legolas) with the NPC table fix: only two
    intro scenes were checked. Swing sound on chained swings still unconfirmed.
-3. Aragorn's two pose variants (0x0832946C, 0x083293E0, see Done 5) never seen in play.
+3. Aragorn's pose variant 0x0832946C (see Done 5) never seen in play. 0x083293E0 is his attack with
+   Dual Wield (Done 8b).
 
 Commits this phase: 17da709 bodies, 786c711 weapons, 7ef6848 skill animations, 28aa44c weapon
 kinds, b139e21 hits, 921cbbf weapon colors, 22f1aa5 combo, fdca774 specials (build after the cart
@@ -789,6 +790,14 @@ Done (each checked headless):
    (SpriteAnimation +12: 2 for Frodo, Aragorn, Gandalf; 3 for Legolas, Eowyn, Gimli). Aragorn's
    idle now changes every 4 video frames. Walk and swing were already at ROTK's 1 (ROTK's Eowyn
    and Gimli walk at 2; left alone, the walk is tied to movement).
+8b. Dual Wield (2026-11-06): with Aragorn's skill 0 (Dual Wield) and a sword in inventory slot 6 (the
+   second hand), player_tick loads his attack from the literal 0x0801B684 = 0x083293E0 instead of the
+   pose table, and the second sword is weapon kind 5. The literal now answers `comboAttack(2)`, so
+   the swing runs the ROTK chain (it used to play one fixed swing, melee -1); kind 5 draws his ROTK
+   sword again 5 px left and 3 px up (`WeaponSource` dx/dy) so both blades show. Test: patch a state
+   from frame 1520 of the Helm's Deep route (player +0xBC + 24 = ff ff 13 ff, +0x25 and +0x30 = 1),
+   replay the route with its ABSOLUTE frames (a loaded state keeps its frame count), then fight from
+   5560. `ROTK_TTT_TRACE_READS=1` logs every overridden ROM read with the first records it returns.
 7. Dialog portraits (3e9c339, 79b5987): the Two Towers' per-line speaker table 0x0832B524 (8 bytes
    per text line, BG asset first; scene_inGameDialog 0x08013498 loads it, drawn as a 6x6-tile map;
    no "active hero" fallback, unlike ROTK) is answered with ROTK's DialogPortraits (0x08D3DCE0,

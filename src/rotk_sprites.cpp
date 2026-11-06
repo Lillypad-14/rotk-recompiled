@@ -45,6 +45,8 @@ constexpr std::uint32_t kBlankFrames = 64;
 struct WeaponSource {
     int hero;
     std::uint32_t part;
+    // pixels the part is drawn from its place in ROTK's art (a second sword beside the first)
+    int dx = 0, dy = 0;
 };
 constexpr WeaponSource kWeaponSources[] = {
     {0, 0},  // 0 Frodo's off hand
@@ -52,7 +54,7 @@ constexpr WeaponSource kWeaponSources[] = {
     {1, 1},  // 2 Legolas's bow
     {2, 1},  // 3 Aragorn's sword
     {2, 0},  // 4 Aragorn's off hand (NPC)
-    {2, 0},  // 5 Aragorn's off-hand long sword (NPC)
+    {2, 1, -5, -3},  // 5 Aragorn's second sword (worn in the second hand): his sword again, beside the first
     {3, 0},  // 6 Gandalf the Grey's hat
     {3, 1},  // 7 Gandalf's sword (NPC main hand)
     {3, 2},  // 8 Gandalf's staff
@@ -135,6 +137,9 @@ constexpr Special kSpecials[] = {
     // Eowyn
     {0x08329624u, 4, {kMeleeBanks, 2}}, {0x08329638u, 4, {kMeleeBanks, 4}},
 };
+// Aragorn's attack while he wears two swords (Dual Wield), a code literal in player_tick.
+constexpr std::uint32_t kDualWieldAttack = 0x083293E0u;
+constexpr int kAragorn = 2;
 constexpr std::uint32_t kCodeStart = 0x08000000u, kCodeEnd = 0x08060000u;
 
 // Dialog portraits. The Two Towers: DialogLineInfos-like table (8 bytes per text line, the
@@ -397,7 +402,8 @@ std::vector<std::vector<Box>> planBoxes(const Bytes& rom, std::uint32_t frameSet
 
 // A ROTK animation in the Two Towers' format (raw tiles, 12-byte pieces, 8-byte boxes), boxes as
 // planned and at least minFrames frames (the last repeated).
-Converted convert(const Bytes& rom, std::uint32_t animation, const BoxPlan& plan, std::uint32_t minFrames = 0)
+Converted convert(const Bytes& rom, std::uint32_t animation, const BoxPlan& plan, std::uint32_t minFrames = 0,
+                  int dx = 0, int dy = 0)
 {
     Converted out;
     const std::uint32_t tilesBase = r32(rom, animation), frameSet = r32(rom, animation + 4);
@@ -434,8 +440,8 @@ Converted convert(const Bytes& rom, std::uint32_t animation, const BoxPlan& plan
             const std::uint32_t x = v & 0x1FFu, y = v >> 9 & 0x1FFu, size = v >> 18 & 3u, shape = v >> 20 & 3u;
             const std::uint32_t tile = v >> 22 & 0x3FFu;
             // signed 16-bit in the Two Towers' pieces, 9-bit in ROTK's
-            put16(b, x & 0x100u ? x | 0xFE00u : x);
-            put16(b, y & 0x100u ? y | 0xFE00u : y);
+            put16(b, static_cast<std::uint32_t>((x & 0x100u ? static_cast<int>(x) - 0x200 : static_cast<int>(x)) + dx));
+            put16(b, static_cast<std::uint32_t>((y & 0x100u ? static_cast<int>(y) - 0x200 : static_cast<int>(y)) + dy));
             b.push_back(static_cast<std::uint8_t>(size));
             b.push_back(static_cast<std::uint8_t>(shape));
             b.push_back(static_cast<std::uint8_t>(shape < 3 ? kObjWidth[shape][size] : 8));
@@ -694,7 +700,8 @@ void build()
             BoxPlan plan;
             plan.weapon = true;
             if (strike) plan.tt = ttBoxes(bus_read_u32(ttFacings + facing * 4u), 0);
-            const Converted c = art ? convert(rom, entry + facing * kRecordSize, plan, bodyFrames)
+            const Converted c = art ? convert(rom, entry + facing * kRecordSize, plan, bodyFrames,
+                                            kWeaponSources[kind].dx, kWeaponSources[kind].dy)
                                     : blankAnimation(blankBoxes(scaleBoxes(plan.tt, bodyFrames)));
             Bytes record;
             put32(record, append(image, c.tiles));
@@ -929,7 +936,20 @@ void comboApply()
     }
 }
 
+int romRead32Inner(std::uint32_t address, std::uint32_t original, std::uint32_t* out);
 int romRead32(std::uint32_t address, std::uint32_t original, std::uint32_t* out)
+{
+    const int r = romRead32Inner(address, original, out);
+    if (r && std::getenv("ROTK_TTT_TRACE_READS")) {
+        const auto saved = gba::g_rom_read32_override;
+        gba::g_rom_read32_override = nullptr;
+        std::fprintf(stderr, "[read] %08X orig=%08X out=%08X f0=%08X f2=%08X\n", address, original, *out,
+                     *out >= kDataBase ? bus_read_u32(*out) : 0, *out >= kDataBase ? bus_read_u32(*out + 8) : 0);
+        gba::g_rom_read32_override = saved;
+    }
+    return r;
+}
+int romRead32Inner(std::uint32_t address, std::uint32_t original, std::uint32_t* out)
 {
     // built on the first ROM read: the cart is not mapped yet when reset runs. The build reads the
     // Two Towers' own tables, so without the override.
@@ -971,7 +991,8 @@ int romRead32(std::uint32_t address, std::uint32_t original, std::uint32_t* out)
                 if (std::getenv("ROTK_TTT_TRACE_SPECIAL"))
                     std::fprintf(stderr, "[special] %08X at %u\n", address,
                                  bus_read_u32(bus_read_u32(kGameStatePointer) + kGameFrame));
-                *out = array;
+                // Aragorn's attack with Dual Wield (two swords worn) starts the combo chain too
+                *out = original == kDualWieldAttack ? comboAttack(kAragorn) : array;
                 return 1;
             }
         return 0;
