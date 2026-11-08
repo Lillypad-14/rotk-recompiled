@@ -436,8 +436,35 @@ bool frame(gbarecomp::LocalLinkFrame* link)
                 // Both players' actor positions (g_PlayerGlobals.players[p] actor, coords at +0xAC).
                 for (std::uint32_t p = 0; p < 2; ++p) {
                     const std::uint32_t actor = bus.read32(0x03003C00u + p * 0x1ACu);
-                    if (actor) std::fprintf(trace, " p%u=%08x,%08x", p, bus.read32(actor + 0xACu), bus.read32(actor + 0xB0u));
+                    // Then the actor's type, actionState and movementCollisionBox, the hero id, the
+                    // trigger box count and box 0 (bounds, enable).
+                    if (actor)
+                        std::fprintf(trace, " p%u=%08x,%08x/%u/%u/%08x/h%u/t%u:%04x%04x%02x", p, bus.read32(actor + 0xACu),
+                                     bus.read32(actor + 0xB0u), bus.read8(actor + 0xF0u), bus.read8(actor + 0x62u),
+                                     bus.read32(actor + 0x30u), bus.read8(0x03003C00u + p * 0x1ACu + 0x19Fu),
+                                     bus.read8(actor + 0xFBu), bus.read16(actor + 0x36u), bus.read16(actor + 0x38u),
+                                     bus.read8(actor + 0x3Au));
+                    // The player's HP, Spirit and selected skill row.
+                    const std::uint32_t player = 0x03003C00u + p * 0x1ACu;
+                    std::fprintf(trace, " hp%u=%d,%d,%u,k%u", p, static_cast<std::int16_t>(bus.read16(player + 380u)),
+                                 static_cast<std::int16_t>(bus.read16(player + 382u)), bus.read8(player + 400u),
+                                 bus.read16(player + 390u));
+                    // The actor's own currentHp and flags.
+                    if (actor)
+                        std::fprintf(trace, " a%u=%d,%08x", p, static_cast<std::int16_t>(bus.read16(actor + 0x5Au)),
+                                     bus.read32(actor + 0xE8u));
                 }
+                // g_CurrentMissionId.
+                std::fprintf(trace, " m=%u", bus.read32(0x03004174u));
+                // ROTK_PC_PROBE_ADDR=<hex>: g_HackLibPlayerProbe (effects, stuns, hits per player).
+                static const std::uint32_t probe = [] {
+                    const char* text = std::getenv("ROTK_PC_PROBE_ADDR");
+                    return text ? static_cast<std::uint32_t>(std::strtoul(text, nullptr, 16)) : 0u;
+                }();
+                if (probe)
+                    std::fprintf(trace, " pr=%u,%u,%u,%u,%u,%u", bus.read8(probe), bus.read8(probe + 1),
+                                 bus.read8(probe + 2), bus.read8(probe + 3), bus.read8(probe + 4),
+                                 bus.read8(probe + 5));
             }
             static std::uint64_t interpreted = 0;
             const std::uint64_t interpretedNow = gbarecomp::self_heal_interpreted_insns();

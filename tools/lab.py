@@ -328,7 +328,9 @@ def refresh_launcher_edition(args: argparse.Namespace) -> None:
     checked([sys.executable, ROOT / "tools/make_edition_patch.py", "--expanded", expanded_rom, "--out", patch])
     sha1 = hashlib.sha1(expanded_rom.read_bytes()).hexdigest()
     checked(["cmake", "-S", ROOT, "-B", launcher, f"-DROTK_EDITION_PATCH={patch.as_posix()}",
-             f"-DROTK_EDITION_SHA1={sha1}"])
+             f"-DROTK_EDITION_SHA1={sha1}",
+             # a release configure (docs/RELEASING.md) leaves the bare name, which dev builds can't find
+             "-DROTK_EDITION_EXE=../host-expanded/ROTK-Recompiled-Expanded.exe"])
     checked(["cmake", "--build", launcher, "--target", TARGETS["stock"].executable, "--parallel", str(args.jobs)])
 
 

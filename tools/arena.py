@@ -35,7 +35,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ROM_BASE = 0x08000000
 CONFIG_SYMBOL = "testArena_config"
 # Config words, in TestArenaConfig order (rotk hacks/patches/test_arena/test_arena.h).
-CONFIG_WORDS = 8
+CONFIG_WORDS = 9
 # ARENA_ROW values, in TestArenaSweepValue order.
 ROW_FIELDS = ("row", "accepted", "recast", "hits", "kills", "damage", "player_hp", "lag_ticks",
               "worst_vblanks", "heap_room", "alloc_failures", "invalid_frees", "bss_guard",
@@ -62,8 +62,8 @@ def write_config(args: argparse.Namespace, rom: bytearray, out: Path) -> Path:
     words = struct.unpack_from(f"<{CONFIG_WORDS}I", rom, offset)
     if words[1:] != (0,) * (CONFIG_WORDS - 1) and out.parent != ROOT / ".private/arena":
         raise SystemExit("the arena ROM's config is not the build's default; pass the unpatched ROM")
-    struct.pack_into(f"<{CONFIG_WORDS}I", rom, offset, args.hero, args.ticks, args.fixture, 0, 0, 0,
-                     args.legacy_level, args.first_row)
+    struct.pack_into(f"<{CONFIG_WORDS}I", rom, offset, args.hero, args.ticks, args.fixture, args.bench_ticks, args.crowd, 0,
+                     args.legacy_level, args.first_row, args.loot)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(bytes(rom))
     # Same build as the ELF: keep its time, so lab.py's ELF-older-than-ROM check holds.
@@ -82,6 +82,11 @@ def main() -> None:
     parser.add_argument("--fixture", type=int, default=0, help="0 dummy, 1 three archers, 2 fire archer")
     parser.add_argument("--legacy-level", type=int, default=5)
     parser.add_argument("--first-row", type=int, default=13)
+    parser.add_argument("--bench-ticks", type=int, default=0,
+                        help="busy fight benchmark instead of a sweep: ticks to run (casts every skill nonstop)")
+    parser.add_argument("--crowd", type=int, default=0, help="living foes the benchmark keeps around the hero")
+    parser.add_argument("--loot", type=int, default=0,
+                        help="loot report instead of a sweep: drops rolled per hero and source (ARENA_LOOT)")
     parser.add_argument("--two-towers", type=Path, default=ROOT.parent / TWO_TOWERS_ROM)
     parser.add_argument("--frames", type=int, default=20000)
     parser.add_argument("--nm", default="arm-none-eabi-nm")

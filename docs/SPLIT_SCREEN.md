@@ -112,7 +112,7 @@ page 2 into the stock rows only while it handles input and draws, so the actor t
 messages always see every row in its own place. Purchases, cycle toggles and quick-select binds go
 out as link message `0x0b` with unswapped rows, and both consoles apply them on the same frame,
 checking a purchase again so a second press sent before the first applies can't overspend. After
-the stock slot exchange, each console sends its page 2 record (24 bytes in 4 messages) before the
+the stock slot exchange, each console sends its page 2 record (with its kit, whole hero id and row 5 rank) before the
 peer's slot loads.
 
 The same record carries the host's gameplay mod options (Loot QoL, Debug cheats, Twists,

@@ -21,5 +21,9 @@ bool hostPalettesConvertedSprites();
 void hostPalettesNotePiece(int buffer, std::uint32_t index, std::uint32_t oam);
 // The buffer the VBlank handler last copied to OAM.
 void hostPalettesSetDisplayed(int buffer);
+// Split-screen co-op: one state per console (-1 = solo).
+void hostPalettesStartCoop();
+void hostPalettesEndCoop();
+void hostPalettesSelectConsole(int console);
 
 }  // namespace rotk

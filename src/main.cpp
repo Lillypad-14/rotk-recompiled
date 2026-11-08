@@ -684,6 +684,7 @@ void pcFeaturesStartCoop()
     widescreenStartCoop();
     smoothStartCoop();
     transparencyStartCoop();
+    hostPalettesStartCoop();
     rotk::hdAudioStartCoop();
     rotk::duelHudSetCoop(true);
 }
@@ -695,6 +696,7 @@ void pcFeaturesEndCoop()
         gba_mod_set_function_hook_runs_suspended(id, 0);
     widescreenEndCoop();
     smoothEndCoop();
+    hostPalettesEndCoop();
     rotk::hdAudioEndCoop();
     pcFeaturesSelectConsole(-1);
     if (g_coopEngineLayout) {
@@ -712,6 +714,7 @@ void pcFeaturesSelectConsole(int console)
     widescreenSelectConsole(console);
     smoothSelectConsole(console);
     transparencySelectConsole(console);
+    hostPalettesSelectConsole(console);
 }
 
 }  // namespace rotk

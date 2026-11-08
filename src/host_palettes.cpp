@@ -60,47 +60,48 @@ struct State {
     std::uint64_t frames = 0, tagged = 0, tries = 0, matched = 0;
 };
 
-State g_state;
+State g_states[3];  // solo, co-op console 1, co-op console 2 (each has its own sprites)
+State* g = &g_states[0];
 
 int composeEntry(std::uint32_t, int, ArmCpuState* cpu)
 {
-    g_state.actor = cpu->R[0];
-    g_state.frameEntry = 0;
+    g->actor = cpu->R[0];
+    g->frameEntry = 0;
     return 0;  // observe only
 }
 
 int particleEntry(std::uint32_t, int, ArmCpuState*)
 {
-    g_state.actor = 0;
-    g_state.frameEntry = 0;
+    g->actor = 0;
+    g->frameEntry = 0;
     return 0;
 }
 int frameEntry(std::uint32_t, int, ArmCpuState* cpu)
 {
-    g_state.frameEntry = 0;
-    ++g_state.frames;
+    g->frameEntry = 0;
+    ++g->frames;
     const std::uint32_t frameSet = cpu->R[0];
     if (frameSet < kRomStart + 8u || frameSet >= kRomEnd || bus_read_u32(frameSet - 8u) != kPieceMagic) return 0;
     const std::uint32_t table = bus_read_u32(frameSet - 4u);
     const std::uint32_t index = cpu->R[1] & 0xFFFFu;
     if (table < kRomStart || table >= kRomEnd || index >= bus_read_u32(table)) return 0;
-    g_state.frameEntry = bus_read_u32(table + 4u + index * 4u);
-    ++g_state.tagged;
-    g_state.frameTile = bus_read_u16(cpu->R[13]);
+    g->frameEntry = bus_read_u32(table + 4u + index * 4u);
+    ++g->tagged;
+    g->frameTile = bus_read_u16(cpu->R[13]);
     return 0;
 }
 // The colors of a pushed piece of the current frame (matched by its tile), or 0.
 std::uint32_t piecePalette(std::uint32_t oam)
 {
-    const std::uint32_t entry = g_state.frameEntry;
+    const std::uint32_t entry = g->frameEntry;
     if (entry < kRomStart || entry >= kRomEnd || oam == 0) return 0;
-    const std::uint32_t offset = (bus_read_u16(oam + 4u) - g_state.frameTile) & 0x3FFu;
-    ++g_state.tries;
+    const std::uint32_t offset = (bus_read_u16(oam + 4u) - g->frameTile) & 0x3FFu;
+    ++g->tries;
     const std::uint32_t count = bus_read_u32(entry);
     for (std::uint32_t k = 0; k < count && k < 128u; ++k) {
         const std::uint32_t piece = entry + 4u + k * kPieceBytes;
         if (bus_read_u16(piece) == offset) {
-            ++g_state.matched;
+            ++g->matched;
             return bus_read_u16(piece + 2u) ? piece + 4u : 0;
         }
     }
@@ -113,30 +114,30 @@ std::uint32_t ownPalette(std::uint32_t actor)
     if (actor == 0) return 0;
     const std::uint32_t animation = bus_read_u32(actor + kActorAnimation);
     if (animation < 0x02000000u) return 0;
-    if (!g_state.animationPalettes) return 0;
+    if (!g->animationPalettes) return 0;
     const std::uint32_t palette = bus_read_u32(animation + kAnimationPalette);
     return palette >= kHostRamStart && palette + kPaletteBytes <= kHostRamEnd ? palette : 0;
 }
 
 int colorsIndex(int buffer, std::uint32_t address)
 {
-    std::vector<std::uint32_t>& addresses = g_state.addresses[buffer];
+    std::vector<std::uint32_t>& addresses = g->addresses[buffer];
     for (std::size_t i = 0; i < addresses.size(); ++i)
         if (addresses[i] == address) return static_cast<int>(i);
     Colors colors;
     for (std::uint32_t i = 0; i < kPaletteBytes; ++i) colors[i] = bus_read_u8(address + i);
     addresses.push_back(address);
-    g_state.colors[buffer].push_back(colors);
+    g->colors[buffer].push_back(colors);
     return static_cast<int>(addresses.size() - 1);
 }
 
 const std::uint8_t* paletteProvider(std::uint32_t index)
 {
-    const int buffer = g_state.displayed;
+    const int buffer = g->displayed;
     if (buffer < 0) return nullptr;
-    const std::vector<int>& pieces = g_state.pieces[buffer];
+    const std::vector<int>& pieces = g->pieces[buffer];
     if (index >= pieces.size() || pieces[index] < 0) return nullptr;
-    return g_state.colors[buffer][pieces[index]].data();
+    return g->colors[buffer][pieces[index]].data();
 }
 
 }  // namespace
@@ -150,53 +151,82 @@ void hostPalettesRegister()
 
 void hostPalettesApply(bool twoTowersData)
 {
-    g_state = State{};
-    g_state.enabled = true;
-    g_state.animationPalettes = twoTowersData;
-    if (const char* v = std::getenv("ROTK_PC_PIECE_PALETTE_LOG")) g_state.log = v[0] == '1';
-    if (g_state.log) std::fprintf(stderr, "[rotk] piece palettes on\n");
-    gba_mod_set_function_hook_enabled(kComposeHookId, g_state.enabled);
-    gba_mod_set_function_hook_enabled(kParticleHookId, g_state.enabled);
-    gba_mod_set_function_hook_enabled(kFrameHookId, g_state.enabled);
-    gba::g_obj_palette_provider = g_state.enabled ? paletteProvider : nullptr;
+    g_states[0] = State{};
+    g = &g_states[0];
+    g->enabled = true;
+    g->animationPalettes = twoTowersData;
+    if (const char* v = std::getenv("ROTK_PC_PIECE_PALETTE_LOG")) g->log = v[0] == '1';
+    if (g->log) std::fprintf(stderr, "[rotk] piece palettes on\n");
+    gba_mod_set_function_hook_enabled(kComposeHookId, g->enabled);
+    gba_mod_set_function_hook_enabled(kParticleHookId, g->enabled);
+    gba_mod_set_function_hook_enabled(kFrameHookId, g->enabled);
+    gba::g_obj_palette_provider = g->enabled ? paletteProvider : nullptr;
+}
+
+// Co-op: both consoles compose sprites, so each needs its own owner/frame tracking and piece table,
+// and the compose hooks must keep running while the session suspends mod hooks. Without this the
+// custom-colored hero anims (Witch-king, Guard of Gondor) drew in the wrong OBJ bank's colors.
+void hostPalettesStartCoop()
+{
+    for (int console = 1; console <= 2; ++console) {
+        State& state = g_states[console];
+        state = State{};
+        state.enabled = g_states[0].enabled;
+        state.animationPalettes = g_states[0].animationPalettes;
+        state.log = g_states[0].log;
+    }
+    for (const char* id : {kComposeHookId, kParticleHookId, kFrameHookId})
+        gba_mod_set_function_hook_runs_suspended(id, 1);
+}
+
+void hostPalettesEndCoop()
+{
+    for (const char* id : {kComposeHookId, kParticleHookId, kFrameHookId})
+        gba_mod_set_function_hook_runs_suspended(id, 0);
+    hostPalettesSelectConsole(-1);
+}
+
+void hostPalettesSelectConsole(int console)
+{
+    g = console >= 0 && console < 2 ? &g_states[console + 1] : &g_states[0];
 }
 
 bool hostPalettesActive()
 {
-    return g_state.enabled;
+    return g->enabled;
 }
 bool hostPalettesConvertedSprites()
 {
-    return g_state.enabled && g_state.animationPalettes;
+    return g->enabled && g->animationPalettes;
 }
 void hostPalettesNotePiece(int buffer, std::uint32_t index, std::uint32_t oam)
 {
-    if (!g_state.enabled || buffer < 0 || buffer > 1) return;
-    std::vector<int>& pieces = g_state.pieces[buffer];
+    if (!g->enabled || buffer < 0 || buffer > 1) return;
+    std::vector<int>& pieces = g->pieces[buffer];
     if (index == 0) {
         // a new frame in this buffer
         pieces.clear();
-        g_state.colors[buffer].clear();
-        g_state.addresses[buffer].clear();
+        g->colors[buffer].clear();
+        g->addresses[buffer].clear();
     }
     if (pieces.size() <= index) pieces.resize(index + 1u, -1);
     std::uint32_t palette = piecePalette(oam);
-    if (!palette) palette = ownPalette(g_state.actor);
+    if (!palette) palette = ownPalette(g->actor);
     pieces[index] = palette ? colorsIndex(buffer, palette) : -1;
-    ++g_state.pushed;
-    if (palette) ++g_state.owned;
-    if (g_state.log && g_state.pushed % 512u == 0)
+    ++g->pushed;
+    if (palette) ++g->owned;
+    if (g->log && g->pushed % 512u == 0)
         std::fprintf(stderr, "[rotk] piece palettes: %llu frames, %llu tagged, %llu tagged pieces, %llu matched, "
                      "%llu of %llu pieces in own colors (last tile %u, frame tile %u)\n",
-                     (unsigned long long)g_state.frames, (unsigned long long)g_state.tagged,
-                     (unsigned long long)g_state.tries, (unsigned long long)g_state.matched,
-                     (unsigned long long)g_state.owned, (unsigned long long)g_state.pushed,
-                     oam ? (unsigned)(bus_read_u16(oam + 4u) & 0x3FFu) : 0u, (unsigned)g_state.frameTile);
+                     (unsigned long long)g->frames, (unsigned long long)g->tagged,
+                     (unsigned long long)g->tries, (unsigned long long)g->matched,
+                     (unsigned long long)g->owned, (unsigned long long)g->pushed,
+                     oam ? (unsigned)(bus_read_u16(oam + 4u) & 0x3FFu) : 0u, (unsigned)g->frameTile);
 }
 
 void hostPalettesSetDisplayed(int buffer)
 {
-    g_state.displayed = buffer;
+    g->displayed = buffer;
 }
 
 }  // namespace rotk
