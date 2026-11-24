@@ -35,6 +35,8 @@ unsigned long long g_tickEntries = 0, g_velocityEntries = 0;
 
 // Set by the framework's input pump in host_window.cpp.
 extern "C" float gba_analog_move[2];
+extern "C" float gba_analog_x[2];
+extern "C" float gba_analog_y[2];
 
 void returnToCaller(ArmCpuState* cpu)
 {
@@ -84,14 +86,34 @@ int setVelocityEntry(std::uint32_t, int, ArmCpuState* cpu)
                      cpu->R[0], actor, player, cpu->R[3]);
     if (!g_enabled || !actor || player < 0) return 0;
     ++g_movementCalls;
-    const float magnitude = g_forcedMagnitude >= 0.0f ? g_forcedMagnitude : gba_analog_move[player];
-    if (!(magnitude > 0.0f) || magnitude >= 0.999f) return 0;
     // The player's movement call passes its own moveSpeed and may write through
     // a temporary vector that the tick then copies into the actor.
     if (cpu->R[3] != bus_read_u32(actor + kActorMoveSpeed)) return 0;
+    const float magnitude = g_forcedMagnitude >= 0.0f ? g_forcedMagnitude : gba_analog_move[player];
+    const float stick_x = gba_analog_x[player];
+    const float stick_y = gba_analog_y[player];
+    const bool stick_angle = stick_x != 0.0f || stick_y != 0.0f;
+    // Without a stick vector keep the original eight-way table; with one, use
+    // the stick's own angle so diagonal movement is not quantised to 45 degrees.
+    if (stick_angle) {
+        const float length = std::sqrt(stick_x * stick_x + stick_y * stick_y);
+        if (length <= 0.0f) return 0;
+        const float scale = magnitude > 0.0f && magnitude < 0.999f ? magnitude : 1.0f;
+        const double speed = static_cast<double>(static_cast<std::int32_t>(cpu->R[3])) * scale;
+        const std::int32_t x = static_cast<std::int32_t>(std::lround(stick_x / length * speed));
+        const std::int32_t y = static_cast<std::int32_t>(std::lround(stick_y / length * speed));
+        bus_write_u32(cpu->R[0], static_cast<std::uint32_t>(x));
+        bus_write_u32(cpu->R[0] + 4u, static_cast<std::uint32_t>(y));
+        ++g_scaledCalls;
+        if (std::getenv("ROTK_PC_ANALOG_DEBUG"))
+            std::fprintf(stderr, "[analog] player %d stick %.2f,%.2f speed %u -> %d,%d\n",
+                         player, stick_x, stick_y, cpu->R[3], x, y);
+        returnToCaller(cpu);
+        return 1;
+    }
+    if (!(magnitude > 0.0f) || magnitude >= 0.999f) return 0;
     const std::int32_t direction = static_cast<std::int32_t>(cpu->R[2]);
     if (direction < 0 || direction > 7) return 0;
-
     const std::uint32_t table = (cpu->R[1] & (1u << 24)) ? kDirectionsSteep : kDirections;
     const std::int32_t scaled = static_cast<std::int32_t>(std::lround(
         static_cast<double>(static_cast<std::int32_t>(cpu->R[3])) * magnitude));

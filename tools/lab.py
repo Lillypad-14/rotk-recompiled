@@ -50,6 +50,7 @@ FRAMEWORK_PATCHES = [
     ROOT / "patches/smooth-120.patch",
     ROOT / "patches/fullscreen-f11.patch",
     ROOT / "patches/analog-move.patch",
+    ROOT / "patches/analog-direction.patch",
 ]
 
 # recomp-ui (launcher) patches, applied the same way to external/recomp-ui.
@@ -61,6 +62,7 @@ RECOMP_UI_PATCHES = [
     ROOT / "patches/recomp-ui-controls.patch",
     ROOT / "patches/recomp-ui-companion-rom.patch",
     ROOT / "patches/recomp-ui-companion-toggle.patch",
+    ROOT / "patches/recomp-ui-deadzone.patch",
 ]
 
 STOCK_ROM_SIZE = 0x1000000

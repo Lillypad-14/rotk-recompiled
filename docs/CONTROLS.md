@@ -177,18 +177,23 @@ Not checked on screen: the menu's look, and the launcher page (phase 5).
 ## Analog movement (2026-11-24)
 
 The launcher's **Engine > Analog movement** feature (on by default) makes the left stick's travel
-set the player's walking speed. It is an engine hook, not a GBA input: the guest still reads a digital
-8-way D-pad, so direction stays quantised; only the speed is scaled.
+set the player's walking speed, and its angle set the movement direction (free-angle velocity, not the
+8-way D-pad table). The sprite's facing/animation still uses the guest's eight directions.
 
 - `patches/analog-move.patch` publishes `gba_analog_move[player]` from `player_held()`: 1.0 for
-  keyboard/D-pad, `(stick - deadzone) / (1 - deadzone)` for the left stick, 0 when idle. The stick
-  dead zone is the controller's own `input.ini` value.
+  keyboard/D-pad, `(stick - deadzone) / (1 - deadzone)` for the left stick, 0 when idle, plus the
+  normalized stick vector. The default dead zone is 15% in both the runtime and recomp-ui's GBA
+  profile; the controller's own `input.ini` value overrides it.
 - `src/analog_move.cpp` observes `actor_player_tick` (0x080236B8) to learn which player's movement
-  follows, then replaces `actor_setVelocityFromDirection8` (0x08001C80) for that call with the same
-  table vector at a scaled speed. Only calls whose speed equals the actor's own `moveSpeed` are
-  touched, so knockback and NPCs keep their fixed speeds.
+  follows, then replaces `actor_setVelocityFromDirection8` (0x08001C80) for that call: with a stick
+  vector it writes a free-angle velocity at the scaled speed, without one it keeps the original
+  table vector. Only calls whose speed equals the actor's own `moveSpeed` are touched, so knockback
+  and NPCs keep their fixed speeds.
 - Stock offsets: `g_PlayerGlobals` 0x03003C00, Player stride 0x1AC, `Actor.moveSpeed` 0xE4 (the
   Expanded decomp headers carry extra fields and are not the stock layout).
 - `ROTK_PC_ANALOG_MOVE=0` disables it; `ROTK_PC_ANALOG_TEST=0.5` forces a magnitude for tests
   without a controller. The exit log reports ticks, velocity calls and scaled calls.
 - Co-op: each player's own stick is read; keyboard and D-pad players stay at full speed.
+- Known limit: GBA scroll registers are integer pixels. Slow diagonal camera movement still
+  advances the map in whole-pixel steps, so 30/60/120 Hz presentation can only divide those steps;
+  it is not a smooth-motion frame-drop.
