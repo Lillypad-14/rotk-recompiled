@@ -50,6 +50,7 @@ FRAMEWORK_PATCHES = [
     ROOT / "patches/fullscreen-f11.patch",
     ROOT / "patches/analog-move.patch",
     ROOT / "patches/analog-direction.patch",
+    ROOT / "patches/subpixel-pan.patch",
 ]
 
 # recomp-ui (launcher) patches, applied the same way to external/recomp-ui.
