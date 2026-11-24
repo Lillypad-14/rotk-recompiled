@@ -39,6 +39,43 @@ pixel-identical to the original.
     ratio learnt from the last two ticks (limited to -2..2, BG1 enabled, gameplay only);
   - changes over 32 pixels (cuts, teleports) are not interpolated.
 
+## Subpixel camera panning (option "Subpixel camera panning", on)
+
+The game keeps positions in 16.16 fixed point but draws on whole pixels, so a camera moving 2.33 px
+per tick steps 2, 2, 3 px (and the halfway frames 0, 1, 2 px). With an internal resolution of 2x or
+more (HD skill icons' "Render resolution", 6x by default) every gameplay frame is drawn at the exact
+camera instead.
+
+- Exact camera: `gfx_updatePlayerCameraScroll` sets the camera to the player's integer position
+  (`0x03001A10 + player * 0x30`, Vector2Fp16) minus a view offset, then clamps it. At each tick
+  (`sprite_endFrame`) the camera gets the player's fraction on an axis whose offset camera - floor(player)
+  is the same as at the previous tick; a clamp (level edge, widescreen), pan or cut changes the offset
+  and keeps that axis on whole pixels.
+- Presented camera: the tick's exact camera, or the exact halfway point on an in-between frame.
+  BG3/BG2 scroll by the whole pixels rounded up (still inside the copied tiles; otherwise clamped and
+  no fraction) and move back down by the remaining fraction. BG1 parallax does the same at its learnt
+  ratio. Each tagged piece moves from floor(position) - camera to its exact (or halfway) position minus
+  the presented camera: whole pixels in OAM, the rest as a fraction. Untagged pieces and BG0 (HUD) stay.
+- Framework (`patches/subpixel-pan.patch`): `gba::g_subpixel_shift` holds per-BG and per-OBJ
+  fractions (1/256 px, moving content right/down), set by the present hook at scanline 0. On such lines
+  the high-resolution frame keeps each layer's pixel per native column (OBJ: the two frontmost, with
+  their OAM index from the compositor key) for this row and the one above, and composites every output
+  subpixel from the column/row that covers it after the shift. It only composites where a layer's
+  source changes and repeats the subpixel otherwise. Lines with affine or HD tile layers keep the
+  regular resolve. Guest state and the native framebuffer are unaffected apart from the whole-pixel
+  part (screenshots and `--dump-png` show the world up to 1 px ahead).
+
+Checks (2026-11-24, stock, widescreen, 6x, the walk route of the 120 Hz test):
+
+- Walking down: the world moves a steady 7 output px (1.17 GBA px) every frame; with the option off
+  it moves 0, 6 or 12. Frames show no seams, the HUD stays put.
+- `[rotk] smooth motion: ... 5276 subpixel (1398 at a fractional camera)` on 9,000 frames.
+- Cost (frames 7600-9000, `GBARECOMP_FRAME_PHASE`): guest time per frame 6.2 ms mean (3.8 ms off),
+  frame intervals unchanged (16.74 ms mean, 17.2 ms p95).
+
+Debug: `ROTK_PC_TRACE_SUBPIXEL=1` logs each camera change (integer, exact and player position);
+`GBARECOMP_FRAMEDUMP_HIRES=1` makes `GBARECOMP_FRAMEDUMP_DIR` write the internal-resolution frame.
+
 ## Checks (2026-10-26)
 
 - Off: stock first-map frame hash unchanged (`824b55b9...`).
@@ -54,6 +91,6 @@ pixel-identical to the original.
 - Particles and parallax were added after the first in-game test and have not been seen in-game yet.
 - Without the CPU boost the next tick is often not ready in time, and those frames repeat as before.
 
-Options: "Smooth particles" and "Smooth parallax background" (both on). Env overrides:
-`ROTK_PC_SMOOTH` = 0 | 1 for the feature, `ROTK_PC_SMOOTH_PARTICLES` and `ROTK_PC_SMOOTH_PARALLAX`
-= 0 | 1 for the options.
+Options: "Smooth particles", "Smooth parallax background" and "Subpixel camera panning" (all on).
+Env overrides: `ROTK_PC_SMOOTH` = 0 | 1 for the feature, `ROTK_PC_SMOOTH_PARTICLES`,
+`ROTK_PC_SMOOTH_PARALLAX` and `ROTK_PC_SMOOTH_SUBPIXEL` = 0 | 1 for the options.
