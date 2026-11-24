@@ -98,7 +98,12 @@ struct State {
     int cameraX[2] = {}, cameraY[2] = {};
     std::int32_t cameraFx[2] = {}, cameraFy[2] = {};  // fp16, the integer camera when not exact
     int cameraOffset[2] = {};  // camera minus the player's integer position at the last tick
+    int playerPixel[2] = {};   // the player's integer position at the last tick
     bool cameraOffsetValid = false;
+    // Per axis: the camera moved with the player across a pixel and the offset has not changed
+    // since. An unchanged offset alone does not show this: a slow player stays on the same pixel
+    // for several ticks while a clamped camera stands still.
+    bool cameraTracks[2] = {};
     std::uint64_t serial = 0;
     // Current sprite_composeOam call.
     std::uint32_t actor = 0;
@@ -125,6 +130,8 @@ struct State {
     std::uint64_t frames = 0, interpolated = 0, movedBg = 0, movedObj = 0;
     std::uint64_t subFrames = 0, subExact = 0;
     std::int32_t presentedCamera[2] = {};  // fp16, the camera the world layers are drawn at
+    std::int32_t playerScreen[2] = {};     // fp16, where the active player's first piece is drawn
+    std::int32_t playerAt[2] = {};         // fp16, the world position it is drawn for
 };
 
 State g_states[3];  // solo, co-op console 1, co-op console 2
@@ -320,6 +327,7 @@ void prepareSubpixel(const std::uint8_t* io, int shown, int next, bool interpola
     const std::uint32_t pieces = g->pieces[shown];
     g->objOffset.assign(static_cast<std::size_t>(pieces) * 2u, 0);
     g->objSub.assign(static_cast<std::size_t>(pieces) * 2u, 0);
+    g->playerScreen[0] = g->playerScreen[1] = 0;
     bool obj = false;
     for (std::uint32_t i = 0; i < pieces; ++i) {
         const Tag& tag = g->tags[shown][i];
@@ -350,6 +358,12 @@ void prepareSubpixel(const std::uint8_t* io, int shown, int next, bool interpola
             valid = valid && whole[axis] >= -kMaxStep && whole[axis] <= kMaxStep;
         }
         if (!valid) continue;
+        if (tag.actor == bus_read_u32(0x03003C00u + (bus_read_u8(kActivePlayer) & 1u) * 0x1ACu) &&
+            !(g->playerScreen[0] | g->playerScreen[1]))
+            for (int axis = 0; axis < 2; ++axis) {
+                g->playerScreen[axis] = fp(pixel(from[axis]) - base[axis] + whole[axis]) + fraction[axis] * 256;
+                g->playerAt[axis] = at[axis];
+            }
         for (int axis = 0; axis < 2; ++axis) {
             g->objOffset[i * 2 + axis] = static_cast<std::int8_t>(whole[axis]);
             g->objSub[i * 2 + axis] = fraction[axis];
@@ -381,10 +395,12 @@ void prepareFrame(const std::uint8_t* io)
         g->presentedCamera[0] = fp(g->cameraX[shown] + (g->interpolate ? g->bgOffset[2][0] : 0));
         g->presentedCamera[1] = fp(g->cameraY[shown] + (g->interpolate ? g->bgOffset[2][1] : 0));
     }
-    std::fprintf(stderr, "[rotk] present %llu shown %d vb %d interp %d sub %d cam %d,%d exact %d,%d next %d,%d\n",
+    std::fprintf(stderr, "[rotk] present %llu shown %d vb %d interp %d sub %d cam %d,%d exact %d,%d next %d,%d"
+                 " player %d,%d screen %d,%d\n",
                  static_cast<unsigned long long>(g->frames), shown, g->vblanksShown, g->interpolate ? 1 : 0,
                  g->subActive ? 1 : 0, g->presentedCamera[0], g->presentedCamera[1], g->cameraFx[shown],
-                 g->cameraFy[shown], g->cameraFx[1 - shown], g->cameraFy[1 - shown]);
+                 g->cameraFy[shown], g->cameraFx[1 - shown], g->cameraFy[1 - shown], g->playerAt[0],
+                 g->playerAt[1], g->playerScreen[0], g->playerScreen[1]);
 }
 
 void prepareFrameImpl(const std::uint8_t* io)
@@ -627,20 +643,28 @@ void smoothEndFrame(int buffer)
     const std::uint32_t camera = activeCamera();
     g->cameraX[buffer] = static_cast<std::int32_t>(bus_read_u32(camera));
     g->cameraY[buffer] = static_cast<std::int32_t>(bus_read_u32(camera + 4u));
-    // The exact camera: the camera follows the player when its offset from the player's integer
-    // position is the same as at the last tick, and then has the player's fraction. Otherwise
-    // (level-edge or widescreen clamp, a pan, a cut) it stays on whole pixels.
+    // The exact camera: the camera follows the player when it moved with the player's integer
+    // position across a pixel and its offset has stayed the same since; it then has the player's
+    // fraction. Otherwise (level-edge or widescreen clamp, a pan, a cut) it stays on whole pixels.
     const std::uint8_t player = bus_read_u8(kActivePlayer) & 1u;
-    const std::int32_t px = static_cast<std::int32_t>(bus_read_u32(kPlayerPositions + player * kPlayerStride));
-    const std::int32_t py = static_cast<std::int32_t>(bus_read_u32(kPlayerPositions + player * kPlayerStride + 4u));
-    const int offset[2] = {g->cameraX[buffer] - pixel(px), g->cameraY[buffer] - pixel(py)};
-    g->cameraFx[buffer] = fp(g->cameraX[buffer]) +
-                          (g->cameraOffsetValid && offset[0] == g->cameraOffset[0] ? (px & 0xFFFF) : 0);
-    g->cameraFy[buffer] = fp(g->cameraY[buffer]) +
-                          (g->cameraOffsetValid && offset[1] == g->cameraOffset[1] ? (py & 0xFFFF) : 0);
-    g->cameraOffset[0] = offset[0];
-    g->cameraOffset[1] = offset[1];
+    const std::int32_t position[2] = {
+        static_cast<std::int32_t>(bus_read_u32(kPlayerPositions + player * kPlayerStride)),
+        static_cast<std::int32_t>(bus_read_u32(kPlayerPositions + player * kPlayerStride + 4u))};
+    const int cameraInt[2] = {g->cameraX[buffer], g->cameraY[buffer]};
+    std::int32_t exact[2];
+    for (int axis = 0; axis < 2; ++axis) {
+        const int at = pixel(position[axis]);
+        const int offset = cameraInt[axis] - at;
+        if (!g->cameraOffsetValid || offset != g->cameraOffset[axis]) g->cameraTracks[axis] = false;
+        else if (at != g->playerPixel[axis]) g->cameraTracks[axis] = true;
+        exact[axis] = fp(cameraInt[axis]) + (g->cameraTracks[axis] ? (position[axis] & 0xFFFF) : 0);
+        g->cameraOffset[axis] = offset;
+        g->playerPixel[axis] = at;
+    }
+    g->cameraFx[buffer] = exact[0];
+    g->cameraFy[buffer] = exact[1];
     g->cameraOffsetValid = true;
+    const std::int32_t px = position[0], py = position[1];
     static const bool trace = std::getenv("ROTK_PC_TRACE_SUBPIXEL") != nullptr;
     if (trace && (g->cameraX[buffer] != g->cameraX[1 - buffer] || g->cameraY[buffer] != g->cameraY[1 - buffer]))
         std::fprintf(stderr, "[rotk] subpixel camera @%llu %d,%d exact %08X,%08X player %08X,%08X\n", static_cast<unsigned long long>(g->frames), g->cameraX[buffer],

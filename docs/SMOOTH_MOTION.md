@@ -48,9 +48,13 @@ camera instead.
 
 - Exact camera: `gfx_updatePlayerCameraScroll` sets the camera to the player's integer position
   (`0x03001A10 + player * 0x30`, Vector2Fp16) minus a view offset, then clamps it. At each tick
-  (`sprite_endFrame`) the camera gets the player's fraction on an axis whose offset camera - floor(player)
-  is the same as at the previous tick; a clamp (level edge, widescreen), pan or cut changes the offset
-  and keeps that axis on whole pixels.
+  (`sprite_endFrame`) the camera gets the player's fraction on an axis where it has moved with
+  floor(player) across a pixel and the offset camera - floor(player) has not changed since; a clamp
+  (level edge, widescreen), pan or cut changes the offset and keeps that axis on whole pixels. An
+  unchanged offset alone is not enough: a slow (analog) player stays on one pixel for several ticks
+  while a clamped camera stands still, and taking its fraction then made the clamped camera, and so
+  the player on screen, jump back and forth by up to a pixel (seen at the first map's left edge
+  walking right at about 1/4 stick).
 - Presented camera: the tick's exact camera, or the exact halfway point on an in-between frame.
   BG3/BG2 scroll by the whole pixels rounded up and move back right/down by the remaining fraction.
   BG1 parallax does the same at its learnt ratio. The game copies only the visible 31x21 tiles, so the
@@ -95,7 +99,9 @@ walking starts or stops. High-resolution dumps at the formerly clamped frames sh
 view edges or the margin boundary.
 
 Debug: `ROTK_PC_TRACE_SUBPIXEL=1` logs each camera change (integer, exact and player position);
-`ROTK_PC_TRACE_PRESENT=1` logs every presented frame's camera (presented, exact, next, fp16);
+`ROTK_PC_TRACE_PRESENT=1` logs every presented frame's camera (presented, exact, next, fp16) and
+the active player's drawn world position and screen position; `ROTK_PC_ANALOG_TEST=0.25` forces a
+stick magnitude for slow-walk checks;
 `GBARECOMP_FRAMEDUMP_HIRES=1` makes `GBARECOMP_FRAMEDUMP_DIR` write the internal-resolution frame.
 
 ## Checks (2026-10-26)
