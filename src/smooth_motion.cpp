@@ -199,11 +199,19 @@ int drawParticleEntry(std::uint32_t, int, ArmCpuState* cpu)
     return 0;
 }
 
+// The world layers can scroll past the 31x21 tiles the game copies: widescreen supplies the rest of
+// the level from the cell maps (gba::g_ws_tilemap_valid).
+bool worldTiles()
+{
+    return gba::g_ws_tilemap_provider && gba::g_ws_tilemap_valid[2][0] && gba::g_ws_tilemap_valid[3][0];
+}
+
 // The presented camera moves half way, limited so the world layers stay inside the copied tiles:
 // the game copies 31x21 tiles for a 240x160 view, so the fine scroll plus the shift must stay in 0..8.
 int cameraShift(int delta, int fine)
 {
     int shift = half(delta);
+    if (worldTiles()) return shift;
     if (shift < -fine) shift = -fine;
     if (shift > 8 - fine) shift = 8 - fine;
     return shift;
@@ -274,9 +282,10 @@ void prepareSubpixel(const std::uint8_t* io, int shown, int next, bool interpola
     const int fine[2] = {(io[0x1C] | io[0x1D] << 8) & 7, (io[0x1E] | io[0x1F] << 8) & 7};
     std::int32_t presented[2];  // the camera the world layers end up at
     g->bottomRowFix = false;
+    const bool tiles = worldTiles();
     for (int axis = 0; axis < 2; ++axis) {
         std::int32_t move = camera[axis] - fp(base[axis]);  // the world moves by -move
-        {
+        if (!tiles) {
             // Inside the copied tiles (fine scroll + shift in 0..8) plus what a fraction can add: up
             // to a pixel to the left/top, a pixel to the right (moving content left), and one row
             // at the bottom whose last line repeats the row above.
@@ -286,11 +295,11 @@ void prepareSubpixel(const std::uint8_t* io, int shown, int next, bool interpola
         }
         int shift = pixel(move + 0xFFFF);  // whole pixels, rounded up
         int fraction = (fp(shift) - move) >> 8;  // back right/down, 0..255
-        if (axis == 0 && shift > 8 - fine[axis]) {
+        if (!tiles && axis == 0 && shift > 8 - fine[axis]) {
             --shift;  // round down and move the content left instead
             fraction -= 256;
         }
-        if (axis == 1 && shift > 8 - fine[axis]) g->bottomRowFix = true;
+        if (!tiles && axis == 1 && shift > 8 - fine[axis]) g->bottomRowFix = true;
         g->bgOffset[2][axis] = g->bgOffset[3][axis] = shift;
         g->bgSub[2][axis] = g->bgSub[3][axis] = static_cast<std::int16_t>(fraction);
         presented[axis] = fp(base[axis] + shift) - fraction * 256;

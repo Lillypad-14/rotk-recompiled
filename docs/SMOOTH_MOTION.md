@@ -52,9 +52,9 @@ camera instead.
   is the same as at the previous tick; a clamp (level edge, widescreen), pan or cut changes the offset
   and keeps that axis on whole pixels.
 - Presented camera: the tick's exact camera, or the exact halfway point on an in-between frame.
-  BG3/BG2 scroll by the whole pixels rounded up (still inside the copied tiles; otherwise clamped and
-  no fraction) and move back down by the remaining fraction. BG1 parallax does the same at its learnt
-  ratio. Each tagged piece moves from floor(position) - camera to its exact (or halfway) position minus
+  BG3/BG2 scroll by the whole pixels rounded up and move back right/down by the remaining fraction.
+  BG1 parallax does the same at its learnt ratio. The game copies only the visible 31x21 tiles, so the
+  fine scroll plus the shift has to stay in 0..8 (see "Copied-tile edges" below). Each tagged piece moves from floor(position) - camera to its exact (or halfway) position minus
   the presented camera: whole pixels in OAM, the rest as a fraction. Untagged pieces and BG0 (HUD) stay.
 - Framework (`patches/subpixel-pan.patch`): `gba::g_subpixel_shift` holds per-BG and per-OBJ
   fractions (1/256 px, moving content right/down), set by the present hook at scanline 0. On such lines
@@ -65,6 +65,20 @@ camera instead.
   regular resolve. Guest state and the native framebuffer are unaffected apart from the whole-pixel
   part (screenshots and `--dump-png` show the world up to 1 px ahead).
 
+Copied-tile edges (`patches/tilemap-window.patch`): moving left/up while the fine scroll is near 0,
+or right/down while it is near 7, the halfway camera needs a column or row just outside the copied
+tiles. Clamping it there dropped up to 1.5 px every 8 px of travel (a 1.0/2.0 or 0/3 px step instead
+of 1.5/1.5), a visible hitch every few frames while walking; the non-subpixel path had the same clamp.
+
+- Widescreen on: `src/widescreen.cpp` marks the copied 31x21 tiles of BG2/BG3 as the valid tilemap
+  window (`gba::g_ws_tilemap_valid`); the expanded renderer takes map entries outside it from the
+  same cell-map provider as the margins, so the world layers can scroll any distance. No clamp.
+- 240 px view: the shift stays inside the copied tiles plus what a fraction adds without new tiles:
+  up to a pixel to the left/top (content moved right/down by up to 255/256), a pixel to the right (the
+  whole pixels rounded down and the content moved left, `g_subpixel_shift.bg` x is signed), and one
+  row at the bottom (the last line scrolls one row less and repeats the row above). Larger halfway
+  shifts are clamped to that range.
+
 Checks (2026-11-24, stock, widescreen, 6x, the walk route of the 120 Hz test):
 
 - Walking down: the world moves a steady 7 output px (1.17 GBA px) every frame; with the option off
@@ -73,7 +87,15 @@ Checks (2026-11-24, stock, widescreen, 6x, the walk route of the 120 Hz test):
 - Cost (frames 7600-9000, `GBARECOMP_FRAME_PHASE`): guest time per frame 6.2 ms mean (3.8 ms off),
   frame intervals unchanged (16.74 ms mean, 17.2 ms p95).
 
+Copied-tile edges, checked on a 16,000-frame walk in all eight directions with dialogue skips
+(`.private` input, frames 7600-16200): halfway frames whose presented camera is more than 0.1 px from
+the exact halfway point went from 83 of 3,098 to 1 of 727 (widescreen) and 2 of 744 (240 px), the
+remaining ones being dialogue openings. Per-frame camera steps no longer alternate except where
+walking starts or stops. High-resolution dumps at the formerly clamped frames show no seams at the
+view edges or the margin boundary.
+
 Debug: `ROTK_PC_TRACE_SUBPIXEL=1` logs each camera change (integer, exact and player position);
+`ROTK_PC_TRACE_PRESENT=1` logs every presented frame's camera (presented, exact, next, fp16);
 `GBARECOMP_FRAMEDUMP_HIRES=1` makes `GBARECOMP_FRAMEDUMP_DIR` write the internal-resolution frame.
 
 ## Checks (2026-10-26)

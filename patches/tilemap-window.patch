@@ -1,0 +1,70 @@
+diff --git a/src/gba/gba_ppu.cpp b/src/gba/gba_ppu.cpp
+--- a/src/gba/gba_ppu.cpp
++++ b/src/gba/gba_ppu.cpp
+@@ -23,6 +23,7 @@
+ // Layering-clean: the PPU only calls a nullable pointer; the sidecar owns it.
+ extern "C" int (*g_ws_tilemap_provider)(int bg, int hw_x, int screen_y,
+                                         uint16_t* out_entry) = nullptr;
++extern "C" uint8_t g_ws_tilemap_valid[4][2] = {};
+ extern "C" int (*g_ws_bg_x_provider)(int bg, int output_x, int screen_y,
+                                      int* out_hw_x) = nullptr;
+ extern "C" unsigned g_ws_bg_x_provider_layers = 0xFu;
+@@ -1392,6 +1393,13 @@
+ // (left) and x>=240 sprites (right) both appear in the margins. Signed `y`
+ // addresses authored vertical rows, where raw OAM/affine/bitmap extrapolation
+ // is prohibited; only validated game providers may contribute content.
++// A map tile outside the title's current tilemap window (g_ws_tilemap_valid).
++inline bool outside_tilemap_window(uint32_t layer, uint32_t tile_x, uint32_t tile_y) {
++    const uint8_t* valid = g_ws_tilemap_valid[layer];
++    return g_ws_tilemap_provider && (valid[0] || valid[1]) &&
++           ((valid[0] && (tile_x & 31u) >= valid[0]) || (valid[1] && (tile_y & 31u) >= valid[1]));
++}
++
+ void render_scanline_wide(uint8_t* rgb, int y, uint16_t dispcnt,
+                           const uint8_t* io, const uint8_t* vram,
+                           const uint8_t* oam, const uint8_t* pal,
+@@ -1599,8 +1607,16 @@
+                 const uint32_t block = (tile_x >> 5) + (tile_y >> 5) * block_cols;
+                 const uint32_t map = screen_base + block * 0x800u +
+                     ((tile_y & 31u) * 32u + (tile_x & 31u)) * 2u;
+-                if (map + 1u < 96u * 1024u) {
+-                    const uint16_t entry = load_u16_le(&vram[map]);
++                uint16_t entry = 0;
++                bool have = map + 1u < 96u * 1024u;
++                if (have) entry = load_u16_le(&vram[map]);
++                if (outside_tilemap_window(layer, tile_x, tile_y)) {
++                    uint16_t ext;
++                    const int action = g_ws_tilemap_provider(static_cast<int>(layer), hx, y, &ext);
++                    if (action == kWsTilemapReplace) entry = ext;
++                    else if (action != kWsTilemapKeepWrapped) have = false;
++                }
++                if (have) {
+                     const uint32_t py = entry & 0x0800u ? 7u - (ty & 7u) : ty & 7u;
+                     const uint32_t tile_row = char_base + (entry & 0x03ffu) *
+                         (color256 ? 64u : 32u) + py * (color256 ? 8u : 4u);
+@@ -1681,7 +1697,8 @@
+             // the true off-screen world tile, use it; if it's armed but has no
+             // data, leave the pixel transparent (no seam) rather than draw the
+             // wrap. With no sidecar, keep vanilla wide behavior.
+-            if (sample_hx < 0 || sample_hx >= 240 || sample_y < 0 || sample_y >= 160) {
++            if (sample_hx < 0 || sample_hx >= 240 || sample_y < 0 || sample_y >= 160 ||
++                outside_tilemap_window(layer, tile_x, tile_y)) {
+                 if (g_ws_tilemap_provider) {
+                     uint16_t ext;
+                     const int action = g_ws_tilemap_provider(
+diff --git a/src/gba/gba_ppu.h b/src/gba/gba_ppu.h
+--- a/src/gba/gba_ppu.h
++++ b/src/gba/gba_ppu.h
+@@ -256,6 +256,12 @@
+ };
+ extern "C" int (*g_ws_tilemap_provider)(int bg, int hw_x, int screen_y,
+                                         uint16_t* out_entry);
++// Optional VRAM tilemap window per BG that the title keeps current: map tile
++// columns 0..[bg][0]-1 and rows 0..[bg][1]-1 of the first screenblock; 0 means
++// the whole map. Inside the native view, the expanded renderer takes entries
++// outside it from g_ws_tilemap_provider like margin samples, so a scroll that
++// runs past the copied tiles (smooth motion) still shows the world.
++extern "C" uint8_t g_ws_tilemap_valid[4][2];
+ // Optional per-game presentation remap for regular BG samples in the expanded
+ // renderer. The callback receives the physical output X and may suppress the
+ // sample (-1), leave the hardware X unchanged (0), or provide an authentic

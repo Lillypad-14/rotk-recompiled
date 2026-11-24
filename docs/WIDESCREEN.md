@@ -52,6 +52,9 @@ needs: culling constants, map margins from the game's full map, HUD backgrounds 
   dialogue overlay (scene 0x11) keep the wide view; other scenes are pillarboxed. The tile camera is
   latched when the game DMAs BG3's rows, so the margins continue exactly the tiles in VRAM. With
   smooth motion the tile follows the shifted scroll of the in-between frame (`smoothBgShift`).
+  The copied 31x21 tiles are also the valid tilemap window (`gba::g_ws_tilemap_valid`,
+  `patches/tilemap-window.patch`): when smooth motion scrolls the world layers past them, the centre
+  view takes those entries from the same provider (docs/SMOOTH_MOTION.md, "Copied-tile edges").
 - Camera: a hook on `_call_via_sl` (0x0804E0B8) when called from gfx_updatePlayerCameraScroll
   (LR 0x0803EC49) re-clamps the active camera to [left margin, worldWidth - 240 - right margin] in
   all three camera copies and in both world layers' fine x scroll.

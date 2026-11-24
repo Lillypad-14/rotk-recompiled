@@ -372,6 +372,12 @@ void installProviders()
 {
     gba::g_ws_pillarbox = g_state->frame.world ? 0 : 1;
     gba::g_ws_tilemap_provider = g_state->frame.world ? rotkWorldTile : nullptr;
+    // The DMA keeps only the visible 31x21 tiles of the world layers current. Smooth motion can
+    // scroll past them; the rest of the level then comes from the cell maps as in the margins.
+    for (int bg = 2; bg <= 3; ++bg) {
+        gba::g_ws_tilemap_valid[bg][0] = g_state->frame.world ? 31 : 0;
+        gba::g_ws_tilemap_valid[bg][1] = g_state->frame.world ? 21 : 0;
+    }
     gba::g_ws_bg_x_provider = g_state->frame.hud ? rotkHudBgX : nullptr;
     gba::g_ws_bg_x_provider_layers = 1u << 0;
     gba::g_ws_obj_attr_x_provider = g_state->frame.hud ? rotkHudObjX : nullptr;
