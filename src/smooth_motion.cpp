@@ -121,6 +121,7 @@ struct State {
     float parallaxRatio[2] = {};
     std::uint64_t frames = 0, interpolated = 0, movedBg = 0, movedObj = 0;
     std::uint64_t subFrames = 0, subExact = 0;
+    std::int32_t presentedCamera[2] = {};  // fp16, the camera the world layers are drawn at
 };
 
 State g_states[3];  // solo, co-op console 1, co-op console 2
@@ -280,6 +281,7 @@ void prepareSubpixel(const std::uint8_t* io, int shown, int next, bool interpola
         g->bgOffset[2][axis] = g->bgOffset[3][axis] = shift;
         g->bgSub[2][axis] = g->bgSub[3][axis] = static_cast<std::uint8_t>(fraction);
         presented[axis] = fp(base[axis] + shift) - fraction * 256;
+        g->presentedCamera[axis] = presented[axis];
     }
     if (g->parallax && (io[1] & 0x02u)) {  // BG1 parallax at its learnt ratio
         for (int axis = 0; axis < 2; ++axis) {
@@ -344,7 +346,26 @@ void prepareSubpixel(const std::uint8_t* io, int shown, int next, bool interpola
     gba::g_subpixel_shift.obj = subpixelObj;
 }
 
+void prepareFrameImpl(const std::uint8_t* io);
+
+// ROTK_PC_TRACE_PRESENT=1: one line per presented frame with the camera it is drawn at.
 void prepareFrame(const std::uint8_t* io)
+{
+    prepareFrameImpl(io);
+    static const bool trace = std::getenv("ROTK_PC_TRACE_PRESENT") != nullptr;
+    if (!trace || !g->enabled || g->displayed < 0) return;
+    const int shown = g->displayed;
+    if (!g->subActive) {
+        g->presentedCamera[0] = fp(g->cameraX[shown] + (g->interpolate ? g->bgOffset[2][0] : 0));
+        g->presentedCamera[1] = fp(g->cameraY[shown] + (g->interpolate ? g->bgOffset[2][1] : 0));
+    }
+    std::fprintf(stderr, "[rotk] present %llu shown %d vb %d interp %d sub %d cam %d,%d exact %d,%d next %d,%d\n",
+                 static_cast<unsigned long long>(g->frames), shown, g->vblanksShown, g->interpolate ? 1 : 0,
+                 g->subActive ? 1 : 0, g->presentedCamera[0], g->presentedCamera[1], g->cameraFx[shown],
+                 g->cameraFy[shown], g->cameraFx[1 - shown], g->cameraFy[1 - shown]);
+}
+
+void prepareFrameImpl(const std::uint8_t* io)
 {
     ++g->frames;
     g->interpolate = false;
