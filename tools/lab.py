@@ -112,7 +112,9 @@ def apply_framework_patch(framework: Path) -> None:
 
 
 def apply_patch_stack(checkout: Path, patches: list[Path]) -> None:
-    command = ["git", "-C", str(checkout), "apply"]
+    # Some patches carry CRLF source lines; on an LF checkout they only apply
+    # with whitespace-insensitive matching.
+    command = ["git", "-C", str(checkout), "apply", "--ignore-whitespace"]
     # The patches form an ordered stack and later ones can change an earlier one's context, so
     # Find the latest applied member of this ordered stack. When new patches
     # are added, older members need not reverse-apply independently: their
