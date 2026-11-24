@@ -191,8 +191,13 @@ set the player's walking speed, and its angle set the movement direction (free-a
   and NPCs keep their fixed speeds.
 - Stock offsets: `g_PlayerGlobals` 0x03003C00, Player stride 0x1AC, `Actor.moveSpeed` 0xE4 (the
   Expanded decomp headers carry extra fields and are not the stock layout).
+- The same magnitude throttles the hero movement animation: `src/analog_move.cpp` observes
+  `actor_tickAnimation` (0x080022E4) and skips the call on a fraction of ticks, but only while the
+  actor uses a `HeroMoveAnimationBanks` animation and has nonzero velocity. Melee and skill banks
+  keep their authored timing. At 50% stick the walk cycle runs at half speed.
 - `ROTK_PC_ANALOG_MOVE=0` disables it; `ROTK_PC_ANALOG_TEST=0.5` forces a magnitude for tests
-  without a controller. The exit log reports ticks, velocity calls and scaled calls.
+  without a controller. The exit log reports ticks, velocity calls, scaled calls and skipped walk
+  animation ticks.
 - Co-op: each player's own stick is read; keyboard and D-pad players stay at full speed.
 - Known limit: GBA scroll registers are integer pixels. Slow diagonal camera movement still
   advances the map in whole-pixel steps, so 30/60/120 Hz presentation can only divide those steps;

@@ -17,14 +17,19 @@ namespace {
 // mod's extra fields, so these are the host's pinned stock offsets).
 constexpr std::uint32_t kPlayerTick = 0x080236B8u;            // actor_player_tick(Actor*)
 constexpr std::uint32_t kSetVelocity = 0x08001C80u;           // actor_setVelocityFromDirection8
+constexpr std::uint32_t kTickAnimation = 0x080022E4u;         // actor_tickAnimation
 constexpr std::uint32_t kPlayerGlobals = 0x03003C00u;
 constexpr std::uint32_t kPlayerStride = 0x1ACu;               // sizeof(Player)
 constexpr std::uint32_t kActorMoveSpeed = 0xE4u;              // just before flags at 0xE8
+constexpr std::uint32_t kActorVelocity = 0xB4u;
+constexpr std::uint32_t kActorAnimationBank = 0x104u;         // sprite.animationBank
+constexpr std::uint32_t kHeroMoveBanks = 0x08282898u;         // HeroMoveAnimationBanks[8]
 constexpr std::uint32_t kDirections = 0x08282150u;            // Direction8MoveVectors
 constexpr std::uint32_t kDirectionsSteep = 0x08282190u;
 
 constexpr const char* kTickHookId = "rotk.pc-analog-player-tick";
 constexpr const char* kVelocityHookId = "rotk.pc-analog-velocity";
+constexpr const char* kAnimationHookId = "rotk.pc-analog-animation";
 
 bool g_enabled = true;
 float g_forcedMagnitude = -1.0f;  // ROTK_PC_ANALOG_TEST, for tests without a pad
@@ -32,6 +37,8 @@ std::uint32_t g_tickActor = 0;
 int g_tickPlayer = -1;
 unsigned long long g_movementCalls = 0, g_scaledCalls = 0;
 unsigned long long g_tickEntries = 0, g_velocityEntries = 0;
+unsigned long long g_animationTicks = 0, g_animationSkipped = 0;
+float g_animationPhase[2] = {};
 
 // Set by the framework's input pump in host_window.cpp.
 extern "C" float gba_analog_move[2];
@@ -74,6 +81,49 @@ int playerTickEntry(std::uint32_t, int, ArmCpuState* cpu)
 // actor_setVelocityFromDirection8(Vector2Fp16 *out, u32 flags, s32 direction, s32 speed).
 // Replace the call only for the player's own movement call; knockback, other
 // actors and full-speed input run the original body.
+int actorTickAnimationEntry(std::uint32_t, int, ArmCpuState* cpu)
+{
+    if (!g_enabled) return 0;
+    const std::uint32_t actor = cpu->R[0];
+    int player = -1;
+    for (int i = 0; i < 2; ++i) {
+        if (bus_read_u32(kPlayerGlobals + static_cast<std::uint32_t>(i) * kPlayerStride) == actor) {
+            player = i;
+            break;
+        }
+    }
+    if (player < 0) return 0;
+    const float magnitude = g_forcedMagnitude >= 0.0f ? g_forcedMagnitude : gba_analog_move[player];
+    if (magnitude >= 0.999f || magnitude <= 0.0f) {
+        g_animationPhase[player] = 0.0f;
+        return 0;
+    }
+    // Only the hero movement bank is throttled; melee and skill banks keep
+    // their authored timing.
+    const std::uint32_t bank = bus_read_u32(actor + kActorAnimationBank);
+    bool walking = false;
+    for (std::uint32_t i = 0; i < 8u && !walking; ++i)
+        walking = bank != 0 && bus_read_u32(kHeroMoveBanks + i * 4u) == bank;
+    if (!walking ||
+        (bus_read_u32(actor + kActorVelocity) | bus_read_u32(actor + kActorVelocity + 4u)) == 0) {
+        g_animationPhase[player] = 0.0f;
+        return 0;
+    }
+    if (std::getenv("ROTK_PC_ANALOG_DEBUG") && g_animationTicks < 5)
+        std::fprintf(stderr, "[analog] anim actor=%08x bank=%08x vel=%08x,%08x mag=%.2f\n",
+                     actor, bank, bus_read_u32(actor + kActorVelocity),
+                     bus_read_u32(actor + kActorVelocity + 4u), magnitude);
+    ++g_animationTicks;
+    g_animationPhase[player] += magnitude;
+    if (g_animationPhase[player] < 1.0f) {
+        ++g_animationSkipped;
+        returnToCaller(cpu);
+        return 1;
+    }
+    g_animationPhase[player] -= 1.0f;
+    return 0;
+}
+
 int setVelocityEntry(std::uint32_t, int, ArmCpuState* cpu)
 {
     const std::uint32_t actor = g_tickActor;
@@ -134,6 +184,7 @@ void analogActivated()
     if (!g_enabled) return;
     gba_mod_set_function_hook_enabled(kTickHookId, 1);
     gba_mod_set_function_hook_enabled(kVelocityHookId, 1);
+    gba_mod_set_function_hook_enabled(kAnimationHookId, 1);
 }
 
 }  // namespace
@@ -149,17 +200,20 @@ void analogMoveRegister()
     }
     std::atexit([] {
         if (g_tickEntries)
-            std::fprintf(stderr, "[rotk] analog movement: %llu ticks, %llu velocity calls, %llu player calls, %llu scaled\n",
-                         g_tickEntries, g_velocityEntries, g_movementCalls, g_scaledCalls);
+            std::fprintf(stderr, "[rotk] analog movement: %llu ticks, %llu velocity calls, %llu player calls, %llu scaled, %llu/%llu walk animation ticks\n",
+                         g_tickEntries, g_velocityEntries, g_movementCalls, g_scaledCalls,
+                         g_animationSkipped, g_animationTicks);
     });
     const int tick_registered = gba_mod_register_function_entry_plugin(kTickHookId, kPlayerTick, 1, playerTickEntry);
     const int velocity_registered = gba_mod_register_function_entry_plugin(kVelocityHookId, kSetVelocity, 1, setVelocityEntry);
+    const int animation_registered = gba_mod_register_function_entry_plugin(kAnimationHookId, kTickAnimation, 1, actorTickAnimationEntry);
     if (g_enabled) {
         gba_mod_set_function_hook_enabled(kTickHookId, 1);
         gba_mod_set_function_hook_enabled(kVelocityHookId, 1);
     }
     (void)tick_registered;
     (void)velocity_registered;
+    (void)animation_registered;
     gba_mod_register_activation_plugin("rotk.pc.analog-move", analogActivated);
 }
 

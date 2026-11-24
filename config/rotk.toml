@@ -153,3 +153,8 @@ note = "actor_player_tick: observed only, analog movement remembers which player
 addr = 0x08001C80
 mode = "thumb"
 note = "actor_setVelocityFromDirection8: analog movement replaces the player's movement call with a stick-magnitude-scaled speed (src/analog_move.cpp)."
+
+[[mod_function_hook]]
+addr = 0x080022E4
+mode = "thumb"
+note = "actor_tickAnimation: analog movement throttles the player's walking animation to its stick speed (src/analog_move.cpp)."
