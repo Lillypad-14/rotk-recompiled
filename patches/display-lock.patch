@@ -1,0 +1,313 @@
+diff --git a/src/runtime/host_platform.cpp b/src/runtime/host_platform.cpp
+--- a/src/runtime/host_platform.cpp
++++ b/src/runtime/host_platform.cpp
+@@ -72,6 +72,14 @@
+ #endif
+ }
+ 
++void FramePacer::set_target_hz(double hz) {
++    if (hz <= 0.0) return;
++    const auto period = std::chrono::nanoseconds(static_cast<long long>(1e9 / hz));
++    if (period == period_) return;
++    next_ += period - period_;
++    period_ = period;
++}
++
+ void FramePacer::reset() {
+     next_ = clock::now() + period_;
+ }
+diff --git a/src/runtime/host_platform.h b/src/runtime/host_platform.h
+--- a/src/runtime/host_platform.h
++++ b/src/runtime/host_platform.h
+@@ -50,6 +50,9 @@
+     // Fast-forward toggle. While uncapped, wait_for_next_frame() returns
+     // immediately and the deadline tracks now.
+     void set_uncapped(bool on) { uncapped_ = on; }
++
++    // Change the frame rate (display lock); the next deadline keeps its place.
++    void set_target_hz(double hz);
+     bool uncapped() const { return uncapped_; }
+ 
+ private:
+diff --git a/src/runtime/host_window.cpp b/src/runtime/host_window.cpp
+--- a/src/runtime/host_window.cpp
++++ b/src/runtime/host_window.cpp
+@@ -6,6 +6,7 @@
+ #include <algorithm>
+ #include <array>
+ #include <atomic>
++#include <chrono>
+ #include <cctype>
+ #include <cmath>
+ #include <cstdint>
+@@ -50,6 +51,7 @@
+ 
+ #if defined(__ANDROID__)
+ #include <atomic>
++#include <chrono>
+ #include <jni.h>
+ // Safe-area insets (display cutout + system bars) pushed from the Activity's
+ // WindowInsets listener. The shared Android template declares the Java side
+@@ -349,11 +351,26 @@
+ // Settings-menu requests from game policies (any thread; consumed by pump).
+ std::atomic<bool> g_settings_menu_requested{false};
+ 
++struct DisplayLock {
++    bool allowed = true;         // GBARECOMP_DISPLAY_LOCK, renderer can toggle vsync
++    bool vsync_forced = false;   // GBARECOMP_VSYNC=1 keeps vsync on regardless
++    bool failed = false;         // vsync did not hold the cadence: stay unlocked
++    int refresh_hz = 0;          // the display's refresh while locked
++    int refreshes = 0;           // k, 0 = not locked
++    int query_in = 0;            // frames until the display mode is read again
++    std::chrono::steady_clock::time_point last{};
++    double interval_sum = 0.0;   // seconds over `intervals` locked frames
++    int intervals = 0;
++    bool repeating = false;      // present() re-shows the uploaded frame
++    double default_correction = 0.005;  // the audio bridge's servo limit unlocked
++};
++
+ struct Backend {
+     SDL_Window*   window   = nullptr;
+     SDL_Renderer* renderer = nullptr;
+     SDL_Texture*  texture  = nullptr;
+     unsigned      presentation_source_w = 0, presentation_source_h = 0;
++    DisplayLock   lock;
+     std::vector<uint8_t> presentation_upload;
+     SDL_Texture*  sharp_texture = nullptr;
+     int           sharp_texture_w = 0;
+@@ -2100,9 +2117,20 @@
+ #if SDL_VERSION_ATLEAST(2, 0, 18)
+     if (SDL_RenderSetVSync(b->renderer, want_vsync ? 1 : 0) != 0 && !want_vsync) {
+         std::fprintf(stderr, "host_window: cannot disable renderer VSync: %s\n", SDL_GetError());
++        b->lock.allowed = false;
+     }
++#else
++    b->lock.allowed = false;
+ #endif
+     {
++        const char* lock_env = std::getenv("GBARECOMP_DISPLAY_LOCK");
++        const char* driver = SDL_GetCurrentVideoDriver();
++        if ((lock_env && *lock_env == '0') || vsync_disabled ||
++            (driver && std::strcmp(driver, "dummy") == 0))  // no display to lock to
++            b->lock.allowed = false;
++        b->lock.vsync_forced = want_vsync;
++    }
++    {
+         SDL_RendererInfo info{};
+         if (SDL_GetRendererInfo(b->renderer, &info) == 0) {
+             std::fprintf(stderr,
+@@ -2237,6 +2265,7 @@
+             cfg.preroll_ms  = 250.0;                    // boot pre-roll: hide the cold-start
+                                                         // recomp warm-up hitch (drains to target)
+             if (rab_init(&b->bridge, &cfg) == 0) b->bridge_ready = true;
++            b->lock.default_correction = cfg.max_correction;
+             SDL_PauseAudioDevice(b->audio_dev, 0);      // start the callback
+         }
+     }
+@@ -2672,6 +2701,7 @@
+     if (!sampled_h) sampled_h = unsigned(b->base_h);
+     int texture_w = 0, texture_h = 0;
+     SDL_QueryTexture(b->texture, nullptr, nullptr, &texture_w, &texture_h);
++    if (!b->lock.repeating) {
+     if (b->presentation_source_w != sampled_w || b->presentation_source_h != sampled_h) {
+         unsigned upload_w = sampled_w, upload_h = sampled_h;
+         SDL_RendererInfo info{};
+@@ -2725,6 +2755,7 @@
+         rgb888 = b->graded_fb.data();
+     }
+     SDL_UpdateTexture(b->texture, nullptr, rgb888, texture_w * 3);
++    }  // !b->lock.repeating
+     SDL_SetRenderDrawColor(b->renderer, 7, 11, 20, 255);
+     SDL_RenderClear(b->renderer);
+ #if defined(__ANDROID__)
+@@ -2844,7 +2875,7 @@
+ 
+     // FPS readout (DisplayPerf hotkey): presents/sec, refreshed twice a
+     // second in the title bar; the base title is restored when toggled off.
+-    if (b->fps_readout) {
++    if (b->fps_readout && !b->lock.repeating) {
+         ++b->fps_presents;
+         const Uint32 now = SDL_GetTicks();
+         if (b->fps_window_start == 0) b->fps_window_start = now;
+@@ -2860,6 +2891,101 @@
+     }
+ }
+ 
++namespace {
++constexpr double kGbaFrameHz = 16777216.0 / 280896.0;
++// Locked, the pacer only catches a renderer whose vsync does not block: it
++// limits to 3% above refresh / k, so vsync sets the cadence.
++constexpr double kLockPacerMargin = 0.97;
++
++void set_display_lock(Backend* b, int refresh_hz, int refreshes) {
++    DisplayLock& d = b->lock;
++    if (d.refreshes == refreshes && (!refreshes || d.refresh_hz == refresh_hz)) return;
++#if SDL_VERSION_ATLEAST(2, 0, 18)
++    if (SDL_RenderSetVSync(b->renderer, refreshes || d.vsync_forced ? 1 : 0) != 0 && refreshes) {
++        std::fprintf(stderr, "host_window: display lock off, cannot enable vsync: %s\n", SDL_GetError());
++        d.failed = true;
++        refreshes = 0;
++    }
++#endif
++    if (refreshes)
++        std::fprintf(stderr, "host_window: display lock %d Hz, %d refresh%s per frame (%.3f fps)\n",
++                     refresh_hz, refreshes, refreshes == 1 ? "" : "es",
++                     double(refresh_hz) / refreshes);
++    else if (d.refreshes)
++        std::fprintf(stderr, "host_window: display lock off\n");
++    std::fflush(stderr);
++    // The game now produces audio at refresh / k instead of 59.7275 Hz (+0.46%
++    // at 60 and 120 Hz), beyond the bridge's default 0.5% servo range once the
++    // device clock's own drift adds up. Allow up to 1.2% (20 cents) while locked.
++    if (b->bridge_ready) {
++        SDL_LockMutex(b->audio_mtx);
++        b->bridge.cfg.max_correction = refreshes ? 0.012 : b->lock.default_correction;
++        SDL_UnlockMutex(b->audio_mtx);
++    }
++    d.refresh_hz = refresh_hz;
++    d.refreshes = refreshes;
++    d.last = {};
++    d.interval_sum = 0.0;
++    d.intervals = 0;
++}
++}  // namespace
++
++double HostWindow::finish_frame(bool real_time) {
++    if (!open_ || !impl_) return kGbaFrameHz;
++    auto* b = static_cast<Backend*>(impl_);
++    DisplayLock& d = b->lock;
++    if (!d.allowed || d.failed) return kGbaFrameHz;
++    if (!real_time) {
++        set_display_lock(b, 0, 0);
++        d.query_in = 0;
++        return kGbaFrameHz;
++    }
++    if (--d.query_in <= 0) {  // the window may move to another display
++        d.query_in = 120;
++        int refresh = 0, k = 0;
++        const int di = SDL_GetWindowDisplayIndex(b->window);
++        SDL_DisplayMode dm{};
++        if (di >= 0 && SDL_GetCurrentDisplayMode(di, &dm) == 0) refresh = dm.refresh_rate;
++        if (refresh > 0) {
++            k = int(std::lround(refresh / kGbaFrameHz));
++            const double rate = k > 0 ? double(refresh) / k : 0.0;
++            if (k < 1 || k > 8 || std::fabs(rate / kGbaFrameHz - 1.0) > 0.005) k = 0;
++        }
++        set_display_lock(b, refresh, k);
++    }
++    if (!d.refreshes) return kGbaFrameHz;
++    // The frame was presented once; show it for the remaining refreshes.
++    if (b->presentation_source_w) {
++        d.repeating = true;
++        static const uint8_t unused = 0;
++        for (int i = 1; i < d.refreshes; ++i)
++            present(&unused, b->presentation_source_w, b->presentation_source_h);
++        d.repeating = false;
++    }
++    // Vsync must be what holds the cadence. If frames come at the pacer's
++    // faster limit instead, presents do not wait for the display.
++    const auto now = std::chrono::steady_clock::now();
++    if (d.last != std::chrono::steady_clock::time_point{}) {
++        d.interval_sum += std::chrono::duration<double>(now - d.last).count();
++        if (++d.intervals == 240) {
++            const double mean = d.interval_sum / d.intervals;
++            const double expected = double(d.refreshes) / d.refresh_hz;
++            if (mean < expected * 0.985) {
++                std::fprintf(stderr, "host_window: display lock off, vsync does not wait "
++                             "(%.2f ms per frame, %.2f expected)\n", mean * 1e3, expected * 1e3);
++                set_display_lock(b, 0, 0);
++                d.failed = true;
++                d.last = {};
++                return kGbaFrameHz;
++            }
++            d.interval_sum = 0.0;
++            d.intervals = 0;
++        }
++    }
++    d.last = now;
++    return double(d.refresh_hz) / d.refreshes / kLockPacerMargin;
++}
++
+ void HostWindow::load_input_config(const char* dir,
+                                    bool assist_tools_default,
+                                    int fast_forward_multiplier_default) {
+@@ -3739,6 +3865,7 @@
+ 
+ void HostWindow::present(const uint8_t* /*rgb888*/) {}
+ void HostWindow::present(const uint8_t*, unsigned, unsigned) {}
++double HostWindow::finish_frame(bool) { return 16777216.0 / 280896.0; }
+ 
+ void HostWindow::load_input_config(const char* /*dir*/,
+                                    bool /*assist_tools_default*/,
+diff --git a/src/runtime/host_window.h b/src/runtime/host_window.h
+--- a/src/runtime/host_window.h
++++ b/src/runtime/host_window.h
+@@ -164,6 +164,16 @@
+     // native-resolution intermediate render target.
+     void present(const uint8_t* rgb888, unsigned width, unsigned height);
+ 
++    // Display lock (GBARECOMP_DISPLAY_LOCK, on unless "0"): on a display that
++    // refreshes at k times the GBA's 59.7275 Hz (within 0.5%: 60, 120, 180,
++    // 240 Hz), a free-running 59.7275 Hz pacer beats against the refresh and
++    // a frame stays up one refresh longer every few seconds. Locked, the
++    // renderer waits for vsync and every frame is presented k times, so each
++    // stays up exactly k refreshes and the game runs at refresh / k. Call once
++    // after presenting each frame, with whether pacing is real time (not
++    // fast-forward); returns the frame rate the pacer should limit to.
++    double finish_frame(bool real_time);
++
+     // Push `count` int16_t mono samples into the audio output queue. The SDL
+     // backend configures its resampler for a 65.536 kHz source; the real
+     // mixer rate follows SOUNDBIAS (GbaAudio::sample_rate(), 32.768 to
+diff --git a/src/runtime/host_window_web.cpp b/src/runtime/host_window_web.cpp
+--- a/src/runtime/host_window_web.cpp
++++ b/src/runtime/host_window_web.cpp
+@@ -317,6 +317,8 @@
+ }
+ bool HostWindow::set_surface_size(int w,int h) { if(!impl_||!dimensions(w,h))return false; backend(impl_)->width=w;backend(impl_)->height=h;return true; }
+ bool HostWindow::drawable_size(int* w,int* h) const { if(!impl_||!w||!h)return false; auto d=backend(impl_)->shared.control.drawable.load(); *w=d&65535;*h=d>>16;return *w&&*h; }
++// The page owns presentation timing.
++double HostWindow::finish_frame(bool) { return 16777216.0 / 280896.0; }
+ void HostWindow::present(const uint8_t* rgb) {
+     if(!impl_||!rgb)return;
+     auto& b=*backend(impl_);auto& s=b.shared;auto& v=s.video[b.back];
+diff --git a/src/runtime/runtime.cpp b/src/runtime/runtime.cpp
+--- a/src/runtime/runtime.cpp
++++ b/src/runtime/runtime.cpp
+@@ -3429,6 +3429,12 @@
+     bool fast_forward_active = false;
+     int fast_forward_multiplier = std::clamp(
+         win.fast_forward_multiplier(), 2, 10);
++    // After a frame's present: the display lock repeats it for its remaining
++    // refreshes and sets the pacer's rate (HostWindow::finish_frame).
++    auto finish_presented_frame = [&]() {
++        if (pacer) pacer->set_target_hz(
++            win.finish_frame(!pacer->uncapped() && !fast_forward_active));
++    };
+     auto capture_rewind_point = [&]() {
+         if (!rewind_capacity || !assist_tools_enabled()) return;
+         const uint64_t frame = ppu.frame_count();
+@@ -4270,6 +4276,7 @@
+             // cost would reach the screen as uneven frames even with budget to spare.
+             if (pacer) pacer->wait_for_next_frame();
+             win.present(composed.data(), out_width * screens, out_height);
++            if (pacer) pacer->set_target_hz(win.finish_frame(!pacer->uncapped()));
+             {
+                 const auto now = std::chrono::steady_clock::now();
+                 if (last_present) {
+@@ -4670,6 +4677,7 @@
+                         if (phase_active) fp_wait_ns = FramePhaseRing::now_ns() - wait_start;
+                     }
+                     present_live_frame();
++                    finish_presented_frame();
+                 }
+                 // Framedump also covers present-in-place, the default windowed
+                 // path and the only one diagnostic replays run on.
+@@ -5164,6 +5172,7 @@
+                         if (phase_active) fp_wait_ns = FramePhaseRing::now_ns() - wait_start;
+                     }
+                     present_live_frame();
++                    finish_presented_frame();
+                 }
+                 // Framedump (capture runs only) is attributed to present_us.
+                 if (framedump_dir && frame >= framedump_start &&
