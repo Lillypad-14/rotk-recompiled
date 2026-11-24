@@ -70,7 +70,6 @@ struct Tag {
 
 struct State {
     bool enabled = false;
-    bool hz120 = true;      // option/env: present a second subframe at 120 Hz
     bool particles = true;  // option "particles"
     bool parallax = true;   // option "parallax"
     // Per shadow buffer.
@@ -81,12 +80,6 @@ struct State {
     std::uint64_t composed[2] = {};  // serial of the finished compose
     int cameraX[2] = {}, cameraY[2] = {};
     std::uint64_t serial = 0;
-    // Motion of the last completed interpolation (next - shown), reused to
-    // extrapolate the first half of the next tick's 120 Hz subframe. Actor
-    // deltas are raw render positions, before the camera.
-    std::unordered_map<std::uint32_t, Position> lastDelta;
-    int lastCameraDx = 0, lastCameraDy = 0;
-    bool lastDeltaValid = false;
     // Current sprite_composeOam call.
     std::uint32_t actor = 0;
     Position position;
@@ -103,7 +96,6 @@ struct State {
     int parallaxScroll[2] = {}, parallaxCamera[2] = {};
     float parallaxRatio[2] = {};
     std::uint64_t frames = 0, interpolated = 0, movedBg = 0, movedObj = 0;
-    std::uint64_t extraFrames = 0, extraMoved = 0;
 };
 
 State g_states[3];  // solo, co-op console 1, co-op console 2
@@ -129,14 +121,6 @@ int half(int delta)
 {
     return delta / 2;
 }
-
-// A quarter step, for the 120 Hz subframe: 1/4 extrapolated on a real tick,
-// 3/4 of the tick change on the repeated vblank.
-int quarter(int delta, int numerator)
-{
-    return delta * numerator / 4;
-}
-
 
 bool small(int dx, int dy)
 {
@@ -238,10 +222,6 @@ void prepareFrame(const std::uint8_t* io)
     int shiftX = 0, shiftY = 0;
     const int cameraDx = g->cameraX[next] - g->cameraX[shown], cameraDy = g->cameraY[next] - g->cameraY[shown];
     const bool cameraFollows = small(cameraDx, cameraDy);
-    g->lastDelta.clear();
-    g->lastCameraDx = cameraDx;
-    g->lastCameraDy = cameraDy;
-    g->lastDeltaValid = cameraFollows;
     if (bus_read_u32(kSceneCurrentId) == kSceneGameplay && cameraFollows) {
         // World layers BG3 and BG2 hold the camera's tiles; their scroll is only the fine offset.
         shiftX = cameraShift(cameraDx, (io[0x1C] | io[0x1D] << 8) & 7);
@@ -265,7 +245,6 @@ void prepareFrame(const std::uint8_t* io)
         if (found == g->positions[next].end() || found->second.screen != tag.position.screen) continue;
         const int dx = found->second.x - tag.position.x, dy = found->second.y - tag.position.y;
         if (!small(dx, dy)) continue;
-        g->lastDelta[tag.actor] = Position{dx, dy, tag.position.screen};
         int ox = half(dx), oy = half(dy);
         if (!tag.position.screen) {
             if (!cameraFollows) continue;
@@ -281,89 +260,6 @@ void prepareFrame(const std::uint8_t* io)
     for (const std::int8_t offset : g->objOffset) obj = obj || offset;
     g->movedBg += shiftX || shiftY;
     g->movedObj += obj;
-}
-
-// Second presentation subframe at 120 Hz. The primary frame's prepareFrame
-// already ran. On a repeated vblank the next tick is known, so this is the 3/4
-// point of that change; on a real tick the previous finished buffer is still
-// intact (the guest is paused inside the present hook), so this extrapolates a
-// quarter step of the move into the displayed buffer.
-void prepareExtraFrame(const std::uint8_t* io)
-{
-    const bool base = g->interpolate;
-    g->interpolate = false;
-    for (auto& layer : g->bgOffset) layer[0] = layer[1] = 0;
-    if (!g->enabled || g->displayed < 0) return;
-    // A repeated vblank whose next tick was not composed stays as it is.
-    if (g->vblanksShown == 1 && !base) return;
-
-    const int previous = 1 - g->displayed;
-    int cameraDx = 0, cameraDy = 0;
-    bool cameraFollows = false;
-    if (base) {
-        if (!g->lastDeltaValid) return;
-        cameraDx = g->lastCameraDx;
-        cameraDy = g->lastCameraDy;
-        cameraFollows = true;
-    } else {
-        if (g->composing[previous] || g->composed[previous] == 0) return;
-        cameraDx = g->cameraX[g->displayed] - g->cameraX[previous];
-        cameraDy = g->cameraY[g->displayed] - g->cameraY[previous];
-        cameraFollows = small(cameraDx, cameraDy);
-        if (!cameraFollows) return;  // a cut or teleport: keep the real frame
-    }
-
-    const int numerator = base ? 3 : 1;  // 3/4 of the tick, or 1/4 extrapolated
-    const float factor = base ? 0.75f : 0.25f;
-    int shiftX = 0, shiftY = 0;
-    if (bus_read_u32(kSceneCurrentId) == kSceneGameplay) {
-        shiftX = quarter(cameraDx, numerator);
-        shiftY = quarter(cameraDy, numerator);
-        const int fineX = (io[0x1C] | io[0x1D] << 8) & 7;
-        const int fineY = (io[0x1E] | io[0x1F] << 8) & 7;
-        if (shiftX < -fineX) shiftX = -fineX;
-        if (shiftX > 8 - fineX) shiftX = 8 - fineX;
-        if (shiftY < -fineY) shiftY = -fineY;
-        if (shiftY > 8 - fineY) shiftY = 8 - fineY;
-        g->bgOffset[2][0] = g->bgOffset[3][0] = shiftX;
-        g->bgOffset[2][1] = g->bgOffset[3][1] = shiftY;
-        if (g->parallax && (io[1] & 0x02u)) {  // BG1 on
-            g->bgOffset[1][0] = static_cast<int>(std::lround(g->parallaxRatio[0] * cameraDx * factor));
-            g->bgOffset[1][1] = static_cast<int>(std::lround(g->parallaxRatio[1] * cameraDy * factor));
-        }
-    }
-
-    const std::uint32_t pieces = g->pieces[g->displayed];
-    g->objOffset.assign(static_cast<std::size_t>(pieces) * 2u, 0);
-    for (std::uint32_t i = 0; i < pieces; ++i) {
-        const Tag& tag = g->tags[g->displayed][i];
-        if (!tag.actor) continue;
-        int dx = 0, dy = 0;
-        if (base) {
-            const auto found = g->lastDelta.find(tag.actor);
-            if (found == g->lastDelta.end() || found->second.screen != tag.position.screen) continue;
-            dx = found->second.x;
-            dy = found->second.y;
-        } else {
-            const auto found = g->positions[previous].find(tag.actor);
-            if (found == g->positions[previous].end() || found->second.screen != tag.position.screen) continue;
-            dx = tag.position.x - found->second.x;
-            dy = tag.position.y - found->second.y;
-        }
-        if (!small(dx, dy)) continue;
-        int ox = quarter(dx, numerator), oy = quarter(dy, numerator);
-        if (!tag.position.screen) {
-            ox -= shiftX;
-            oy -= shiftY;
-        }
-        g->objOffset[i * 2] = static_cast<std::int8_t>(ox);
-        g->objOffset[i * 2 + 1] = static_cast<std::int8_t>(oy);
-    }
-    g->interpolate = true;
-    ++g->extraFrames;
-    bool moved = shiftX || shiftY;
-    for (const std::int8_t offset : g->objOffset) moved = moved || offset;
-    g->extraMoved += moved;
 }
 
 void moveObject(std::uint8_t* entry, int dx, int dy)
@@ -382,10 +278,7 @@ void moveObject(std::uint8_t* entry, int dx, int dy)
 void presentScanline(std::uint32_t y, std::uint8_t* io, std::uint8_t* oam)
 {
     transparencyScanline(y, io, oam);  // first: it replaces whole entries that smoothing then moves
-    if (y == 0) {
-        if (gba::g_present_extra_render) prepareExtraFrame(io);
-        else prepareFrame(io);
-    }
+    if (y == 0) prepareFrame(io);
     if (!g->interpolate) return;
     for (unsigned layer = 0; layer < 4; ++layer)
         for (unsigned axis = 0; axis < 2; ++axis) {
@@ -409,28 +302,16 @@ void report()
     for (int i = 0; i < 3; ++i) {
         const State& state = g_states[i];
         if (state.frames)
-            std::fprintf(stderr, "[rotk] smooth motion%s: %llu frames, %llu interpolated (%llu moved BG, %llu moved sprites), %llu extra 120 Hz frames (%llu moved)\n",
+            std::fprintf(stderr, "[rotk] smooth motion%s: %llu frames, %llu interpolated (%llu moved BG, %llu moved sprites)\n",
                          names[i], static_cast<unsigned long long>(state.frames),
                          static_cast<unsigned long long>(state.interpolated),
-                         static_cast<unsigned long long>(state.movedBg),
-                         static_cast<unsigned long long>(state.movedObj),
-                         static_cast<unsigned long long>(state.extraFrames),
-                         static_cast<unsigned long long>(state.extraMoved));
+                         static_cast<unsigned long long>(state.movedBg), static_cast<unsigned long long>(state.movedObj));
     }
-}
-
-// 120 Hz is the default presentation for smooth motion; ROTK_PC_SMOOTH_HZ=60
-// keeps the original single subframe.
-bool extraSubframeEnabled()
-{
-    const char* hz = std::getenv("ROTK_PC_SMOOTH_HZ");
-    return !hz || std::string(hz) != "60";
 }
 
 void enable()
 {
     g->enabled = true;
-    g->hz120 = extraSubframeEnabled();
     for (auto& tags : g->tags) tags.assign(kMaxPieces, Tag{});
     gba_mod_set_function_hook_enabled(kHookId, 1);
     gba_mod_set_function_hook_enabled(kParticleHookId, 1);
@@ -497,7 +378,6 @@ void smoothStartCoop()
         State& state = g_states[console];
         state = State{};
         state.enabled = g_states[0].enabled;
-        state.hz120 = g_states[0].hz120;
         state.particles = g_states[0].particles;
         state.parallax = g_states[0].parallax;
         if (state.enabled)
@@ -522,11 +402,6 @@ void smoothSelectConsole(int console)
 bool smoothMotionActive()
 {
     return g->enabled;
-}
-
-bool smoothMotion120()
-{
-    return g->enabled && g->hz120;
 }
 
 void smoothNotePiece(int buffer, std::uint32_t index)

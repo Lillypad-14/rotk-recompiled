@@ -47,7 +47,6 @@ FRAMEWORK_PATCHES = [
     ROOT / "patches/ram-trace-host.patch",
     ROOT / "patches/rom-poke.patch",
     ROOT / "patches/boot-skip-io.patch",
-    ROOT / "patches/smooth-120.patch",
     ROOT / "patches/fullscreen-f11.patch",
     ROOT / "patches/analog-move.patch",
     ROOT / "patches/analog-direction.patch",

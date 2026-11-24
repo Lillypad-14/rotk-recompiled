@@ -1,4 +1,4 @@
-# Smooth motion (launcher feature "Smooth motion (120 fps)", src/smooth_motion.cpp)
+# Smooth motion (launcher feature "Smooth motion (60 fps)", src/smooth_motion.cpp)
 
 On by default. The game ticks once every 2 vblanks (30 Hz), so every second frame repeats. On the
 repeated vblank this draws the halfway point between the tick on screen and the next one. It is
@@ -48,24 +48,6 @@ pixel-identical to the original.
   the player sprite moves.
 - Camera scrolling: the headless routes never scroll (the first map's crebain tutorial box keeps
   blocking movement); the user tested walking in-game and it works.
-
-## 120 Hz second subframe (2026-11-24)
-
-The presentation loop now shows two images per guest vblank, paced at 2 x 59.7275 Hz: the primary
-frame at the vblank boundary and a second subframe half a vblank later. `smoothMotion120()` opts in
-through `RunOptions::present_extra_frame`; `ROTK_PC_SMOOTH_HZ=60` keeps the old 60 fps cadence.
-
-- On a repeated vblank the extra frame is the 3/4 point of the tick change (the primary is the 1/2
-  point). On a real tick it is a 1/4 extrapolation of the previous tick's motion, so a constant
-  velocity advances in equal 1/4 steps.
-- The runtime re-renders the frame by calling `GbaPpu::render_scanline()` for every line with
-  `g_present_extra_render` set. The hook therefore sees the same guest state, same tile camera and
-  same OAM as the primary frame, and applies the extra offsets per line. High-resolution output is
-  rebuilt at the same scale.
-- Cost is one extra full-frame render per guest frame, so 6x internal resolution roughly doubles
-  presenter work. Fast-forward and disabled smoothing keep a single present.
-- `docs/` checks use `smooth motion: ... extra 120 Hz frames (moved)` to show the second subframe ran
-  and that it actually displaced something.
 
 ## Known gaps
 

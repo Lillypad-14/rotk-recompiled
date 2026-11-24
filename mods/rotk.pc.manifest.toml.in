@@ -145,8 +145,8 @@ default = false
 
 [[feature]]
 id = "smooth-motion"
-name = "Smooth motion (120 fps)"
-description = "The game updates 30 times a second. This draws three in-between frames between updates, so scrolling and movement look like 120 fps on a high-refresh display. Gameplay is unchanged. Works best with CPU boost. ROTK_PC_SMOOTH_HZ=60 opts out."
+name = "Smooth motion (60 fps)"
+description = "The game updates 30 times a second. This draws a halfway frame in between, so scrolling and movement look like 60 fps. Gameplay is unchanged. Works best with CPU boost."
 group = "Display"
 default_enabled = true
 
