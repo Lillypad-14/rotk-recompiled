@@ -48,6 +48,7 @@ FRAMEWORK_PATCHES = [
     ROOT / "patches/rom-poke.patch",
     ROOT / "patches/boot-skip-io.patch",
     ROOT / "patches/smooth-120.patch",
+    ROOT / "patches/fullscreen-f11.patch",
 ]
 
 # recomp-ui (launcher) patches, applied the same way to external/recomp-ui.

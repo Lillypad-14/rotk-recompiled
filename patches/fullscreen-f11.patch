@@ -1,0 +1,15 @@
+diff --git a/src/runtime/host_window.cpp b/src/runtime/host_window.cpp
+index a320574..56ea11c 100644
+--- a/src/runtime/host_window.cpp
++++ b/src/runtime/host_window.cpp
+@@ -3511,6 +3511,10 @@ HostWindow::Events HostWindow::pump() {
+                 int slot = static_cast<int>(sym - SDLK_F1) + 1;
+                 if (mods & KMOD_SHIFT) ev.save_slot = slot;
+                 else                   ev.load_slot = slot;
++            } else if (sym == SDLK_F11) {
++                // Browsers and fullscreen emulators use F11; always available
++                // even when Fullscreen is rebound in [KeyMap].
++                ev.toggle_fullscreen = true;
+             } else {
+                 // Rebindable system hotkeys (config.ini [KeyMap]).
+                 for (int h = 0; h < HK_COUNT; ++h) {
