@@ -776,6 +776,9 @@ int main(int argc, char** argv)
     rotk::minimapRegister();
     options.present_decorate = presentDecorate;
     options.present_decorate_active = presentDecorateActive;
+    // Smooth motion's 120 Hz mode: one extra interpolated presentation per
+    // guest frame, rendered by the runtime from the same guest state.
+    options.present_extra_frame = rotk::smoothMotion120;
     rotk::localCoopRegister(options);
 #if defined(ROTK_LAUNCHER)
     std::vector<std::string> args(argv, argv + argc);

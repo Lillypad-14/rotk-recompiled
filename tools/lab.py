@@ -47,6 +47,7 @@ FRAMEWORK_PATCHES = [
     ROOT / "patches/ram-trace-host.patch",
     ROOT / "patches/rom-poke.patch",
     ROOT / "patches/boot-skip-io.patch",
+    ROOT / "patches/smooth-120.patch",
 ]
 
 # recomp-ui (launcher) patches, applied the same way to external/recomp-ui.

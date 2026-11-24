@@ -24,6 +24,10 @@ void smoothSelectConsole(int console);
 // True while the feature needs the sprite push/end-frame observers.
 bool smoothMotionActive();
 
+// True when the runtime should present a second, 3/4-phase subframe half a
+// guest frame after the primary one (120 Hz). Env: ROTK_PC_SMOOTH_HZ=60 opts out.
+bool smoothMotion120();
+
 // Called by the sprite_pushOam hook for every piece: OAM index (128 and up for extra pieces) in
 // shadow buffer 0 or 1.
 void smoothNotePiece(int buffer, std::uint32_t index);
