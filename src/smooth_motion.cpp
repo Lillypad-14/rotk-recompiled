@@ -112,7 +112,10 @@ struct State {
     std::vector<std::int8_t> objOffset;  // dx, dy per piece
     // Subpixel: fraction (1/256 px) moving content right/down, per BG and per piece.
     bool subActive = false;
-    std::uint8_t bgSub[4][2] = {};
+    std::int16_t bgSub[4][2] = {};  // x may be negative (content moves left)
+    // The world layers scroll one row past the copied tiles; the last line draws one row less.
+    bool bottomRowFix = false;
+    std::uint32_t line = 0;  // scanline being drawn
     std::vector<std::uint8_t> objSub;
     std::vector<std::uint8_t> extraCopy;
     // BG1 parallax: scroll and camera at the last tick, and scroll change per camera pixel.
@@ -270,16 +273,26 @@ void prepareSubpixel(const std::uint8_t* io, int shown, int next, bool interpola
     }
     const int fine[2] = {(io[0x1C] | io[0x1D] << 8) & 7, (io[0x1E] | io[0x1F] << 8) & 7};
     std::int32_t presented[2];  // the camera the world layers end up at
+    g->bottomRowFix = false;
     for (int axis = 0; axis < 2; ++axis) {
-        const std::int32_t move = camera[axis] - fp(base[axis]);  // the world moves by -move
-        int shift = pixel(move + 0xFFFF);                          // whole pixels, rounded up
-        int fraction = (fp(shift) - move) >> 8;                    // back down, 0..255
-        if (shift < -fine[axis] || shift > 8 - fine[axis]) {       // outside the copied tiles
-            shift = shift < -fine[axis] ? -fine[axis] : 8 - fine[axis];
-            fraction = 0;
+        std::int32_t move = camera[axis] - fp(base[axis]);  // the world moves by -move
+        {
+            // Inside the copied tiles (fine scroll + shift in 0..8) plus what a fraction can add: up
+            // to a pixel to the left/top, a pixel to the right (moving content left), and one row
+            // at the bottom whose last line repeats the row above.
+            const std::int32_t low = fp(-fine[axis]) - 255 * 256;
+            const std::int32_t high = axis == 0 ? fp(8 - fine[axis]) + 255 * 256 : fp(9 - fine[axis]);
+            move = move < low ? low : move > high ? high : move;
         }
+        int shift = pixel(move + 0xFFFF);  // whole pixels, rounded up
+        int fraction = (fp(shift) - move) >> 8;  // back right/down, 0..255
+        if (axis == 0 && shift > 8 - fine[axis]) {
+            --shift;  // round down and move the content left instead
+            fraction -= 256;
+        }
+        if (axis == 1 && shift > 8 - fine[axis]) g->bottomRowFix = true;
         g->bgOffset[2][axis] = g->bgOffset[3][axis] = shift;
-        g->bgSub[2][axis] = g->bgSub[3][axis] = static_cast<std::uint8_t>(fraction);
+        g->bgSub[2][axis] = g->bgSub[3][axis] = static_cast<std::int16_t>(fraction);
         presented[axis] = fp(base[axis] + shift) - fraction * 256;
         g->presentedCamera[axis] = presented[axis];
     }
@@ -289,7 +302,7 @@ void prepareSubpixel(const std::uint8_t* io, int shown, int next, bool interpola
             const int shift = static_cast<int>(std::ceil(move / 65536.0f));
             const int fraction = static_cast<int>((static_cast<float>(fp(shift)) - move) / 256.0f);
             g->bgOffset[1][axis] = shift;
-            g->bgSub[1][axis] = static_cast<std::uint8_t>(fraction < 0 ? 0 : fraction > 255 ? 255 : fraction);
+            g->bgSub[1][axis] = static_cast<std::int16_t>(fraction < 0 ? 0 : fraction > 255 ? 255 : fraction);
         }
     }
 
@@ -441,14 +454,23 @@ void moveObject(std::uint8_t* entry, int dx, int dy)
     entry[3] = static_cast<std::uint8_t>(attr1 >> 8);
 }
 
+// The scroll change of a world layer on the line being drawn.
+int lineBgShift(int layer, int axis)
+{
+    const int offset = g->bgOffset[layer][axis];
+    const bool lastLine = g->line == 159u && (layer == 2 || layer == 3) && axis == 1;
+    return lastLine && g->bottomRowFix ? offset - 1 : offset;
+}
+
 void presentScanline(std::uint32_t y, std::uint8_t* io, std::uint8_t* oam)
 {
     transparencyScanline(y, io, oam);  // first: it replaces whole entries that smoothing then moves
+    g->line = y;
     if (y == 0) prepareFrame(io);
     if (!g->interpolate) return;
     for (unsigned layer = 0; layer < 4; ++layer)
         for (unsigned axis = 0; axis < 2; ++axis) {
-            const int offset = g->bgOffset[layer][axis];
+            const int offset = lineBgShift(static_cast<int>(layer), static_cast<int>(axis));
             if (!offset) continue;
             const unsigned reg = 0x10u + layer * 4u + axis * 2u;
             const int value = ((io[reg] | io[reg + 1] << 8) + offset) & 0x1FF;
@@ -628,7 +650,7 @@ void smoothSetDisplayedBuffer(int buffer)
 int smoothBgShift(int bg, int axis)
 {
     if (!g->enabled || !g->interpolate || bg < 0 || bg > 3 || axis < 0 || axis > 1) return 0;
-    return g->bgOffset[bg][axis];
+    return lineBgShift(bg, axis);
 }
 
 const std::uint8_t* smoothAdjustExtra(const std::uint8_t* pieces, std::uint32_t count)

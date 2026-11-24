@@ -1,8 +1,7 @@
 diff --git a/src/gba/gba_high_resolution.cpp b/src/gba/gba_high_resolution.cpp
-index 7c3f76d..a5de793 100644
 --- a/src/gba/gba_high_resolution.cpp
 +++ b/src/gba/gba_high_resolution.cpp
-@@ -94,6 +94,14 @@ void hd_tiles_set(std::vector<HdTileImage> images) {
+@@ -94,6 +94,14 @@
  
  bool hd_tiles_active() { return !hd_registry().images.empty(); }
  
@@ -17,7 +16,7 @@ index 7c3f76d..a5de793 100644
  unsigned hd_tiles_matched() { return hd_registry().matched; }
  const char* GbaHighResolutionFrame::sampler_implementation() {
  #if defined(GBARECOMP_HD_SAMPLER_HLE)
-@@ -141,6 +149,7 @@ void GbaHighResolutionFrame::configure(unsigned width, unsigned height) {
+@@ -141,6 +149,7 @@
      work_.resize(size_t(width) * height * scale_ * scale_ * 3);
      latched_.resize(work_.size());
      scratch_.resize(size_t(width) * height * 3);
@@ -25,7 +24,7 @@ index 7c3f76d..a5de793 100644
      invalidate();
  }
  void GbaHighResolutionFrame::invalidate() {
-@@ -153,6 +162,7 @@ void GbaHighResolutionFrame::begin_frame() {
+@@ -153,6 +162,7 @@
      std::fill(written_.begin(), written_.end(), 0);
      written_lines_ = 0;
      hd_frame_prepared_ = false;
@@ -33,7 +32,7 @@ index 7c3f76d..a5de793 100644
  }
  void GbaHighResolutionFrame::match_hd_tiles(uint16_t dispcnt, const uint8_t* io,
                                              const uint8_t* vram) {
-@@ -255,7 +265,7 @@ bool GbaHighResolutionFrame::sample_hd(const HdPixel& at, unsigned sx, unsigned
+@@ -255,7 +265,7 @@
  bool GbaHighResolutionFrame::begin_line(int y, unsigned ox, unsigned oy,
      uint16_t dispcnt, const uint8_t* io, const uint8_t* vram, const uint8_t* pal,
      HighResolutionAffineProvider provider, bool filter) {
@@ -42,7 +41,7 @@ index 7c3f76d..a5de793 100644
      if (y < 0 || y >= 160 || (dispcnt & 0x80)) {
          previous_ = {}; return false;
      }
-@@ -294,7 +304,8 @@ bool GbaHighResolutionFrame::begin_line(int y, unsigned ox, unsigned oy,
+@@ -294,7 +304,8 @@
          selected_ |= 1u << layer;
      }
      if (!provider) previous_ = {};
@@ -52,7 +51,7 @@ index 7c3f76d..a5de793 100644
      if (selected_) ++affine_lines_;
      ox_ = ox; row_ = unsigned(y + int(oy));
      vram_ = vram; pal_ = pal; filter_ = filter;
-@@ -306,6 +317,18 @@ bool GbaHighResolutionFrame::begin_line(int y, unsigned ox, unsigned oy,
+@@ -306,6 +317,22 @@
      std::fill(second_.begin(), second_.end(), Pixel{});
      std::fill(windows_.begin(), windows_.end(), 0x3f);
      std::fill(black_.begin(), black_.end(), 0);
@@ -62,8 +61,12 @@ index 7c3f76d..a5de793 100644
 +        sub_bg_x_breaks_ = sub_bg_y_breaks_ = 1u;
 +        sub_obj_y_breaks_[sub_current_] = 0;
 +        for (unsigned bg = 0; bg < 4; ++bg) {
-+            for (unsigned axis = 0; axis < 2; ++axis)
-+                sub_bg_[bg][axis] = uint8_t(g_subpixel_shift.bg[bg][axis] * scale_ / 256u);
++            const int x = std::clamp(int(g_subpixel_shift.bg[bg][0]), -255, 255);
++            const int y = std::clamp(int(g_subpixel_shift.bg[bg][1]), 0, 255);
++            const unsigned right = unsigned(x < 0 ? -x : x) * scale_ / 256u;
++            sub_bg_[bg][0] = uint8_t(x < 0 ? scale_ - right : right);
++            sub_bg_lo_[bg] = int8_t(x < 0 ? 0 : -1);
++            sub_bg_[bg][1] = uint8_t(unsigned(y) * scale_ / 256u);
 +            sub_bg_x_breaks_ |= 1u << sub_bg_[bg][0];
 +            sub_bg_y_breaks_ |= 1u << sub_bg_[bg][1];
 +        }
@@ -71,7 +74,7 @@ index 7c3f76d..a5de793 100644
      return true;
  }
  void GbaHighResolutionFrame::window(unsigned x, uint8_t control) {
-@@ -319,6 +342,27 @@ void GbaHighResolutionFrame::insert(Pixel& top, Pixel& second, const Pixel& p) {
+@@ -319,6 +346,27 @@
  void GbaHighResolutionFrame::submit(unsigned x, uint16_t color, int key,
      uint8_t layer, bool target1, bool target2) {
      if (selected_ & (1u << layer)) return;
@@ -99,7 +102,7 @@ index 7c3f76d..a5de793 100644
      if (layer < 4 && (hd_line_layers_ & (1u << layer)) && hd_pixels_[layer][x].image) return;
      insert(top_[x], second_[x], {color, key, layer, target1, target2, true});
  }
-@@ -435,7 +479,78 @@ void GbaHighResolutionFrame::write_color_rgb(uint8_t* dst, const Pixel& top,
+@@ -435,7 +483,80 @@
  void GbaHighResolutionFrame::wrote_line(unsigned y) {
      if (y < height_ && !written_[y]) { written_[y] = 1; ++written_lines_; }
  }
@@ -107,8 +110,9 @@ index 7c3f76d..a5de793 100644
 +// native column and row that cover it once the layer is moved right/down by
 +// its offset, then composites them like the native stack. Content moves at
 +// most one native pixel, so only this column and the one to its left, and this
-+// row and the one above, can cover a subpixel. Missing neighbours at the left
-+// and top edges repeat the edge pixel for BGs.
++// row and the one above, can cover a subpixel (BGs moving left take the column
++// to the right instead). Missing neighbours at the edges repeat the edge pixel
++// for BGs.
 +void GbaHighResolutionFrame::resolve_subpixel() {
 +    ++subpixel_lines_;
 +    const auto& current = sub_rows_[sub_current_];
@@ -156,7 +160,8 @@ index 7c3f76d..a5de793 100644
 +                Pixel top = top_[x], second = second_[x];
 +                for (unsigned bg = 0; bg < 4; ++bg) {
 +                    if (!(window & (1u << bg))) continue;
-+                    const unsigned column = sx >= sub_bg_[bg][0] ? x : (x ? x - 1 : 0);
++                    const int column = std::clamp(int(x) + sub_bg_lo_[bg] + (sx >= sub_bg_[bg][0]), 0,
++                                                  int(width_) - 1);
 +                    const Pixel& p = bg_rows[bg][column].bg[bg];
 +                    if (p.valid) insert(top, second, p);
 +                }
@@ -178,7 +183,7 @@ index 7c3f76d..a5de793 100644
  #if defined(GBARECOMP_HD_SAMPLER_HLE)
      for (const auto& a : affine_) if (a.active) surfaces_[a.cache].update(a.cnt, vram_);
      for (unsigned i = 0; i < palette_.size(); ++i) {
-@@ -500,6 +615,7 @@ void GbaHighResolutionFrame::resolve() {
+@@ -500,6 +621,7 @@
      wrote_line(row_);
  }
  void GbaHighResolutionFrame::upscale_line(unsigned y, const uint8_t* native_row) {
@@ -187,23 +192,25 @@ index 7c3f76d..a5de793 100644
          auto* dst = work_.data() + size_t(y * scale_ + sy) * width() * 3;
  #if defined(GBARECOMP_HD_SAMPLER_HLE)
 diff --git a/src/gba/gba_high_resolution.h b/src/gba/gba_high_resolution.h
-index da84235..3d43a2b 100644
 --- a/src/gba/gba_high_resolution.h
 +++ b/src/gba/gba_high_resolution.h
-@@ -25,6 +25,20 @@ bool hd_tiles_active();
+@@ -25,6 +25,23 @@
  // Image blocks drawn on the latest published frame.
  unsigned hd_tiles_matched();
  
 +// Presentation-only subpixel offsets for the internal resolution, set by the
 +// host before each frame (for example from the present scanline hook). Each
-+// value is in 1/256 of a native pixel, 0..255, and moves that layer's content
-+// right (x) or down (y). The host folds whole pixels into the scroll registers
-+// and OAM; this only adds the remaining fraction. `obj` returns the offsets of
-+// OBJ `index` (0..127 hardware OAM, 128 and up extra objects), false for none.
-+// Lines with affine or HD tile layers keep their regular resolve.
++// value is in 1/256 of a native pixel. BG x is -255..255 and moves that
++// layer's content right (positive) or left (negative); BG y is 0..255 and moves
++// it down (lines resolve top to bottom, so the row below is not known yet).
++// OBJ offsets are 0..255 and move right/down. The host folds whole pixels into
++// the scroll registers and OAM; this only adds the remaining fraction. `obj`
++// returns the offsets of OBJ `index` (0..127 hardware OAM, 128 and up extra
++// objects), false for none. Lines with affine or HD tile layers keep their
++// regular resolve.
 +struct SubpixelShift {
 +    bool active = false;
-+    uint8_t bg[4][2] = {};
++    int16_t bg[4][2] = {};
 +    bool (*obj)(unsigned index, uint8_t* dx, uint8_t* dy) = nullptr;
 +};
 +extern SubpixelShift g_subpixel_shift;
@@ -211,7 +218,7 @@ index da84235..3d43a2b 100644
  // Downstream presentation only. Native layers retain their authored pixels;
  // approved affine BGs are sampled again at fractional output coordinates and
  // inserted into the same priority/window/blend stack. No guest state is owned
-@@ -55,6 +69,7 @@ public:
+@@ -55,6 +72,7 @@
      uint64_t frames() const { return frames_; }
      uint64_t affine_lines() const { return affine_lines_; }
      uint64_t samples() const { return samples_; }
@@ -219,7 +226,7 @@ index da84235..3d43a2b 100644
  
  private:
      struct Pixel {
-@@ -106,6 +121,7 @@ private:
+@@ -106,6 +124,7 @@
      void write_color(uint8_t* dst, const Pixel& top, const Pixel& second) const;
      void write_color_rgb(uint8_t* dst, const Pixel& top, const Pixel& second) const;
      void wrote_line(unsigned y);
@@ -227,7 +234,7 @@ index da84235..3d43a2b 100644
      void match_hd_tiles(uint16_t dispcnt, const uint8_t* io, const uint8_t* vram);
      bool prepare_hd_line(int y, uint16_t dispcnt, const uint8_t* io);
      bool sample_hd(const HdPixel& at, unsigned sx, unsigned sy, Pixel& out) const;
-@@ -125,6 +141,27 @@ private:
+@@ -125,6 +144,30 @@
      std::array<int, 4> hd_keys_{};
      unsigned hd_line_layers_ = 0, hd_frame_matched_ = 0;
      bool hd_frame_prepared_ = false;
@@ -245,7 +252,10 @@ index da84235..3d43a2b 100644
 +    std::vector<SubpixelColumn> sub_rows_[2];
 +    unsigned sub_current_ = 0, sub_previous_row_ = ~0u;
 +    bool subpixel_line_ = false;
++    // Per BG, in output subpixels: y offset, and the x boundary where the
++    // source column changes from x + lo to x + lo + 1 (lo -1 moves right, 0 left).
 +    std::array<std::array<uint8_t, 2>, 4> sub_bg_{};
++    std::array<int8_t, 4> sub_bg_lo_{};
 +    // Subpixel positions (bits) where a layer's source column or row changes:
 +    // the BG x and y offsets, and the OBJ y offsets of each stored row. Output
 +    // between two of them repeats the previous subpixel.
@@ -256,10 +266,9 @@ index da84235..3d43a2b 100644
      unsigned written_lines_ = 0;
      uint64_t frames_ = 0, affine_lines_ = 0, samples_ = 0;
 diff --git a/src/runtime/runtime.cpp b/src/runtime/runtime.cpp
-index 4414513..2f1666f 100644
 --- a/src/runtime/runtime.cpp
 +++ b/src/runtime/runtime.cpp
-@@ -2434,14 +2434,14 @@ int run_game(int argc, char** argv, const RunOptions& opts) {
+@@ -2434,14 +2434,14 @@
          reg(0x05000000u, bus.pal_ptr(),       1 * 1024);
          reg(0x06000000u, bus.vram_ptr(),     96 * 1024);
          reg(0x07000000u, bus.oam_ptr(),       1 * 1024);
@@ -282,7 +291,7 @@ index 4414513..2f1666f 100644
      }
      auto wram_trace_tick = [&]() {
          if (!wram_trace_log) return;
-@@ -4678,8 +4678,13 @@ int run_game(int argc, char** argv, const RunOptions& opts) {
+@@ -4678,8 +4678,13 @@
                      char p[512];
                      std::snprintf(p, sizeof(p), "%s/f_%06llu.png", framedump_dir,
                                    static_cast<unsigned long long>(frame));
@@ -298,7 +307,7 @@ index 4414513..2f1666f 100644
                      if (++framedump_written >= framedump_max) host_quit = true;
                  }
                  if (opts.local_link && opts.local_link->wanted && opts.local_link->wanted())
-@@ -4982,36 +4987,42 @@ int run_game(int argc, char** argv, const RunOptions& opts) {
+@@ -4982,36 +4987,42 @@
          !args.window && args.frames >= 0 && args.tcp_port <= 0 &&
          !demo_input && !input_replay_requested && present_in_place &&
          !diag.playing();
@@ -366,7 +375,7 @@ index 4414513..2f1666f 100644
              return ppu.frame_count() - headless_base_frame >=
                     static_cast<uint64_t>(args.frames);
          });
-@@ -5160,8 +5171,13 @@ int run_game(int argc, char** argv, const RunOptions& opts) {
+@@ -5160,8 +5171,13 @@
                      char p[512];
                      std::snprintf(p, sizeof(p), "%s/f_%06llu.png", framedump_dir,
                                    static_cast<unsigned long long>(frame));
@@ -382,7 +391,7 @@ index 4414513..2f1666f 100644
                      if (++framedump_written >= framedump_max) host_quit = true;
                  }
                  if (phase_active) fp_t2 = FramePhaseRing::now_ns();
-@@ -5194,7 +5210,7 @@ int run_game(int argc, char** argv, const RunOptions& opts) {
+@@ -5194,7 +5210,7 @@
                  }
              }
          }
