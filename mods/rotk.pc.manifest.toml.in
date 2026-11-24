@@ -167,6 +167,13 @@ type = "boolean"
 default = true
 
 [[feature]]
+id = "analog-move"
+name = "Analog movement"
+description = "Left-stick movement speed follows how far the stick is pushed. Keyboard and D-pad stay full speed; the direction stays eight-way. ROTK_PC_ANALOG_MOVE=0 opts out."
+group = "Engine"
+default_enabled = true
+
+[[feature]]
 id = "combat-info"
 name = "Health bars and damage numbers"
 description = "Shows a health bar over hurt enemies and the damage of each hit, drawn in the game's pixel style. Display only: gameplay is unchanged."
@@ -3983,6 +3990,10 @@ id = "rotk.pc.cpu-boost"
 [[plugin]]
 feature = "widescreen"
 id = "rotk.pc.widescreen"
+
+[[plugin]]
+feature = "analog-move"
+id = "rotk.pc.analog-move"
 
 [[plugin]]
 feature = "smooth-motion"

@@ -25,6 +25,7 @@
 #include "rumble.h"
 #include "local_coop.h"
 #include "smooth_motion.h"
+#include "analog_move.h"
 #include "host_palettes.h"
 #include "transparency.h"
 #include "mod_function_hooks.h"
@@ -749,6 +750,7 @@ int main(int argc, char** argv)
         gba_mod_register_activation_plugin(plugin, featureActivated);
     rotk::hdAudioRegister();
     rotk::smoothMotionRegister();
+    rotk::analogMoveRegister();
     rotk::hostPalettesRegister();
     rotk::transparencyRegister();
     g_stereoFromEnv = std::getenv("GBARECOMP_AUDIO_STEREO") != nullptr;
