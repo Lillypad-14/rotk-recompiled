@@ -107,3 +107,34 @@ The normal replay was subsequently checked on the reference build (57.876 Hz, 22
 `runtime_bridge_interpret` (gbarecomp `runtime_arm_default_aborts.cpp`) asked `runtime_has_static_entry` after every interpreted instruction whether it could return to native code. That lookup does not cache misses, and in two-console co-op fights its `lookup_native_ram` was 18% of all samples. The bridge now asks only after a control transfer (branch, return, exception return or an IRQ taken during the tick). Code that falls through into a static entry stays interpreted until its next branch, which is still correct. The bridge also skips the copy of the interpreter state into `g_cpu` at the top of an instruction when the state was just loaded from `g_cpu`.
 
 Split-screen co-op fights on a quiet machine went from 8.1 to 6.2 ms per frame (median; details in [SPLIT_SCREEN.md](SPLIT_SCREEN.md)). Co-op screenshots are byte-identical before and after. On the single-player 1,800-frame crowd-action checkpoint the final image is unchanged (`dba12c45...`), and the snapshot matches except the RTC byte that also differs between two runs of the same build. Interpreted instructions went from 243,569 to 243,591. Single-player frame rate was not measured for this change.
+
+## Display lock (2026-11-24)
+
+The pacer ran the game at the GBA's 59.7275 Hz with renderer vsync off. A display refreshing at
+60 or 120 Hz shows the latest frame at each refresh, so the two clocks beat: on a 120 Hz panel two
+refreshes last 16.667 ms against a 16.743 ms frame, and every ~110 frames (1.8 s) one frame stays up
+for three refreshes (25 ms) instead of two; on 60 Hz one frame repeats every ~220 frames (3.7 s).
+With 60 fps smooth motion and subpixel panning this is a visible hitch "now and then".
+
+`patches/display-lock.patch` (`HostWindow::finish_frame`, on unless `GBARECOMP_DISPLAY_LOCK=0`):
+
+- When the window's display refreshes at k times 59.7275 Hz within 0.5% (60, 120, 180, 240 Hz;
+  not 75, 144 or 165 Hz), the renderer waits for vsync and every frame is presented k times. Each
+  frame then stays up exactly k refreshes and the game runs at refresh / k (60.000 fps at 120 Hz,
+  +0.46%). The display mode is read again every 120 frames, so moving the window re-evaluates it.
+- The pacer stays as a limit 3% above refresh / k. If 240 locked frames arrive at that limit
+  instead of the refresh cadence, vsync does not wait on this system: the lock turns off for the
+  session and pacing returns to 59.7275 Hz without vsync. Fast-forward unlocks. The SDL dummy video
+  driver (automated runs) never locks. `GBARECOMP_NO_VSYNC` also disables it.
+- Audio: the bridge's resampling servo is limited to 0.5%, which the +0.46% plus the device clock's
+  drift exceeded (258 overflow drops in a 5,400-frame run, correction pinned at +0.500%). While
+  locked the limit is 1.2%; measured correction then settles at +0.42..+0.48% with no overflow or
+  underrun (9,300 frames, real PipeWire device at volume 0). The pitch change is under 8 cents.
+- `GBARECOMP_FRAME_PHASE`'s present time now includes the vsync wait, so `tools/frame_report.py`
+  counts locked frames as "work over budget"; use the interval columns instead.
+
+Measured on the development laptop (Wayland, SDL 2.32 compat on SDL3, opengl renderer, 120 Hz
+panel), 9,300-frame walk with a real window: `display lock 120 Hz, 2 refreshes per frame`, 59.998 fps,
+every frame interval within 16.67 ± 0.5 ms (p99 16.82 ms) except one 25 ms interval at a scene load
+(frame 3726, 16 ms of guest work), no long gaps. Not yet checked: Windows (DXGI), X11, a 60 Hz
+display, split-screen co-op (wired the same way).

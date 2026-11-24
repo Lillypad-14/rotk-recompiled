@@ -47,6 +47,12 @@ FRAMEWORK_PATCHES = [
     ROOT / "patches/ram-trace-host.patch",
     ROOT / "patches/rom-poke.patch",
     ROOT / "patches/boot-skip-io.patch",
+    ROOT / "patches/fullscreen-f11.patch",
+    ROOT / "patches/analog-move.patch",
+    ROOT / "patches/analog-direction.patch",
+    ROOT / "patches/subpixel-pan.patch",
+    ROOT / "patches/tilemap-window.patch",
+    ROOT / "patches/display-lock.patch",
 ]
 
 # recomp-ui (launcher) patches, applied the same way to external/recomp-ui.
@@ -58,6 +64,7 @@ RECOMP_UI_PATCHES = [
     ROOT / "patches/recomp-ui-controls.patch",
     ROOT / "patches/recomp-ui-companion-rom.patch",
     ROOT / "patches/recomp-ui-companion-toggle.patch",
+    ROOT / "patches/recomp-ui-deadzone.patch",
 ]
 
 STOCK_ROM_SIZE = 0x1000000
@@ -112,7 +119,9 @@ def apply_framework_patch(framework: Path) -> None:
 
 
 def apply_patch_stack(checkout: Path, patches: list[Path]) -> None:
-    command = ["git", "-C", str(checkout), "apply"]
+    # Some patches carry CRLF source lines; on an LF checkout they only apply
+    # with whitespace-insensitive matching.
+    command = ["git", "-C", str(checkout), "apply", "--ignore-whitespace"]
     # The patches form an ordered stack and later ones can change an earlier one's context, so
     # Find the latest applied member of this ordered stack. When new patches
     # are added, older members need not reverse-apply independently: their

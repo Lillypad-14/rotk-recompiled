@@ -166,6 +166,21 @@ description = "Also scrolls the far background layer at 60 fps. Off keeps it at 
 type = "boolean"
 default = true
 
+[[option]]
+feature = "smooth-motion"
+id = "subpixel"
+label = "Subpixel camera panning"
+description = "Scrolls the world and moves sprites by fractions of a pixel at the internal resolution, so slow movement and the halfway frames glide instead of stepping a whole GBA pixel. Needs an internal resolution of 2x or more (HD skill icons' Render resolution)."
+type = "boolean"
+default = true
+
+[[feature]]
+id = "analog-move"
+name = "Analog movement"
+description = "Left-stick movement speed follows how far the stick is pushed. Keyboard and D-pad stay full speed; the direction stays eight-way. ROTK_PC_ANALOG_MOVE=0 opts out."
+group = "Engine"
+default_enabled = true
+
 [[feature]]
 id = "combat-info"
 name = "Health bars and damage numbers"
@@ -3983,6 +3998,10 @@ id = "rotk.pc.cpu-boost"
 [[plugin]]
 feature = "widescreen"
 id = "rotk.pc.widescreen"
+
+[[plugin]]
+feature = "analog-move"
+id = "rotk.pc.analog-move"
 
 [[plugin]]
 feature = "smooth-motion"

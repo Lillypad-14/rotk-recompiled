@@ -1,0 +1,65 @@
+diff --git a/src/runtime/host_window.cpp b/src/runtime/host_window.cpp
+index b472c4c..cac10fb 100644
+--- a/src/runtime/host_window.cpp
++++ b/src/runtime/host_window.cpp
+@@ -83,6 +83,8 @@ Java_org_gbarecomp_GbaNative_setDisplayDpi(JNIEnv*, jclass, jfloat xdpi, jfloat
+ // Live left-stick movement magnitude per player (0..1); keyboard and D-pad
+ // movement publish 1.0. Read by the game's analog movement hook.
+ extern "C" float gba_analog_move[2] = {1.0f, 1.0f};
++extern "C" float gba_analog_x[2] = {0.0f, 0.0f};
++extern "C" float gba_analog_y[2] = {0.0f, 0.0f};
+ 
+ #if defined(_WIN32)
+ #ifndef WIN32_LEAN_AND_MEAN
+@@ -672,6 +674,7 @@ void open_all_game_controllers(Backend* b) {
+ std::uint16_t player_held(Backend* b, int player) {
+     std::uint16_t held = 0;
+     float analog = 0.0f;
++    float stick_x = 0.0f, stick_y = 0.0f;
+     if (b->assigned.keyboard[player]) {
+         int count = 0;
+         const Uint8* keyboard = SDL_GetKeyboardState(&count);
+@@ -699,11 +702,15 @@ std::uint16_t player_held(Backend* b, int player) {
+             const float y = state.axis[controls::kLeftY] / 32767.0f;
+             const float magnitude = std::sqrt(x * x + y * y);
+             const float deadzone = std::clamp(profile.deadzone_pct, 5, 95) / 100.0f;
++            stick_x = x;
++            stick_y = y;
+             if (magnitude > deadzone)
+                 analog = std::max(analog, std::min(1.0f, (magnitude - deadzone) / (1.0f - deadzone)));
+         }
+     }
+     gba_analog_move[player] = analog;
++    gba_analog_x[player] = stick_x;
++    gba_analog_y[player] = stick_y;
+     return held;
+ }
+ 
+diff --git a/src/runtime/player_controls.h b/src/runtime/player_controls.h
+index 14ff2ae..bf16a31 100644
+--- a/src/runtime/player_controls.h
++++ b/src/runtime/player_controls.h
+@@ -51,7 +51,7 @@ struct PadBind {
+ struct PadProfile {
+     PadBind bind[kButtons];
+     bool set[kButtons] = {};   // per-controller profiles override only what they set
+-    int deadzone_pct = 50;
++    int deadzone_pct = 15;
+     bool deadzone_set = false;
+ };
+ 
+diff --git a/src/runtime/runtime.h b/src/runtime/runtime.h
+index b3a1f75..72fa2a9 100644
+--- a/src/runtime/runtime.h
++++ b/src/runtime/runtime.h
+@@ -21,6 +21,10 @@ namespace gbarecomp {
+ // Live left-stick movement magnitude per player (0..1), written by the host
+ // input pump; 1.0 for keyboard/D-pad or no analog source.
+ extern "C" float gba_analog_move[2];
++// Normalized left-stick vector for the same player (screen axes, up = -1).
++// Zero for keyboard, D-pad and no stick, so the game keeps eight-way movement.
++extern "C" float gba_analog_x[2];
++extern "C" float gba_analog_y[2];
+ 
+ struct GbaNetplayLaunch;
+ struct ViewGeometry;

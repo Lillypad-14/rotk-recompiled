@@ -1,0 +1,402 @@
+diff --git a/src/gba/gba_high_resolution.cpp b/src/gba/gba_high_resolution.cpp
+--- a/src/gba/gba_high_resolution.cpp
++++ b/src/gba/gba_high_resolution.cpp
+@@ -94,6 +94,14 @@
+ 
+ bool hd_tiles_active() { return !hd_registry().images.empty(); }
+ 
++SubpixelShift g_subpixel_shift;
++
++namespace {
++// OBJ pixels carry their OAM index in the low bits of the compositor key
++// (gba_ppu.cpp kObjKeyStride).
++constexpr unsigned kObjKeyStride = 4096u;
++}
++
+ unsigned hd_tiles_matched() { return hd_registry().matched; }
+ const char* GbaHighResolutionFrame::sampler_implementation() {
+ #if defined(GBARECOMP_HD_SAMPLER_HLE)
+@@ -141,6 +149,7 @@
+     work_.resize(size_t(width) * height * scale_ * scale_ * 3);
+     latched_.resize(work_.size());
+     scratch_.resize(size_t(width) * height * 3);
++    for (auto& rows : sub_rows_) rows.assign(width, SubpixelColumn{});
+     invalidate();
+ }
+ void GbaHighResolutionFrame::invalidate() {
+@@ -153,6 +162,7 @@
+     std::fill(written_.begin(), written_.end(), 0);
+     written_lines_ = 0;
+     hd_frame_prepared_ = false;
++    sub_previous_row_ = ~0u;
+ }
+ void GbaHighResolutionFrame::match_hd_tiles(uint16_t dispcnt, const uint8_t* io,
+                                             const uint8_t* vram) {
+@@ -255,7 +265,7 @@
+ bool GbaHighResolutionFrame::begin_line(int y, unsigned ox, unsigned oy,
+     uint16_t dispcnt, const uint8_t* io, const uint8_t* vram, const uint8_t* pal,
+     HighResolutionAffineProvider provider, bool filter) {
+-    selected_ = 0; affine_ = {}; hd_line_layers_ = 0;
++    selected_ = 0; affine_ = {}; hd_line_layers_ = 0; subpixel_line_ = false;
+     if (y < 0 || y >= 160 || (dispcnt & 0x80)) {
+         previous_ = {}; return false;
+     }
+@@ -294,7 +304,8 @@
+         selected_ |= 1u << layer;
+     }
+     if (!provider) previous_ = {};
+-    if (!selected_ && !hd_line_layers_) return false;
++    subpixel_line_ = g_subpixel_shift.active && !selected_ && !hd_line_layers_;
++    if (!selected_ && !hd_line_layers_ && !subpixel_line_) return false;
+     if (selected_) ++affine_lines_;
+     ox_ = ox; row_ = unsigned(y + int(oy));
+     vram_ = vram; pal_ = pal; filter_ = filter;
+@@ -306,6 +317,22 @@
+     std::fill(second_.begin(), second_.end(), Pixel{});
+     std::fill(windows_.begin(), windows_.end(), 0x3f);
+     std::fill(black_.begin(), black_.end(), 0);
++    if (subpixel_line_) {
++        auto& row = sub_rows_[sub_current_];
++        std::fill(row.begin(), row.end(), SubpixelColumn{});
++        sub_bg_x_breaks_ = sub_bg_y_breaks_ = 1u;
++        sub_obj_y_breaks_[sub_current_] = 0;
++        for (unsigned bg = 0; bg < 4; ++bg) {
++            const int x = std::clamp(int(g_subpixel_shift.bg[bg][0]), -255, 255);
++            const int y = std::clamp(int(g_subpixel_shift.bg[bg][1]), 0, 255);
++            const unsigned right = unsigned(x < 0 ? -x : x) * scale_ / 256u;
++            sub_bg_[bg][0] = uint8_t(x < 0 ? scale_ - right : right);
++            sub_bg_lo_[bg] = int8_t(x < 0 ? 0 : -1);
++            sub_bg_[bg][1] = uint8_t(unsigned(y) * scale_ / 256u);
++            sub_bg_x_breaks_ |= 1u << sub_bg_[bg][0];
++            sub_bg_y_breaks_ |= 1u << sub_bg_[bg][1];
++        }
++    }
+     return true;
+ }
+ void GbaHighResolutionFrame::window(unsigned x, uint8_t control) {
+@@ -319,6 +346,27 @@
+ void GbaHighResolutionFrame::submit(unsigned x, uint16_t color, int key,
+     uint8_t layer, bool target1, bool target2) {
+     if (selected_ & (1u << layer)) return;
++    if (subpixel_line_) {
++        auto& column = sub_rows_[sub_current_][x];
++        const Pixel p{color, key, layer, target1, target2, true};
++        if (layer < 4) {
++            if (key < column.bg[layer].key) column.bg[layer] = p;
++            return;
++        }
++        if (layer != 4) return;
++        auto& obj = column.obj;
++        if (key >= obj[1].pixel.key) return;
++        SubpixelObj o{p};
++        uint8_t dx = 0, dy = 0;
++        if (g_subpixel_shift.obj && g_subpixel_shift.obj(unsigned(key) % kObjKeyStride, &dx, &dy)) {
++            o.dx = uint8_t(dx * scale_ / 256u);
++            o.dy = uint8_t(dy * scale_ / 256u);
++        }
++        sub_obj_y_breaks_[sub_current_] |= 1u << o.dy;
++        if (key < obj[0].pixel.key) { obj[1] = obj[0]; obj[0] = o; }
++        else obj[1] = o;
++        return;
++    }
+     if (layer < 4 && (hd_line_layers_ & (1u << layer)) && hd_pixels_[layer][x].image) return;
+     insert(top_[x], second_[x], {color, key, layer, target1, target2, true});
+ }
+@@ -435,7 +483,80 @@
+ void GbaHighResolutionFrame::wrote_line(unsigned y) {
+     if (y < height_ && !written_[y]) { written_[y] = 1; ++written_lines_; }
+ }
++// A subpixel line: each output subpixel takes every layer's pixel from the
++// native column and row that cover it once the layer is moved right/down by
++// its offset, then composites them like the native stack. Content moves at
++// most one native pixel, so only this column and the one to its left, and this
++// row and the one above, can cover a subpixel (BGs moving left take the column
++// to the right instead). Missing neighbours at the edges repeat the edge pixel
++// for BGs.
++void GbaHighResolutionFrame::resolve_subpixel() {
++    ++subpixel_lines_;
++    const auto& current = sub_rows_[sub_current_];
++    const bool above = sub_previous_row_ != ~0u && sub_previous_row_ + 1 == row_;
++    const auto& previous = above ? sub_rows_[sub_current_ ^ 1] : current;
++    struct Candidate { const SubpixelObj* obj; bool same_column; };
++    const uint32_t y_breaks = 1u | sub_bg_y_breaks_ | sub_obj_y_breaks_[sub_current_] |
++                              (above ? sub_obj_y_breaks_[sub_current_ ^ 1] : 0u);
++    const size_t row_bytes = size_t(width()) * 3;
++    for (unsigned sy = 0; sy < scale_; ++sy) {
++        auto* dst = work_.data() + size_t(row_ * scale_ + sy) * width() * 3;
++        if (!(y_breaks & (1u << sy))) { std::memcpy(dst, dst - row_bytes, row_bytes); continue; }
++        const SubpixelColumn* bg_rows[4];
++        for (unsigned bg = 0; bg < 4; ++bg)
++            bg_rows[bg] = (sy >= sub_bg_[bg][1] ? current : previous).data();
++        for (unsigned x = 0; x < width_; ++x) {
++            if (black_[x]) {
++                std::memset(dst, 0, size_t(scale_) * 3); dst += scale_ * 3;
++                continue;
++            }
++            const uint8_t window = windows_[x];
++            Candidate candidates[8];
++            unsigned count = 0;
++            uint32_t x_breaks = sub_bg_x_breaks_;
++            if (window & 0x10) {
++                for (unsigned column = x + 1; column-- > x - (x ? 1 : 0);) {
++                    for (const auto& o : current[column].obj)
++                        if (o.pixel.valid && (!above || sy >= o.dy)) {
++                            candidates[count++] = {&o, column == x};
++                            x_breaks |= 1u << o.dx;
++                        }
++                    if (above)
++                        for (const auto& o : previous[column].obj)
++                            if (o.pixel.valid && sy < o.dy) {
++                                candidates[count++] = {&o, column == x};
++                                x_breaks |= 1u << o.dx;
++                            }
++                }
++            }
++            for (unsigned sx = 0; sx < scale_; ++sx, dst += 3) {
++                if (sx && !(x_breaks & (1u << sx))) {
++                    dst[0] = dst[-3]; dst[1] = dst[-2]; dst[2] = dst[-1];
++                    continue;
++                }
++                Pixel top = top_[x], second = second_[x];
++                for (unsigned bg = 0; bg < 4; ++bg) {
++                    if (!(window & (1u << bg))) continue;
++                    const int column = std::clamp(int(x) + sub_bg_lo_[bg] + (sx >= sub_bg_[bg][0]), 0,
++                                                  int(width_) - 1);
++                    const Pixel& p = bg_rows[bg][column].bg[bg];
++                    if (p.valid) insert(top, second, p);
++                }
++                for (unsigned i = 0; i < count; ++i) {
++                    const Candidate& c = candidates[i];
++                    if ((sx >= c.obj->dx) == c.same_column) insert(top, second, c.obj->pixel);
++                }
++                write_color(dst, top, second);
++            }
++        }
++    }
++    sub_previous_row_ = row_;
++    sub_current_ ^= 1u;
++    wrote_line(row_);
++}
+ void GbaHighResolutionFrame::resolve() {
++    if (subpixel_line_) { resolve_subpixel(); return; }
++    sub_previous_row_ = ~0u;
+ #if defined(GBARECOMP_HD_SAMPLER_HLE)
+     for (const auto& a : affine_) if (a.active) surfaces_[a.cache].update(a.cnt, vram_);
+     for (unsigned i = 0; i < palette_.size(); ++i) {
+@@ -500,6 +621,7 @@
+     wrote_line(row_);
+ }
+ void GbaHighResolutionFrame::upscale_line(unsigned y, const uint8_t* native_row) {
++    sub_previous_row_ = ~0u;
+     for (unsigned sy = 0; sy < scale_; ++sy) {
+         auto* dst = work_.data() + size_t(y * scale_ + sy) * width() * 3;
+ #if defined(GBARECOMP_HD_SAMPLER_HLE)
+diff --git a/src/gba/gba_high_resolution.h b/src/gba/gba_high_resolution.h
+--- a/src/gba/gba_high_resolution.h
++++ b/src/gba/gba_high_resolution.h
+@@ -25,6 +25,23 @@
+ // Image blocks drawn on the latest published frame.
+ unsigned hd_tiles_matched();
+ 
++// Presentation-only subpixel offsets for the internal resolution, set by the
++// host before each frame (for example from the present scanline hook). Each
++// value is in 1/256 of a native pixel. BG x is -255..255 and moves that
++// layer's content right (positive) or left (negative); BG y is 0..255 and moves
++// it down (lines resolve top to bottom, so the row below is not known yet).
++// OBJ offsets are 0..255 and move right/down. The host folds whole pixels into
++// the scroll registers and OAM; this only adds the remaining fraction. `obj`
++// returns the offsets of OBJ `index` (0..127 hardware OAM, 128 and up extra
++// objects), false for none. Lines with affine or HD tile layers keep their
++// regular resolve.
++struct SubpixelShift {
++    bool active = false;
++    int16_t bg[4][2] = {};
++    bool (*obj)(unsigned index, uint8_t* dx, uint8_t* dy) = nullptr;
++};
++extern SubpixelShift g_subpixel_shift;
++
+ // Downstream presentation only. Native layers retain their authored pixels;
+ // approved affine BGs are sampled again at fractional output coordinates and
+ // inserted into the same priority/window/blend stack. No guest state is owned
+@@ -55,6 +72,7 @@
+     uint64_t frames() const { return frames_; }
+     uint64_t affine_lines() const { return affine_lines_; }
+     uint64_t samples() const { return samples_; }
++    uint64_t subpixel_lines() const { return subpixel_lines_; }
+ 
+ private:
+     struct Pixel {
+@@ -106,6 +124,7 @@
+     void write_color(uint8_t* dst, const Pixel& top, const Pixel& second) const;
+     void write_color_rgb(uint8_t* dst, const Pixel& top, const Pixel& second) const;
+     void wrote_line(unsigned y);
++    void resolve_subpixel();
+     void match_hd_tiles(uint16_t dispcnt, const uint8_t* io, const uint8_t* vram);
+     bool prepare_hd_line(int y, uint16_t dispcnt, const uint8_t* io);
+     bool sample_hd(const HdPixel& at, unsigned sx, unsigned sy, Pixel& out) const;
+@@ -125,6 +144,30 @@
+     std::array<int, 4> hd_keys_{};
+     unsigned hd_line_layers_ = 0, hd_frame_matched_ = 0;
+     bool hd_frame_prepared_ = false;
++    // Subpixel lines keep each layer's pixel per native column, for this row
++    // and the one above, so every output subpixel can pick its source column
++    // and row by the layer's offset. OBJ keeps the two frontmost pixels.
++    struct SubpixelObj {
++        Pixel pixel;
++        uint8_t dx = 0, dy = 0; // offsets in output subpixels, 0..scale-1
++    };
++    struct SubpixelColumn {
++        std::array<Pixel, 4> bg{};
++        std::array<SubpixelObj, 2> obj{};
++    };
++    std::vector<SubpixelColumn> sub_rows_[2];
++    unsigned sub_current_ = 0, sub_previous_row_ = ~0u;
++    bool subpixel_line_ = false;
++    // Per BG, in output subpixels: y offset, and the x boundary where the
++    // source column changes from x + lo to x + lo + 1 (lo -1 moves right, 0 left).
++    std::array<std::array<uint8_t, 2>, 4> sub_bg_{};
++    std::array<int8_t, 4> sub_bg_lo_{};
++    // Subpixel positions (bits) where a layer's source column or row changes:
++    // the BG x and y offsets, and the OBJ y offsets of each stored row. Output
++    // between two of them repeats the previous subpixel.
++    uint32_t sub_bg_x_breaks_ = 0, sub_bg_y_breaks_ = 0;
++    uint32_t sub_obj_y_breaks_[2] = {};
++    uint64_t subpixel_lines_ = 0;
+     std::vector<uint8_t> windows_, black_, written_, work_, latched_, scratch_;
+     unsigned written_lines_ = 0;
+     uint64_t frames_ = 0, affine_lines_ = 0, samples_ = 0;
+diff --git a/src/runtime/runtime.cpp b/src/runtime/runtime.cpp
+--- a/src/runtime/runtime.cpp
++++ b/src/runtime/runtime.cpp
+@@ -2434,14 +2434,14 @@
+         reg(0x05000000u, bus.pal_ptr(),       1 * 1024);
+         reg(0x06000000u, bus.vram_ptr(),     96 * 1024);
+         reg(0x07000000u, bus.oam_ptr(),       1 * 1024);
+-        // PC host RAM (game heap, actor pools): only the [lo, hi] slice, since
+-        // the whole window is tens of MiB.
+-        const uint32_t host_end = gba::kHostRamBase + static_cast<uint32_t>(bus.host_ram_size());
+-        if (wram_trace_hi >= gba::kHostRamBase && wram_trace_lo < host_end) {
+-            const uint32_t lo = std::max(wram_trace_lo, gba::kHostRamBase);
+-            const uint32_t hi = std::min(wram_trace_hi, host_end - 1u);
+-            reg(lo, bus.host_ram_ptr() + (lo - gba::kHostRamBase), hi - lo + 1u);
+-        }
++        // PC host RAM (game heap, actor pools): only the [lo, hi] slice, since
++        // the whole window is tens of MiB.
++        const uint32_t host_end = gba::kHostRamBase + static_cast<uint32_t>(bus.host_ram_size());
++        if (wram_trace_hi >= gba::kHostRamBase && wram_trace_lo < host_end) {
++            const uint32_t lo = std::max(wram_trace_lo, gba::kHostRamBase);
++            const uint32_t hi = std::min(wram_trace_hi, host_end - 1u);
++            reg(lo, bus.host_ram_ptr() + (lo - gba::kHostRamBase), hi - lo + 1u);
++        }
+     }
+     auto wram_trace_tick = [&]() {
+         if (!wram_trace_log) return;
+@@ -4678,8 +4678,13 @@
+                     char p[512];
+                     std::snprintf(p, sizeof(p), "%s/f_%06llu.png", framedump_dir,
+                                   static_cast<unsigned long long>(frame));
+-                    write_png(p, live_fb.data(), ppu.render_width(),
+-                              ppu.render_height());
++                    // GBARECOMP_FRAMEDUMP_HIRES=1: the internal-resolution frame, when there is one.
++                    if (std::getenv("GBARECOMP_FRAMEDUMP_HIRES") && ppu.high_resolution_framebuffer())
++                        write_png(p, ppu.high_resolution_framebuffer(), ppu.high_resolution()->width(),
++                                  ppu.high_resolution()->height());
++                    else
++                        write_png(p, live_fb.data(), ppu.render_width(),
++                                  ppu.render_height());
+                     if (++framedump_written >= framedump_max) host_quit = true;
+                 }
+                 if (opts.local_link && opts.local_link->wanted && opts.local_link->wanted())
+@@ -4982,36 +4987,42 @@
+         !args.window && args.frames >= 0 && args.tcp_port <= 0 &&
+         !demo_input && !input_replay_requested && present_in_place &&
+         !diag.playing();
+-    // GBARECOMP_FRAMEDUMP_DIR headless: each new frame from START is drawn and written, as the
+-    // windowed present block does, up to COUNT (then the run ends).
+-    uint64_t headless_framedump_last = ~uint64_t{0};
+-    auto headless_framedump = [&]() {
+-        if (args.window || !framedump_dir) return;
+-        const uint64_t frame = ppu.frame_count();
+-        if (frame == headless_framedump_last || frame < framedump_start ||
+-            framedump_written >= framedump_max)
+-            return;
+-        headless_framedump_last = frame;
+-        std::vector<uint8_t> fb(ppu.render_bytes(), 0);
+-        if (ppu.has_latched_framebuffer()) {
+-            std::memcpy(fb.data(), ppu.latched_framebuffer(), fb.size());
+-        } else {
+-            ppu.render(fb.data(), bus.io().read16(0x000), bus.io().raw(),
+-                       bus.vram_ptr(), bus.oam_ptr(), bus.pal_ptr());
+-        }
+-        char p[512];
+-        std::snprintf(p, sizeof(p), "%s/f_%06llu.png", framedump_dir,
+-                      static_cast<unsigned long long>(frame));
+-        write_png(p, fb.data(), ppu.render_width(), ppu.render_height());
+-        if (++framedump_written >= framedump_max) host_quit = true;
+-    };
++    // GBARECOMP_FRAMEDUMP_DIR headless: each new frame from START is drawn and written, as the
++    // windowed present block does, up to COUNT (then the run ends).
++    uint64_t headless_framedump_last = ~uint64_t{0};
++    auto headless_framedump = [&]() {
++        if (args.window || !framedump_dir) return;
++        const uint64_t frame = ppu.frame_count();
++        if (frame == headless_framedump_last || frame < framedump_start ||
++            framedump_written >= framedump_max)
++            return;
++        headless_framedump_last = frame;
++        std::vector<uint8_t> fb(ppu.render_bytes(), 0);
++        if (ppu.has_latched_framebuffer()) {
++            std::memcpy(fb.data(), ppu.latched_framebuffer(), fb.size());
++        } else {
++            ppu.render(fb.data(), bus.io().read16(0x000), bus.io().raw(),
++                       bus.vram_ptr(), bus.oam_ptr(), bus.pal_ptr());
++        }
++        char p[512];
++        std::snprintf(p, sizeof(p), "%s/f_%06llu.png", framedump_dir,
++                      static_cast<unsigned long long>(frame));
++        // GBARECOMP_FRAMEDUMP_HIRES=1: the internal-resolution frame instead, when there is one.
++        static const bool hires = std::getenv("GBARECOMP_FRAMEDUMP_HIRES") != nullptr;
++        if (hires && ppu.high_resolution_framebuffer())
++            write_png(p, ppu.high_resolution_framebuffer(), ppu.high_resolution()->width(),
++                      ppu.high_resolution()->height());
++        else
++            write_png(p, fb.data(), ppu.render_width(), ppu.render_height());
++        if (++framedump_written >= framedump_max) host_quit = true;
++    };
+     if (passive_headless_present_in_place) {
+         std::fprintf(stderr, "[gbarecomp:runtime] headless present-in-place ON "
+                      "(unwind at final frame only; "
+                      "GBARECOMP_PRESENT_IN_PLACE=0 to disable)\n");
+         runtime_set_frame_present_hook([&]() -> bool {
+-            headless_framedump();
+-            if (host_quit) return true;
++            headless_framedump();
++            if (host_quit) return true;
+             return ppu.frame_count() - headless_base_frame >=
+                    static_cast<uint64_t>(args.frames);
+         });
+@@ -5160,8 +5171,13 @@
+                     char p[512];
+                     std::snprintf(p, sizeof(p), "%s/f_%06llu.png", framedump_dir,
+                                   static_cast<unsigned long long>(frame));
+-                    write_png(p, live_fb.data(), ppu.render_width(),
+-                              ppu.render_height());
++                    // GBARECOMP_FRAMEDUMP_HIRES=1: the internal-resolution frame, when there is one.
++                    if (std::getenv("GBARECOMP_FRAMEDUMP_HIRES") && ppu.high_resolution_framebuffer())
++                        write_png(p, ppu.high_resolution_framebuffer(), ppu.high_resolution()->width(),
++                                  ppu.high_resolution()->height());
++                    else
++                        write_png(p, live_fb.data(), ppu.render_width(),
++                                  ppu.render_height());
+                     if (++framedump_written >= framedump_max) host_quit = true;
+                 }
+                 if (phase_active) fp_t2 = FramePhaseRing::now_ns();
+@@ -5194,7 +5210,7 @@
+                 }
+             }
+         }
+-        headless_framedump();
++        headless_framedump();
+         // Differential-oracle WRAM trace fires on frame advance in BOTH windowed
+         // and headless modes (the present block above only runs windowed).
+         if (wram_trace_log) {

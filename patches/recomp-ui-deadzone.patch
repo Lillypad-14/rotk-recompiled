@@ -1,0 +1,13 @@
+diff --git a/src/consoles/gba/gba_pad_binds.h b/src/consoles/gba/gba_pad_binds.h
+index b87eead..4d6e5cd 100644
+--- a/src/consoles/gba/gba_pad_binds.h
++++ b/src/consoles/gba/gba_pad_binds.h
+@@ -15,7 +15,7 @@
+ extern "C" {
+ #endif
+ 
+-#define RUI_GBA_PAD_DEFAULT_DEADZONE_PCT 50
++#define RUI_GBA_PAD_DEFAULT_DEADZONE_PCT 15
+ 
+ // input.ini next to `keybinds_path`.
+ void rui_gba_pad_binds_path(const char* keybinds_path, char* out, int cap);

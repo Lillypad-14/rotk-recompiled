@@ -34,10 +34,21 @@ namespace {
 //
 // Changes over kMaxStep pixels are scene cuts or teleports and stay as they are. The HUD does not
 // move.
+//
+//   subpixel  (option, needs an internal resolution of 2x or more) the camera and the actors keep
+//             their fraction of a pixel: every gameplay frame is drawn at the exact camera, the
+//             in-between frame at the exact halfway camera. Whole pixels go into the scroll
+//             registers and OAM as above, the rest is a per-layer and per-sprite subpixel offset
+//             of the high-resolution frame (gba::g_subpixel_shift).
 
 constexpr std::uint32_t kComposeOam = 0x08002484u;     // sprite_composeOam(Actor*)
 constexpr std::uint32_t kDrawParticle = 0x08039324u;  // fx_drawParticle, the other piece pusher
 constexpr std::uint32_t kCameraPositions = 0x030020F8u;  // Vector2Int g_CameraPositions[2]
+// Vector2Fp16 world position per player, every 0x30 bytes. gfx_updatePlayerCameraScroll sets the
+// camera to its integer part minus a view offset (120 and 80 plus a per-mode table byte), then
+// clamps it to the level.
+constexpr std::uint32_t kPlayerPositions = 0x03001A10u;
+constexpr std::uint32_t kPlayerStride = 0x30u;
 constexpr std::uint32_t kActivePlayer = 0x03003F59u;     // g_PlayerGlobals.activePlayerIndex
 constexpr std::uint32_t kSceneCurrentId = 0x030041B0u;  // g_SceneCurrent.id
 constexpr std::uint32_t kSceneGameplay = 1u;
@@ -47,8 +58,8 @@ constexpr std::uint32_t kActorFlags = 0xE8u;
 constexpr std::uint32_t kActorListId = 0xFFu;
 constexpr std::uint32_t kActorScreenSpace = 0x200000u;   // drawn without the camera
 constexpr std::uint8_t kListOverlay = 1u;
-constexpr std::uint32_t kParticleRenderX = 0x1Au;        // integer half of FxParticle.renderPosition
-constexpr std::uint32_t kParticleRenderY = 0x1Eu;
+constexpr std::uint32_t kParticleRenderX = 0x18u;        // fp16 FxParticle.renderPosition
+constexpr std::uint32_t kParticleRenderY = 0x1Cu;
 constexpr std::uint32_t kParticleFlags = 0x3Eu;
 constexpr std::uint16_t kParticleScreenSpace = 0x200u;
 constexpr std::uint32_t kMaxPieces = 128u + 3800u;
@@ -58,10 +69,15 @@ constexpr const char* kParticleHookId = "rotk.pc-smooth-particle";
 constexpr const char* kPluginId = "rotk.pc.smooth-motion";
 
 struct Position {
-    int x = 0;
-    int y = 0;
+    std::int32_t x = 0;  // fp16; the sprite is drawn at the integer part (floor)
+    std::int32_t y = 0;
     bool screen = false;  // drawn without the camera (HUD, overlay list)
 };
+
+int pixel(std::int32_t fp)
+{
+    return fp >> 16;  // floor, like the game's asr #16
+}
 
 struct Tag {
     std::uint32_t actor = 0;  // 0: not from sprite_composeOam
@@ -72,6 +88,7 @@ struct State {
     bool enabled = false;
     bool particles = true;  // option "particles"
     bool parallax = true;   // option "parallax"
+    bool subpixel = true;   // option "subpixel"
     // Per shadow buffer.
     std::vector<Tag> tags[2];
     std::uint32_t pieces[2] = {};
@@ -79,6 +96,14 @@ struct State {
     bool composing[2] = {};
     std::uint64_t composed[2] = {};  // serial of the finished compose
     int cameraX[2] = {}, cameraY[2] = {};
+    std::int32_t cameraFx[2] = {}, cameraFy[2] = {};  // fp16, the integer camera when not exact
+    int cameraOffset[2] = {};  // camera minus the player's integer position at the last tick
+    int playerPixel[2] = {};   // the player's integer position at the last tick
+    bool cameraOffsetValid = false;
+    // Per axis: the camera moved with the player across a pixel and the offset has not changed
+    // since. An unchanged offset alone does not show this: a slow player stays on the same pixel
+    // for several ticks while a clamped camera stands still.
+    bool cameraTracks[2] = {};
     std::uint64_t serial = 0;
     // Current sprite_composeOam call.
     std::uint32_t actor = 0;
@@ -90,12 +115,23 @@ struct State {
     bool interpolate = false;
     int bgOffset[4][2] = {};
     std::vector<std::int8_t> objOffset;  // dx, dy per piece
+    // Subpixel: fraction (1/256 px) moving content right/down, per BG and per piece.
+    bool subActive = false;
+    std::int16_t bgSub[4][2] = {};  // x may be negative (content moves left)
+    // The world layers scroll one row past the copied tiles; the last line draws one row less.
+    bool bottomRowFix = false;
+    std::uint32_t line = 0;  // scanline being drawn
+    std::vector<std::uint8_t> objSub;
     std::vector<std::uint8_t> extraCopy;
     // BG1 parallax: scroll and camera at the last tick, and scroll change per camera pixel.
     bool parallaxValid = false;
     int parallaxScroll[2] = {}, parallaxCamera[2] = {};
     float parallaxRatio[2] = {};
     std::uint64_t frames = 0, interpolated = 0, movedBg = 0, movedObj = 0;
+    std::uint64_t subFrames = 0, subExact = 0;
+    std::int32_t presentedCamera[2] = {};  // fp16, the camera the world layers are drawn at
+    std::int32_t playerScreen[2] = {};     // fp16, where the active player's first piece is drawn
+    std::int32_t playerAt[2] = {};         // fp16, the world position it is drawn for
 };
 
 State g_states[3];  // solo, co-op console 1, co-op console 2
@@ -137,8 +173,8 @@ int composeOamEntry(std::uint32_t, int, ArmCpuState* cpu)
     }
     const std::uint32_t actor = cpu->R[0];
     Position position;
-    position.x = static_cast<std::int32_t>(bus_read_u32(actor + kActorRenderX)) >> 16;
-    position.y = static_cast<std::int32_t>(bus_read_u32(actor + kActorRenderY)) >> 16;
+    position.x = static_cast<std::int32_t>(bus_read_u32(actor + kActorRenderX));
+    position.y = static_cast<std::int32_t>(bus_read_u32(actor + kActorRenderY));
     position.screen = (bus_read_u32(actor + kActorFlags) & kActorScreenSpace) ||
                       bus_read_u8(actor + kActorListId) == kListOverlay;
     g->actor = actor;
@@ -161,8 +197,8 @@ int drawParticleEntry(std::uint32_t, int, ArmCpuState* cpu)
     }
     const std::uint32_t particle = cpu->R[0];
     Position position;
-    position.x = static_cast<std::int16_t>(bus_read_u16(particle + kParticleRenderX));
-    position.y = static_cast<std::int16_t>(bus_read_u16(particle + kParticleRenderY));
+    position.x = static_cast<std::int32_t>(bus_read_u32(particle + kParticleRenderX));
+    position.y = static_cast<std::int32_t>(bus_read_u32(particle + kParticleRenderY));
     position.screen = (bus_read_u16(particle + kParticleFlags) & kParticleScreenSpace) != 0;
     g->actor = particle;
     g->position = position;
@@ -170,11 +206,19 @@ int drawParticleEntry(std::uint32_t, int, ArmCpuState* cpu)
     return 0;
 }
 
+// The world layers can scroll past the 31x21 tiles the game copies: widescreen supplies the rest of
+// the level from the cell maps (gba::g_ws_tilemap_valid).
+bool worldTiles()
+{
+    return gba::g_ws_tilemap_provider && gba::g_ws_tilemap_valid[2][0] && gba::g_ws_tilemap_valid[3][0];
+}
+
 // The presented camera moves half way, limited so the world layers stay inside the copied tiles:
 // the game copies 31x21 tiles for a 240x160 view, so the fine scroll plus the shift must stay in 0..8.
 int cameraShift(int delta, int fine)
 {
     int shift = half(delta);
+    if (worldTiles()) return shift;
     if (shift < -fine) shift = -fine;
     if (shift > 8 - fine) shift = 8 - fine;
     return shift;
@@ -207,16 +251,175 @@ void learnParallax(const std::uint8_t* io, int shown)
     g->parallaxValid = true;
 }
 
+std::int32_t fp(int pixels)
+{
+    return static_cast<std::int32_t>(pixels * 65536);
+}
+
+bool subpixelObj(unsigned index, std::uint8_t* dx, std::uint8_t* dy)
+{
+    if (!g->subActive || std::size_t(index) * 2u + 1u >= g->objSub.size()) return false;
+    *dx = g->objSub[index * 2u];
+    *dy = g->objSub[index * 2u + 1u];
+    return *dx || *dy;
+}
+
+// Subpixel frames: gameplay with an internal resolution that can show a fraction of a pixel.
+bool subpixelFrame()
+{
+    return g->subpixel && gba_mod_internal_resolution() >= 2 &&
+           bus_read_u32(kSceneCurrentId) == kSceneGameplay;
+}
+
+// A gameplay frame at the exact camera: the displayed tick's, or with `interpolate` the halfway
+// point to the next tick. The world layers scroll by whole pixels inside the copied tiles plus a
+// fraction; each sprite moves by its actor's exact position through that camera.
+void prepareSubpixel(const std::uint8_t* io, int shown, int next, bool interpolate)
+{
+    for (auto& layer : g->bgOffset) layer[0] = layer[1] = 0;
+    for (auto& layer : g->bgSub) layer[0] = layer[1] = 0;
+    const int base[2] = {g->cameraX[shown], g->cameraY[shown]};
+    std::int32_t camera[2] = {g->cameraFx[shown], g->cameraFy[shown]};
+    const bool cameraFollows =
+        interpolate && small(g->cameraX[next] - base[0], g->cameraY[next] - base[1]);
+    if (cameraFollows) {
+        camera[0] += (g->cameraFx[next] - camera[0]) / 2;
+        camera[1] += (g->cameraFy[next] - camera[1]) / 2;
+    }
+    const int fine[2] = {(io[0x1C] | io[0x1D] << 8) & 7, (io[0x1E] | io[0x1F] << 8) & 7};
+    std::int32_t presented[2];  // the camera the world layers end up at
+    g->bottomRowFix = false;
+    const bool tiles = worldTiles();
+    for (int axis = 0; axis < 2; ++axis) {
+        std::int32_t move = camera[axis] - fp(base[axis]);  // the world moves by -move
+        if (!tiles) {
+            // Inside the copied tiles (fine scroll + shift in 0..8) plus what a fraction can add: up
+            // to a pixel to the left/top, a pixel to the right (moving content left), and one row
+            // at the bottom whose last line repeats the row above.
+            const std::int32_t low = fp(-fine[axis]) - 255 * 256;
+            const std::int32_t high = axis == 0 ? fp(8 - fine[axis]) + 255 * 256 : fp(9 - fine[axis]);
+            move = move < low ? low : move > high ? high : move;
+        }
+        int shift = pixel(move + 0xFFFF);  // whole pixels, rounded up
+        int fraction = (fp(shift) - move) >> 8;  // back right/down, 0..255
+        if (!tiles && axis == 0 && shift > 8 - fine[axis]) {
+            --shift;  // round down and move the content left instead
+            fraction -= 256;
+        }
+        if (!tiles && axis == 1 && shift > 8 - fine[axis]) g->bottomRowFix = true;
+        g->bgOffset[2][axis] = g->bgOffset[3][axis] = shift;
+        g->bgSub[2][axis] = g->bgSub[3][axis] = static_cast<std::int16_t>(fraction);
+        presented[axis] = fp(base[axis] + shift) - fraction * 256;
+        g->presentedCamera[axis] = presented[axis];
+    }
+    if (g->parallax && (io[1] & 0x02u)) {  // BG1 parallax at its learnt ratio
+        for (int axis = 0; axis < 2; ++axis) {
+            const float move = g->parallaxRatio[axis] * static_cast<float>(presented[axis] - fp(base[axis]));
+            const int shift = static_cast<int>(std::ceil(move / 65536.0f));
+            const int fraction = static_cast<int>((static_cast<float>(fp(shift)) - move) / 256.0f);
+            g->bgOffset[1][axis] = shift;
+            g->bgSub[1][axis] = static_cast<std::int16_t>(fraction < 0 ? 0 : fraction > 255 ? 255 : fraction);
+        }
+    }
+
+    // Sprite pieces: drawn at floor(position) - camera, moved to the exact position minus the
+    // presented camera (world actors) or to the exact position (screen actors).
+    const std::uint32_t pieces = g->pieces[shown];
+    g->objOffset.assign(static_cast<std::size_t>(pieces) * 2u, 0);
+    g->objSub.assign(static_cast<std::size_t>(pieces) * 2u, 0);
+    g->playerScreen[0] = g->playerScreen[1] = 0;
+    bool obj = false;
+    for (std::uint32_t i = 0; i < pieces; ++i) {
+        const Tag& tag = g->tags[shown][i];
+        if (!tag.actor) continue;
+        const std::int32_t from[2] = {tag.position.x, tag.position.y};
+        std::int32_t at[2] = {from[0], from[1]};
+        if (interpolate) {
+            const auto found = g->positions[next].find(tag.actor);
+            if (found != g->positions[next].end() && found->second.screen == tag.position.screen &&
+                small(pixel(found->second.x) - pixel(from[0]), pixel(found->second.y) - pixel(from[1])) &&
+                (tag.position.screen || cameraFollows)) {
+                at[0] += (found->second.x - from[0]) / 2;
+                at[1] += (found->second.y - from[1]) / 2;
+            }
+        }
+        int whole[2];
+        std::uint8_t fraction[2];
+        bool valid = true;
+        for (int axis = 0; axis < 2; ++axis) {
+            std::int32_t target = at[axis], drawn = fp(pixel(from[axis]));
+            if (!tag.position.screen) {
+                target -= presented[axis];
+                drawn -= fp(base[axis]);
+            }
+            const std::int32_t move = target - drawn;
+            whole[axis] = pixel(move);
+            fraction[axis] = static_cast<std::uint8_t>((move >> 8) & 0xFF);
+            valid = valid && whole[axis] >= -kMaxStep && whole[axis] <= kMaxStep;
+        }
+        if (!valid) continue;
+        if (tag.actor == bus_read_u32(0x03003C00u + (bus_read_u8(kActivePlayer) & 1u) * 0x1ACu) &&
+            !(g->playerScreen[0] | g->playerScreen[1]))
+            for (int axis = 0; axis < 2; ++axis) {
+                g->playerScreen[axis] = fp(pixel(from[axis]) - base[axis] + whole[axis]) + fraction[axis] * 256;
+                g->playerAt[axis] = at[axis];
+            }
+        for (int axis = 0; axis < 2; ++axis) {
+            g->objOffset[i * 2 + axis] = static_cast<std::int8_t>(whole[axis]);
+            g->objSub[i * 2 + axis] = fraction[axis];
+            obj = obj || whole[axis] || fraction[axis];
+        }
+    }
+    g->interpolate = true;  // the scanline hook applies the offsets
+    g->subActive = true;
+    ++g->subFrames;
+    g->subExact += g->cameraFx[shown] != fp(base[0]) || g->cameraFy[shown] != fp(base[1]);
+    if (interpolate) ++g->interpolated;
+    g->movedBg += g->bgOffset[2][0] || g->bgOffset[2][1] || g->bgSub[2][0] || g->bgSub[2][1];
+    g->movedObj += obj;
+    gba::g_subpixel_shift.active = true;
+    std::memcpy(gba::g_subpixel_shift.bg, g->bgSub, sizeof(g->bgSub));
+    gba::g_subpixel_shift.obj = subpixelObj;
+}
+
+void prepareFrameImpl(const std::uint8_t* io);
+
+// ROTK_PC_TRACE_PRESENT=1: one line per presented frame with the camera it is drawn at.
 void prepareFrame(const std::uint8_t* io)
+{
+    prepareFrameImpl(io);
+    static const bool trace = std::getenv("ROTK_PC_TRACE_PRESENT") != nullptr;
+    if (!trace || !g->enabled || g->displayed < 0) return;
+    const int shown = g->displayed;
+    if (!g->subActive) {
+        g->presentedCamera[0] = fp(g->cameraX[shown] + (g->interpolate ? g->bgOffset[2][0] : 0));
+        g->presentedCamera[1] = fp(g->cameraY[shown] + (g->interpolate ? g->bgOffset[2][1] : 0));
+    }
+    std::fprintf(stderr, "[rotk] present %llu shown %d vb %d interp %d sub %d cam %d,%d exact %d,%d next %d,%d"
+                 " player %d,%d screen %d,%d\n",
+                 static_cast<unsigned long long>(g->frames), shown, g->vblanksShown, g->interpolate ? 1 : 0,
+                 g->subActive ? 1 : 0, g->presentedCamera[0], g->presentedCamera[1], g->cameraFx[shown],
+                 g->cameraFy[shown], g->cameraFx[1 - shown], g->cameraFy[1 - shown], g->playerAt[0],
+                 g->playerAt[1], g->playerScreen[0], g->playerScreen[1]);
+}
+
+void prepareFrameImpl(const std::uint8_t* io)
 {
     ++g->frames;
     g->interpolate = false;
+    g->subActive = false;
+    gba::g_subpixel_shift.active = false;
     const int shown = g->displayed;
     if (!g->enabled || shown < 0) return;
     if (g->vblanksShown == 0) learnParallax(io, shown);
-    if (g->vblanksShown != 1) return;
     const int next = 1 - shown;
-    if (g->composing[next] || g->composed[next] <= g->composed[shown]) return;  // next tick not ready
+    const bool nextReady = g->vblanksShown == 1 && !g->composing[next] &&
+                           g->composed[next] > g->composed[shown];
+    if (subpixelFrame()) {
+        prepareSubpixel(io, shown, next, nextReady);
+        return;
+    }
+    if (!nextReady) return;  // next tick not ready
 
     for (auto& layer : g->bgOffset) layer[0] = layer[1] = 0;
     int shiftX = 0, shiftY = 0;
@@ -243,7 +446,8 @@ void prepareFrame(const std::uint8_t* io)
         if (!tag.actor) continue;
         const auto found = g->positions[next].find(tag.actor);
         if (found == g->positions[next].end() || found->second.screen != tag.position.screen) continue;
-        const int dx = found->second.x - tag.position.x, dy = found->second.y - tag.position.y;
+        const int dx = pixel(found->second.x) - pixel(tag.position.x);
+        const int dy = pixel(found->second.y) - pixel(tag.position.y);
         if (!small(dx, dy)) continue;
         int ox = half(dx), oy = half(dy);
         if (!tag.position.screen) {
@@ -275,14 +479,23 @@ void moveObject(std::uint8_t* entry, int dx, int dy)
     entry[3] = static_cast<std::uint8_t>(attr1 >> 8);
 }
 
+// The scroll change of a world layer on the line being drawn.
+int lineBgShift(int layer, int axis)
+{
+    const int offset = g->bgOffset[layer][axis];
+    const bool lastLine = g->line == 159u && (layer == 2 || layer == 3) && axis == 1;
+    return lastLine && g->bottomRowFix ? offset - 1 : offset;
+}
+
 void presentScanline(std::uint32_t y, std::uint8_t* io, std::uint8_t* oam)
 {
     transparencyScanline(y, io, oam);  // first: it replaces whole entries that smoothing then moves
+    g->line = y;
     if (y == 0) prepareFrame(io);
     if (!g->interpolate) return;
     for (unsigned layer = 0; layer < 4; ++layer)
         for (unsigned axis = 0; axis < 2; ++axis) {
-            const int offset = g->bgOffset[layer][axis];
+            const int offset = lineBgShift(static_cast<int>(layer), static_cast<int>(axis));
             if (!offset) continue;
             const unsigned reg = 0x10u + layer * 4u + axis * 2u;
             const int value = ((io[reg] | io[reg + 1] << 8) + offset) & 0x1FF;
@@ -302,10 +515,12 @@ void report()
     for (int i = 0; i < 3; ++i) {
         const State& state = g_states[i];
         if (state.frames)
-            std::fprintf(stderr, "[rotk] smooth motion%s: %llu frames, %llu interpolated (%llu moved BG, %llu moved sprites)\n",
+            std::fprintf(stderr, "[rotk] smooth motion%s: %llu frames, %llu interpolated (%llu moved BG, %llu moved sprites), "
+                         "%llu subpixel (%llu at a fractional camera)\n",
                          names[i], static_cast<unsigned long long>(state.frames),
                          static_cast<unsigned long long>(state.interpolated),
-                         static_cast<unsigned long long>(state.movedBg), static_cast<unsigned long long>(state.movedObj));
+                         static_cast<unsigned long long>(state.movedBg), static_cast<unsigned long long>(state.movedObj),
+                         static_cast<unsigned long long>(state.subFrames), static_cast<unsigned long long>(state.subExact));
     }
 }
 
@@ -339,6 +554,7 @@ void smoothActivated()
     enable();
     g->particles = subOption("ROTK_PC_SMOOTH_PARTICLES", "particles");
     g->parallax = subOption("ROTK_PC_SMOOTH_PARALLAX", "parallax");
+    g->subpixel = subOption("ROTK_PC_SMOOTH_SUBPIXEL", "subpixel");
 }
 
 }  // namespace
@@ -355,6 +571,7 @@ void smoothMotionApply()
 {
     g = &g_states[0];
     *g = State{};
+    gba::g_subpixel_shift.active = false;
     smoothRefreshPresentHook();
     gba_mod_set_function_hook_enabled(kHookId, 0);
     gba_mod_set_function_hook_enabled(kParticleHookId, 0);
@@ -364,6 +581,7 @@ void smoothMotionApply()
             enable();
             g->particles = subOption("ROTK_PC_SMOOTH_PARTICLES", "particles");
             g->parallax = subOption("ROTK_PC_SMOOTH_PARALLAX", "parallax");
+            g->subpixel = subOption("ROTK_PC_SMOOTH_SUBPIXEL", "subpixel");
         }
 }
 
@@ -380,6 +598,7 @@ void smoothStartCoop()
         state.enabled = g_states[0].enabled;
         state.particles = g_states[0].particles;
         state.parallax = g_states[0].parallax;
+        state.subpixel = g_states[0].subpixel;
         if (state.enabled)
             for (auto& tags : state.tags) tags.assign(kMaxPieces, Tag{});
     }
@@ -424,6 +643,33 @@ void smoothEndFrame(int buffer)
     const std::uint32_t camera = activeCamera();
     g->cameraX[buffer] = static_cast<std::int32_t>(bus_read_u32(camera));
     g->cameraY[buffer] = static_cast<std::int32_t>(bus_read_u32(camera + 4u));
+    // The exact camera: the camera follows the player when it moved with the player's integer
+    // position across a pixel and its offset has stayed the same since; it then has the player's
+    // fraction. Otherwise (level-edge or widescreen clamp, a pan, a cut) it stays on whole pixels.
+    const std::uint8_t player = bus_read_u8(kActivePlayer) & 1u;
+    const std::int32_t position[2] = {
+        static_cast<std::int32_t>(bus_read_u32(kPlayerPositions + player * kPlayerStride)),
+        static_cast<std::int32_t>(bus_read_u32(kPlayerPositions + player * kPlayerStride + 4u))};
+    const int cameraInt[2] = {g->cameraX[buffer], g->cameraY[buffer]};
+    std::int32_t exact[2];
+    for (int axis = 0; axis < 2; ++axis) {
+        const int at = pixel(position[axis]);
+        const int offset = cameraInt[axis] - at;
+        if (!g->cameraOffsetValid || offset != g->cameraOffset[axis]) g->cameraTracks[axis] = false;
+        else if (at != g->playerPixel[axis]) g->cameraTracks[axis] = true;
+        exact[axis] = fp(cameraInt[axis]) + (g->cameraTracks[axis] ? (position[axis] & 0xFFFF) : 0);
+        g->cameraOffset[axis] = offset;
+        g->playerPixel[axis] = at;
+    }
+    g->cameraFx[buffer] = exact[0];
+    g->cameraFy[buffer] = exact[1];
+    g->cameraOffsetValid = true;
+    const std::int32_t px = position[0], py = position[1];
+    static const bool trace = std::getenv("ROTK_PC_TRACE_SUBPIXEL") != nullptr;
+    if (trace && (g->cameraX[buffer] != g->cameraX[1 - buffer] || g->cameraY[buffer] != g->cameraY[1 - buffer]))
+        std::fprintf(stderr, "[rotk] subpixel camera @%llu %d,%d exact %08X,%08X player %08X,%08X\n", static_cast<unsigned long long>(g->frames), g->cameraX[buffer],
+                     g->cameraY[buffer], static_cast<unsigned>(g->cameraFx[buffer]),
+                     static_cast<unsigned>(g->cameraFy[buffer]), static_cast<unsigned>(px), static_cast<unsigned>(py));
     g->composed[buffer] = ++g->serial;
 }
 
@@ -437,7 +683,7 @@ void smoothSetDisplayedBuffer(int buffer)
 int smoothBgShift(int bg, int axis)
 {
     if (!g->enabled || !g->interpolate || bg < 0 || bg > 3 || axis < 0 || axis > 1) return 0;
-    return g->bgOffset[bg][axis];
+    return lineBgShift(bg, axis);
 }
 
 const std::uint8_t* smoothAdjustExtra(const std::uint8_t* pieces, std::uint32_t count)

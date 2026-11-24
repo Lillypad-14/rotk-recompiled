@@ -143,3 +143,18 @@ note = "fx_drawParticle: observed only, smooth motion stops tagging pieces with 
 addr = 0x08002CD8
 mode = "thumb"
 note = "sprite_composeFrame: observed only, host palettes give the pieces of a frame set tagged HPAL their own colors (src/host_palettes.cpp)."
+
+[[mod_function_hook]]
+addr = 0x080236B8
+mode = "thumb"
+note = "actor_player_tick: observed only, analog movement remembers which player's movement call follows (src/analog_move.cpp)."
+
+[[mod_function_hook]]
+addr = 0x08001C80
+mode = "thumb"
+note = "actor_setVelocityFromDirection8: analog movement replaces the player's movement call with a stick-magnitude-scaled speed (src/analog_move.cpp)."
+
+[[mod_function_hook]]
+addr = 0x080022E4
+mode = "thumb"
+note = "actor_tickAnimation: analog movement throttles the player's walking animation to its stick speed (src/analog_move.cpp)."

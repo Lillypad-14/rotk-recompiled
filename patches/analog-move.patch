@@ -1,0 +1,68 @@
+diff --git a/src/runtime/host_window.cpp b/src/runtime/host_window.cpp
+index 56ea11c..b472c4c 100644
+--- a/src/runtime/host_window.cpp
++++ b/src/runtime/host_window.cpp
+@@ -80,6 +80,10 @@ Java_org_gbarecomp_GbaNative_setDisplayDpi(JNIEnv*, jclass, jfloat xdpi, jfloat
+ }
+ #endif
+ 
++// Live left-stick movement magnitude per player (0..1); keyboard and D-pad
++// movement publish 1.0. Read by the game's analog movement hook.
++extern "C" float gba_analog_move[2] = {1.0f, 1.0f};
++
+ #if defined(_WIN32)
+ #ifndef WIN32_LEAN_AND_MEAN
+ #define WIN32_LEAN_AND_MEAN
+@@ -667,10 +671,12 @@ void open_all_game_controllers(Backend* b) {
+ // keyboard, and their controller through its input.ini profile.
+ std::uint16_t player_held(Backend* b, int player) {
+     std::uint16_t held = 0;
++    float analog = 0.0f;
+     if (b->assigned.keyboard[player]) {
+         int count = 0;
+         const Uint8* keyboard = SDL_GetKeyboardState(&count);
+         held |= controls::key_buttons(b->controls.player[player].keys, keyboard, count);
++        if (held & 0x00F0u) analog = 1.0f;  // a digital direction is full speed
+     }
+     const int index = b->assigned.pad[player];
+     if (index >= 0 && index < static_cast<int>(b->pads.size()) &&
+@@ -681,8 +687,23 @@ std::uint16_t player_held(Backend* b, int player) {
+             state.button[i] = SDL_GameControllerGetButton(pad, static_cast<SDL_GameControllerButton>(i)) != 0;
+         for (int i = 0; i < SDL_CONTROLLER_AXIS_MAX && i < controls::kPadAxes; ++i)
+             state.axis[i] = SDL_GameControllerGetAxis(pad, static_cast<SDL_GameControllerAxis>(i));
+-        held |= controls::pad_buttons(controls::profile_for(b->controls, b->pad_guids[index]), state);
++        const controls::PadProfile& profile = controls::profile_for(b->controls, b->pad_guids[index]);
++        held |= controls::pad_buttons(profile, state);
++        if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_LEFT) ||
++            SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) ||
++            SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_UP) ||
++            SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_DOWN)) {
++            analog = 1.0f;
++        } else {
++            const float x = state.axis[controls::kLeftX] / 32767.0f;
++            const float y = state.axis[controls::kLeftY] / 32767.0f;
++            const float magnitude = std::sqrt(x * x + y * y);
++            const float deadzone = std::clamp(profile.deadzone_pct, 5, 95) / 100.0f;
++            if (magnitude > deadzone)
++                analog = std::max(analog, std::min(1.0f, (magnitude - deadzone) / (1.0f - deadzone)));
++        }
+     }
++    gba_analog_move[player] = analog;
+     return held;
+ }
+ 
+diff --git a/src/runtime/runtime.h b/src/runtime/runtime.h
+index 6c84e2b..b3a1f75 100644
+--- a/src/runtime/runtime.h
++++ b/src/runtime/runtime.h
+@@ -18,6 +18,10 @@
+ namespace gba { class GbaBus; }
+ 
+ namespace gbarecomp {
++// Live left-stick movement magnitude per player (0..1), written by the host
++// input pump; 1.0 for keyboard/D-pad or no analog source.
++extern "C" float gba_analog_move[2];
++
+ struct GbaNetplayLaunch;
+ struct ViewGeometry;
+ 
